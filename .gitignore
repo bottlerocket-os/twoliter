@@ -1,0 +1,12 @@
+/target/
+.ignore/
+design/project/.cargo/
+design/project/.docker/
+design/project/tools/*
+!design/project/tools/bootconfig
+design/project/.gomodcache/
+design/project/build/
+design/project/variants/target/
+design/project/sources/target/
+design/project/keys/
+design/project/roles/

@@ -1,0 +1,13 @@
+[package]
+name = "twoliter"
+version = "0.0.0"
+edition = "2021"
+description = "A command line tool for creating custom builds of Bottlerocket"
+authors = ["Matthew James Briggs <brigmatt@amazon.com>"]
+license = "MIT OR Apache-2.0"
+keywords = ["twoliter", "bottlerocket"]
+exclude = ["/design", "/target", "/dockerfiles", "/scripts"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env", "std"] }
