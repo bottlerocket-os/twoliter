@@ -1,0 +1,30 @@
+@startuml
+autonumber
+
+
+participant "Twoliter Host" as user
+box "Twoliter Container"
+participant "Twoliter Container" as tc
+participant "Cargo" as cargo
+participant "Buildsys" as buildsys
+end box
+box "SDK"
+participant "SDK Container" as sdk
+end box
+
+user -> tc : twoliter build variant
+tc -> cargo : cargo make variant
+cargo -> buildsys : cargo build variant\ncargo build kit(s)\ncargo build package(s)\nbuildsys build-package
+buildsys -> sdk : rpm build package.spec
+buildsys <- sdk : package.rpm
+cargo -> buildsys : buildsys build-kit
+buildsys -> sdk : rpm build kit.spec
+buildsys <- sdk : kit.rpm
+cargo <- buildsys : kit.rpm
+cargo -> buildsys : buildsys aggregate-kits
+cargo <- buildsys : aggregated kits docker image
+cargo -> buildsys : buildsys build-variant
+buildsys -> sdk : rpm2img
+buildsys <- sdk : bottlerocket.img
+cargo <- buildsys : bottlerocket.img
+@enduml
