@@ -559,3 +559,26 @@ The requirements needing further design are:
   This means Requirement 3 (*All functionality necessary to build, test, and publish out-of-tree builds must be provided by a unified CLI*) is only partially met.
 - A design is needed for customizing partition layouts (Requirement 15).
   This may be limited to changes in the Bottlerocket tree (`partyplanner` and variant `Cargo.toml` metadata, for example).
+
+---
+
+## Twoliter Exec
+
+This section introduces a concept which will allow us to cut-over to using Twoliter for Bottlerocket builds sooner rather than later.
+Our goal is to commit to Twoliter and get the appropriate code moved into the Twoliter git repo as soon as possible.
+One challenge is that we want to move most things in the `bottlerocket/tools` directory into the Twoliter git repository.
+We cannot maintain that code in two places, so we want to do a hard cut-over to using Twoliter as soon as possible.
+
+To accomplish this, we will introduce a command, `twoliter exec` as a thin wrapper to `cargo make`.
+The arguments to `twoliter exec` will mirror those of `cargo make`.
+In particular, it will accept the `cargo make` build target and `-e` arguments.
+For example, `twoliter exec variant` will cause `cargo make variant` to be executed in the Twoliter container environment.
+
+We will add an `alias` to `.cargo/config` in the monorepo to send `cargo make` commands directly to `twoliter exec`.`*`
+
+In the Bottlerocket monorepo, the `Makefile.toml` will become a thin passthrough sending all commands and variables to `twoliter exec`.
+This will require passing all `-e BUILDSYS_SOMETHING=foo` variables to the twoliter exec command, which will then pass these to `cargo make`.
+
+Getting the Bottlerocket build cut-over to using `twoliter exec` is the first milestone of the Twoliter project.
+
+`*` Another option is to use rewrite Bottlerocket's `Makefile.toml` to explicitly call `twoliter exec` in each of its targets.
