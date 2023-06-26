@@ -1,8 +1,9 @@
 use crate::docker;
-use crate::docker::default_sdk;
+use crate::project::Project;
 use anyhow::Result;
 use clap::Parser;
-use log::LevelFilter;
+use log::{debug, LevelFilter};
+use std::path::PathBuf;
 
 /// A tool for building custom variants of Bottlerocket.
 #[derive(Debug, Parser)]
@@ -40,11 +41,29 @@ impl BuildCommand {
 
 /// Build a Bottlerocket variant image.
 #[derive(Debug, Parser)]
-pub(crate) struct BuildVariant {}
+pub(crate) struct BuildVariant {
+    /// Path to Twoliter.toml. Will search for Twoliter.toml when absent.
+    #[clap(long = "project-path")]
+    project_path: Option<PathBuf>,
+
+    /// The architecture to build for.
+    #[clap(long = "arch", default_value = "x86_64")]
+    arch: String,
+}
 
 impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
-        let _ = docker::create_twoliter_image_if_not_exists(&default_sdk()).await?;
+        let project = match &self.project_path {
+            None => {
+                let (project, path) = Project::find_and_load(".").await?;
+                debug!("Project file loaded from '{}'", path.display());
+                project
+            }
+            Some(p) => Project::load(p).await?,
+        };
+        // TODO - get smart about sdk: https://github.com/bottlerocket-os/twoliter/issues/11
+        let sdk = project.sdk.clone().unwrap_or_default();
+        let _ = docker::create_twoliter_image_if_not_exists(&sdk.uri(&self.arch)).await?;
         Ok(())
     }
 }

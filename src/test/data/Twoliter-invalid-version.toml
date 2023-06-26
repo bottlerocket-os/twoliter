@@ -1,0 +1,8 @@
+schema-version = 4294967295
+project-name = "sample-project"
+project-version = "v1.0.0"
+
+[sdk]
+registry = "example.com/my-repos"
+name = "my-bottlerocket-sdk"
+version = "1.2.3"

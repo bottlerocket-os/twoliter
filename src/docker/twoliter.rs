@@ -7,6 +7,7 @@ const TWOLITER_DOCKERFILE: &str = include_str!("Twoliter.dockerfile");
 
 /// Creates the container needed for twoliter to use as its build environment.
 pub(crate) async fn create_twoliter_image_if_not_exists(sdk: &ImageArchUri) -> Result<ImageUri> {
+    // TODO - exit early if exists https://github.com/bottlerocket-os/twoliter/issues/12
     let temp_dir = TempDir::new()
         .context("Unable to create a temporary directory for Twoliter image creation")?;
     let empty_dir = temp_dir.path().join("context");

@@ -5,6 +5,11 @@ use clap::Parser;
 mod cmd;
 mod common;
 mod docker;
+mod project;
+
+/// Test code that should only be compiled when running tests.
+#[cfg(test)]
+mod test;
 
 /// `anyhow` prints a nicely formatted error message with `Debug`, so we can return a result from
 /// the `main` function.

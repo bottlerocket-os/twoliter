@@ -1,4 +1,3 @@
-pub(crate) const DEFAULT_ARCH: &str = "x86_64";
 use anyhow::{ensure, Context, Result};
 use log::{self, debug, LevelFilter};
 use tokio::process::Command;
