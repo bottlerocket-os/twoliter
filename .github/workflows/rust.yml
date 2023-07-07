@@ -1,0 +1,25 @@
+name: Rust
+on:
+  # triggers when a PR is posted
+  pull_request:
+    branches: [develop]
+    paths-ignore:
+      - "**.md"
+      - "**.plantuml"
+      - "**.svg"
+  # triggers when a PR is merged
+  push:
+    branches: [develop]
+    paths-ignore:
+      - "**.md"
+      - "**.plantuml"
+      - "**.svg"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: cargo fmt -- --check
+      - run: cargo clippy --locked -- -D warnings --no-deps
+      - run: cargo test --locked
+      - run: cargo install --path ./ --locked
