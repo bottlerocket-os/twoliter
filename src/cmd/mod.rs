@@ -1,6 +1,6 @@
-mod args;
+mod build;
 
-use crate::cmd::args::BuildCommand;
+use self::build::BuildCommand;
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
