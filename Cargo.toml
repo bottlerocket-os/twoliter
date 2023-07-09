@@ -1,21 +1,6 @@
-[package]
-name = "twoliter"
-version = "0.0.0"
-edition = "2021"
-description = "A command line tool for creating custom builds of Bottlerocket"
-authors = ["Matthew James Briggs <brigmatt@amazon.com>"]
-license = "MIT OR Apache-2.0"
-keywords = ["twoliter", "bottlerocket"]
-exclude = ["/design", "/target", "/dockerfiles", "/scripts"]
+[workspace]
+resolver = "2"
 
-[dependencies]
-anyhow = "1"
-async-recursion = "1"
-clap = { version = "4", features = ["derive", "env", "std"] }
-env_logger = "0.10"
-log = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_plain = "1"
-tempfile = "3"
-tokio = { version = "1", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread"] }
-toml = "0.7"
+members = [
+    "twoliter",
+]
