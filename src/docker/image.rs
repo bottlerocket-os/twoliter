@@ -1,7 +1,7 @@
 /// Represents a docker image URI such as `public.ecr.aws/myregistry/myrepo:v0.1.0`. The registry is
 /// optional as it is when using `docker`. That is, it will be looked for locally first, then at
 /// `dockerhub.io` when the registry is absent.
-#[derive(Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) struct ImageUri {
     /// e.g. public.ecr.aws/bottlerocket
     registry: Option<String>,
@@ -55,7 +55,7 @@ fn image_uri_with_registry() {
 /// optional as it is when using `docker`. That is, it will be looked for locally first, then at
 /// `dockerhub.io` when the registry is absent. The `name` is automatically suffixed with the target
 /// architecture when creating a docker image URI.
-#[derive(Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) struct ImageArchUri {
     /// e.g. public.ecr.aws/bottlerocket
     registry: Option<String>,
