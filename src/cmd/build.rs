@@ -2,29 +2,8 @@ use crate::docker;
 use crate::project::Project;
 use anyhow::Result;
 use clap::Parser;
-use log::{debug, LevelFilter};
+use log::debug;
 use std::path::PathBuf;
-
-/// A tool for building custom variants of Bottlerocket.
-#[derive(Debug, Parser)]
-#[clap(about, long_about = None)]
-pub(crate) struct Args {
-    /// Set the logging level. One of [off|error|warn|info|debug|trace]. Defaults to warn. You can
-    /// also leave this unset and use the RUST_LOG env variable. See
-    /// https://github.com/rust-cli/env_logger/
-    #[clap(long = "log-level")]
-    pub(crate) log_level: Option<LevelFilter>,
-
-    #[clap(subcommand)]
-    pub(crate) subcommand: Subcommand,
-}
-
-#[derive(Debug, Parser)]
-pub(crate) enum Subcommand {
-    /// Build something, such as a Bottlerocket image or a kit of packages.
-    #[clap(subcommand)]
-    Build(BuildCommand),
-}
 
 #[derive(Debug, Parser)]
 pub(crate) enum BuildCommand {
