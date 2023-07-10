@@ -22,4 +22,4 @@ jobs:
       - run: cargo fmt -- --check
       - run: cargo clippy --locked -- -D warnings --no-deps
       - run: cargo test --locked
-      - run: cargo install --path ./ --locked
+      - run: cargo build --locked
