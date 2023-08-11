@@ -1,21 +1,39 @@
 use crate::docker::{ImageArchUri, DEFAULT_REGISTRY, DEFAULT_SDK_NAME, DEFAULT_SDK_VERSION};
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
-use log::trace;
+use log::{debug, trace};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
+/// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
+/// found (this is the same as `user_path` if provided).
+pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<Project> {
+    let project = match user_path {
+        None => Project::find_and_load(".").await?,
+        Some(p) => Project::load(&p).await?,
+    };
+    debug!(
+        "Project file loaded from '{}'",
+        project.filepath().display()
+    );
+    Ok(project)
+}
+
 /// Represents the structure of a `Twoliter.toml` project file.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Project {
+    #[serde(skip)]
+    filepath: PathBuf,
+    #[serde(skip)]
+    project_dir: PathBuf,
     pub(crate) schema_version: SchemaVersion<1>,
     pub(crate) project_name: String,
     pub(crate) project_version: String,
-    pub(crate) sdk: Option<Sdk>,
 }
 
 impl Project {
@@ -25,16 +43,26 @@ impl Project {
         let data = fs::read_to_string(&path)
             .await
             .context(format!("Unable to read project file '{}'", path.display()))?;
-        toml::from_str(&data).context(format!(
+        let mut project: Self = toml::from_str(&data).context(format!(
             "Unable to deserialize project file '{}'",
             path.display()
-        ))
+        ))?;
+        project.filepath = path.into();
+        project.project_dir = project
+            .filepath
+            .parent()
+            .context(format!(
+                "Unable to find the parent directory of '{}'",
+                project.filepath.display(),
+            ))?
+            .into();
+        Ok(project)
     }
 
     /// Recursively search for a file named `Twoliter.toml` starting in `dir`. If it is not found,
     /// move up (i.e. `cd ..`) until it is found. Return an error if there is no parent directory.
     #[async_recursion]
-    pub(crate) async fn find_and_load<P: AsRef<Path> + Send>(dir: P) -> Result<(Self, PathBuf)> {
+    pub(crate) async fn find_and_load<P: AsRef<Path> + Send>(dir: P) -> Result<Self> {
         let dir = dir.as_ref();
         trace!("Looking for Twoliter.toml in '{}'", dir.display());
         ensure!(
@@ -47,7 +75,7 @@ impl Project {
             .context(format!("Unable to canonicalize '{}'", dir.display()))?;
         let filepath = dir.join("Twoliter.toml");
         if filepath.is_file() {
-            return Ok((Self::load(&filepath).await?, filepath));
+            return Self::load(&filepath).await;
         }
         // Move up a level and recurse.
         let parent = dir
@@ -55,6 +83,14 @@ impl Project {
             .context("Unable to find Twoliter.toml file")?
             .to_owned();
         Self::find_and_load(parent).await
+    }
+
+    pub(crate) fn filepath(&self) -> PathBuf {
+        self.filepath.clone()
+    }
+
+    pub(crate) fn project_dir(&self) -> PathBuf {
+        self.project_dir.clone()
     }
 }
 
@@ -183,9 +219,9 @@ mod test {
         let subdir = tempdir.path().join("a").join("b").join("c");
         fs::create_dir_all(&subdir).await.unwrap();
         fs::copy(&original_path, &twoliter_toml_path).await.unwrap();
-        let (_, path) = Project::find_and_load(subdir).await.unwrap();
+        let project = Project::find_and_load(subdir).await.unwrap();
 
         // Ensure that the file we loaded was the one we expected to load.
-        assert_eq!(path, twoliter_toml_path);
+        assert_eq!(project.filepath(), twoliter_toml_path);
     }
 }

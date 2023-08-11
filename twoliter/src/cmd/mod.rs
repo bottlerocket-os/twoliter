@@ -1,12 +1,14 @@
 mod build;
+mod make;
 
 use self::build::BuildCommand;
+use crate::cmd::make::Make;
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
 use log::LevelFilter;
 
-const DEFAULT_LEVEL_FILTER: LevelFilter = LevelFilter::Warn;
+const DEFAULT_LEVEL_FILTER: LevelFilter = LevelFilter::Info;
 
 /// A tool for building custom variants of Bottlerocket.
 #[derive(Debug, Parser)]
@@ -27,12 +29,15 @@ pub(crate) enum Subcommand {
     /// Build something, such as a Bottlerocket image or a kit of packages.
     #[clap(subcommand)]
     Build(BuildCommand),
+
+    Make(Make),
 }
 
 /// Entrypoint for the `twoliter` command line program.
 pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
         Subcommand::Build(build_command) => build_command.run().await,
+        Subcommand::Make(make_args) => make_args.run().await,
     }
 }
 
