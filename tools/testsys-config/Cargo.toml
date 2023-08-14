@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 bottlerocket-types = { git = "https://github.com/bottlerocket-os/bottlerocket-test-system", version = "0.0.8", tag = "v0.0.8"}
-bottlerocket-variant = { version = "0.1", path = "../../sources/bottlerocket-variant" }
+bottlerocket-variant = { version = "0.1", path = "../bottlerocket-variant" }
 handlebars = "4"
 log = "0.4"
 maplit="1"

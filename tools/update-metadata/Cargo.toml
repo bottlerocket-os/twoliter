@@ -1,5 +1,5 @@
 [package]
-name = "update_metadata"
+name = "update-metadata"
 version = "0.1.0"
 authors = ["Samuel Mendoza-Jonas <samjonas@amazon.com>"]
 license = "Apache-2.0 OR MIT"
@@ -10,7 +10,7 @@ exclude = ["README.md"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "serde", "clock"] }
-parse-datetime = { path = "../../parse-datetime", version = "0.1" }
+parse-datetime = { path = "../parse-datetime", version = "0.1" }
 regex = "1"
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +19,3 @@ serde_plain = "1"
 snafu = "0.7"
 toml = "0.5"
 
-[lib]
-name = "update_metadata"
-path = "src/lib.rs"
