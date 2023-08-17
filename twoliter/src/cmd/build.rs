@@ -1,5 +1,5 @@
 use crate::docker;
-use crate::project::Project;
+use crate::project::{Project, Sdk};
 use anyhow::Result;
 use clap::Parser;
 use log::debug;
@@ -32,16 +32,19 @@ pub(crate) struct BuildVariant {
 
 impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
-        let project = match &self.project_path {
+        let _project = match &self.project_path {
             None => {
-                let (project, path) = Project::find_and_load(".").await?;
-                debug!("Project file loaded from '{}'", path.display());
+                let project = Project::find_and_load(".").await?;
+                debug!(
+                    "Project file loaded from '{}'",
+                    project.filepath().display()
+                );
                 project
             }
             Some(p) => Project::load(p).await?,
         };
         // TODO - get smart about sdk: https://github.com/bottlerocket-os/twoliter/issues/11
-        let sdk = project.sdk.clone().unwrap_or_default();
+        let sdk = Sdk::default();
         let _ = docker::create_twoliter_image_if_not_exists(&sdk.uri(&self.arch)).await?;
         Ok(())
     }

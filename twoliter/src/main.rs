@@ -6,6 +6,7 @@ mod cmd;
 mod common;
 mod docker;
 mod project;
+mod tools;
 
 /// Test code that should only be compiled when running tests.
 #[cfg(test)]
