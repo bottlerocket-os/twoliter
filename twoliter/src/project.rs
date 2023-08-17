@@ -32,8 +32,6 @@ pub(crate) struct Project {
     #[serde(skip)]
     project_dir: PathBuf,
     pub(crate) schema_version: SchemaVersion<1>,
-    pub(crate) project_name: String,
-    pub(crate) project_version: String,
 }
 
 impl Project {
