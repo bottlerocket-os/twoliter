@@ -63,7 +63,7 @@ impl DockerBuild {
         mut self,
         build_args: I,
     ) -> Self {
-        self.build_args.extend(build_args.into_iter());
+        self.build_args.extend(build_args);
         self
     }
 
@@ -86,7 +86,7 @@ impl DockerBuild {
         args.push(self.context_dir.display().to_string());
         exec(
             Command::new("docker")
-                .args(args.into_iter())
+                .args(args)
                 .env("DOCKER_BUILDKIT", "1"),
         )
         .await
