@@ -2,7 +2,8 @@ name: Rust
 on:
   # triggers when a PR is posted
   pull_request:
-    branches: [develop]
+    branches:
+      - "*"
     paths-ignore:
       - "**.md"
       - "**.plantuml"
