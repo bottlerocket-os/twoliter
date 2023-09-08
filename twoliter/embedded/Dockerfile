@@ -13,6 +13,16 @@ ARG ARCH
 ARG GOARCH
 
 FROM ${SDK} as sdk
+USER root
+RUN \
+     --mount=type=secret,id=tools-docker-go,mode=755,target=/tmp/tools/docker-go \
+     --mount=type=secret,id=tools-partyplanner,mode=755,target=/tmp/tools/partyplanner \
+     --mount=type=secret,id=tools-rpm2img,mode=755,target=/tmp/tools/rpm2img \
+     --mount=type=secret,id=tools-rpm2kmodkit,mode=755,target=/tmp/tools/rpm2kmodkit \
+     --mount=type=secret,id=tools-rpm2migrations,mode=755,target=/tmp/tools/rpm2migrations \
+     cp -a /tmp/tools/ /tools/
+USER builder
+
 FROM --platform=linux/${GOARCH} ${TOOLCHAIN}-${ARCH} as toolchain
 
 ############################################################################################
@@ -223,7 +233,7 @@ RUN --mount=target=/host \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
     --mount=type=secret,id=aws-session-token.env,target=/root/.aws/aws-session-token.env \
-    /host/tools/rpm2img \
+    /tools/rpm2img \
       --package-dir=/local/rpms \
       --output-dir=/local/output \
       --output-fmt="${IMAGE_FORMAT}" \
@@ -256,7 +266,7 @@ RUN --mount=target=/host \
         -name "bottlerocket-migrations-*.rpm" \
         -not -iname '*debuginfo*' \
         -exec cp '{}' '/local/migrations/' ';' \
-    && /host/tools/rpm2migrations \
+    && /tools/rpm2migrations \
         --package-dir=/local/migrations \
         --output-dir=/local/output \
     && echo ${NOCACHE}
@@ -282,7 +292,7 @@ RUN --mount=target=/host \
     && find /host/build/rpms/ -maxdepth 1 -type f \
         -name "bottlerocket-${KERNEL}-archive-*.rpm" \
         -exec cp '{}' '/local/archives/' ';' \
-    && /host/tools/rpm2kmodkit \
+    && /tools/rpm2kmodkit \
         --archive-dir=/local/archives \
         --toolchain-dir=/local/toolchain \
         --output-dir=/local/output \
