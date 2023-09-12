@@ -47,7 +47,9 @@ on:
 jobs:
   # Create the Github Release™ so the packages have something to be uploaded to
   create-release:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: bottlerocket
+      labels: bottlerocket_ubuntu-latest_16-core
     outputs:
       has-releases: ${{ steps.create-release.outputs.has-releases }}
     env:
@@ -57,9 +59,13 @@ jobs:
         with:
           submodules: recursive
       - name: Install cargo-dist
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.1.0/cargo-dist-installer.sh | sh"
+        run: |
+          cargo install \
+            --git "https://github.com/webern/cargo-dist" \
+            --rev "3dcbe823db0c4068f38db790d996a4af54e68b3e"
       - id: create-release
         run: |
+          export PATH=$CARGO_HOME/bin:$PATH
           cargo dist plan --tag=${{ github.ref_name }} --output-format=json > dist-manifest.json
           echo "dist plan ran successfully"
           cat dist-manifest.json
@@ -89,20 +95,19 @@ jobs:
       matrix:
         # For these target platforms
         include:
-        - os: "macos-11"
-          dist-args: "--artifacts=local --target=aarch64-apple-darwin"
-          install-dist: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.1.0/cargo-dist-installer.sh | sh"
-        - os: "macos-11"
-          dist-args: "--artifacts=local --target=x86_64-apple-darwin"
-          install-dist: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.1.0/cargo-dist-installer.sh | sh"
-        - os: "windows-2019"
-          dist-args: "--artifacts=local --target=x86_64-pc-windows-msvc"
-          install-dist: "irm  https://github.com/axodotdev/cargo-dist/releases/download/v0.1.0/cargo-dist-installer.ps1 | iex"
-        - os: "ubuntu-20.04"
-          dist-args: "--artifacts=local --target=x86_64-unknown-linux-gnu"
-          install-dist: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.1.0/cargo-dist-installer.sh | sh"
-
-    runs-on: ${{ matrix.os }}
+          - dist-args: "--artifacts=local --target=x86_64-unknown-linux-musl"
+            install-dist: |
+              cargo install \
+                --git "https://github.com/webern/cargo-dist" \
+                --rev "3dcbe823db0c4068f38db790d996a4af54e68b3e"
+          - dist-args: "--artifacts=local --target=aarch64-unknown-linux-musl"
+            install-dist:  |
+              cargo install \
+                --git "https://github.com/webern/cargo-dist" \
+                --rev "3dcbe823db0c4068f38db790d996a4af54e68b3e"
+    runs-on:
+      group: bottlerocket
+      labels: bottlerocket_ubuntu-latest_16-core
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -111,12 +116,17 @@ jobs:
           submodules: recursive
       - name: Install cargo-dist
         run: ${{ matrix.install-dist }}
+      - name: Install Cross
+        # Pin cargo cross to a version that we know is working for us.
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross/ --rev d6511b7b
       - name: Run cargo-dist
         # This logic is a bit janky because it's trying to be a polyglot between
         # powershell and bash since this will run on windows, macos, and linux!
         # The two platforms don't agree on how to talk about env vars but they
         # do agree on 'cat' and '$()' so we use that to marshal values between commands.
         run: |
+          export PATH=$CARGO_HOME/bin:$PATH
           # Actually do builds and make zips and whatnot
           cargo dist build --tag=${{ github.ref_name }} --output-format=json ${{ matrix.dist-args }} > dist-manifest.json
           echo "dist ran successfully"
