@@ -1,7 +1,9 @@
 mod build;
+mod debug;
 mod make;
 
 use self::build::BuildCommand;
+use crate::cmd::debug::DebugAction;
 use crate::cmd::make::Make;
 use anyhow::Result;
 use clap::Parser;
@@ -31,6 +33,10 @@ pub(crate) enum Subcommand {
     Build(BuildCommand),
 
     Make(Make),
+
+    /// Commands that are used for checking and troubleshooting Twoliter's internals.
+    #[clap(subcommand)]
+    Debug(DebugAction),
 }
 
 /// Entrypoint for the `twoliter` command line program.
@@ -38,6 +44,7 @@ pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
         Subcommand::Build(build_command) => build_command.run().await,
         Subcommand::Make(make_args) => make_args.run().await,
+        Subcommand::Debug(debug_action) => debug_action.run().await,
     }
 }
 

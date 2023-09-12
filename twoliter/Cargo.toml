@@ -22,6 +22,7 @@ tar = "0.4"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread"] }
 toml = "0.7"
+uuid = { version = "1", features = [ "v4" ] }
 
 # Binary dependencies. These are binaries that we want to embed in the Twoliter binary.
 buildsys = { version = "0.1.0", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }
