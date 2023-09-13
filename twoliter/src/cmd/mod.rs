@@ -14,7 +14,7 @@ const DEFAULT_LEVEL_FILTER: LevelFilter = LevelFilter::Info;
 
 /// A tool for building custom variants of Bottlerocket.
 #[derive(Debug, Parser)]
-#[clap(about, long_about = None)]
+#[clap(about, long_about = None, version)]
 pub(crate) struct Args {
     /// Set the logging level. One of [off|error|warn|info|debug|trace]. Defaults to warn. You can
     /// also leave this unset and use the RUST_LOG env variable. See
