@@ -12,11 +12,10 @@ pub(crate) async fn exec(cmd: &mut Command) -> Result<()> {
             let output = cmd
                 .output()
                 .await
-                .context(format!("Unable to start command '{:?}'", cmd))?;
+                .context(format!("Unable to start command"))?;
             ensure!(
                 output.status.success(),
-                "Command '{:?}' was unsuccessful, exit code {}:\n{}\n{}",
-                cmd,
+                "Command was unsuccessful, exit code {}:\n{}\n{}",
                 output.status.code().unwrap_or(1),
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
@@ -28,12 +27,11 @@ pub(crate) async fn exec(cmd: &mut Command) -> Result<()> {
             let status = cmd
                 .status()
                 .await
-                .context(format!("Unable to start command '{:?}'", cmd))?;
+                .context(format!("Unable to start command"))?;
 
             ensure!(
                 status.success(),
-                "Command '{:?}' was unsuccessful, exit code {:?}",
-                cmd,
+                "Command was unsuccessful, exit code {}",
                 status.code().unwrap_or(1),
             );
         }
