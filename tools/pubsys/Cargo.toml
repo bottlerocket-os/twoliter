@@ -28,7 +28,7 @@ lazy_static = "1"
 log = "0.4"
 nonzero_ext = "0.3"
 num_cpus = "1"
-parse-datetime = { path = "../../sources/parse-datetime", version = "0.1" }
+parse-datetime = { path = "../parse-datetime", version = "0.1" }
 pubsys-config = { path = "../pubsys-config/", version = "0.1" }
 rayon = "1"
 # Need to bring in reqwest with a TLS feature so tough can support TLS repos.
@@ -48,5 +48,5 @@ toml = "0.5"
 tough = { version = "0.14", features = ["http"] }
 tough-kms = "0.6"
 tough-ssm = "0.9"
-update_metadata = { path = "../../sources/updater/update_metadata/", version = "0.1" }
+update-metadata = { path = "../update-metadata/", version = "0.1" }
 url = { version = "2", features = ["serde"] }

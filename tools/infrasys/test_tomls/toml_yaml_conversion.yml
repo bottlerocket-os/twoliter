@@ -1,40 +1,37 @@
----
 repo:
   default:
-    root_role_url: ~
-    root_role_sha512: ~
-    signing_keys:
-      kms:
-        key_id: ~
-        available_keys:
-          e4a8f7fe-2272-4e51-bc3e-3f719c77eb31: us-west-1
-        key_alias: ~
-        regions: []
-        key_stack_arns: {}
-    root_keys:
-      kms:
-        key_id: ~
-        available_keys:
-          e4a8f7fe-2272-4e51-bc3e-3f719c77eb31: us-west-1
-        key_alias: ~
-        regions: []
-        key_stack_arns: {}
-    metadata_base_url: ~
-    targets_url: ~
+    root_role_url: null
+    root_role_sha512: null
+    signing_keys: !kms
+      key_id: null
+      available_keys:
+        e4a8f7fe-2272-4e51-bc3e-3f719c77eb31: us-west-1
+      key_alias: null
+      regions: []
+      key_stack_arns: {}
+    root_keys: !kms
+      key_id: null
+      available_keys:
+        e4a8f7fe-2272-4e51-bc3e-3f719c77eb31: us-west-1
+      key_alias: null
+      regions: []
+      key_stack_arns: {}
+    metadata_base_url: null
+    targets_url: null
     file_hosting_config_name: TUF-Repo-S3-Buck
     root_key_threshold: 1
     pub_key_threshold: 1
 aws:
   regions: []
-  role: ~
-  profile: ~
+  role: null
+  profile: null
   region: {}
-  ssm_prefix: ~
+  ssm_prefix: null
   s3:
     TUF-Repo-S3-Buck:
       region: us-west-2
       s3_prefix: /my-bottlerocket-remix
       vpc_endpoint_id: vpc-12345
-      stack_arn: ~
-      bucket_name: ~
-vmware: ~
+      stack_arn: null
+      bucket_name: null
+vmware: null

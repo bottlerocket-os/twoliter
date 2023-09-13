@@ -2,5 +2,16 @@
 resolver = "2"
 
 members = [
+    "tools/bottlerocket-variant",
+    "tools/buildsys",
+    "tools/generate-readme",
+    "tools/infrasys",
+    "tools/parse-datetime",
+    "tools/pubsys",
+    "tools/pubsys-config",
+    "tools/pubsys-setup",
+    "tools/testsys",
+    "tools/testsys-config",
+    "tools/update-metadata",
     "twoliter",
 ]

@@ -9,7 +9,7 @@ publish = false
 exclude = ["README.md"]
 
 [dependencies]
-bottlerocket-variant = { version = "0.1", path = "../../sources/bottlerocket-variant" }
+bottlerocket-variant = { version = "0.1", path = "../bottlerocket-variant" }
 duct = "0.13"
 hex = "0.4"
 lazy_static = "1"
