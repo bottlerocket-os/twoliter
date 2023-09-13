@@ -1,0 +1,11 @@
+[workspace]
+resolver = "1"
+members = [
+    "infrasys",
+    "buildsys",
+    "pubsys",
+    "pubsys-config",
+    "pubsys-setup",
+    "testsys",
+    "testsys-config",
+]

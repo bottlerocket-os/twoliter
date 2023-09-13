@@ -1,0 +1,84 @@
+# This is an example infrastructure configuration for pubsys, the tool that
+# creates repos when you call `cargo make repo`.  Save a copy as `Infra.toml`
+# at the root of the repo, then edit the settings below to match your use case.
+
+# You can have any number of repos defined and build a specific one by running like this:
+#     cargo make -e PUBLISH_REPO=myrepo repo
+[repo.default]
+# URL to your root role JSON file; can be a file:// URL for local files.  If
+# you don't specify one here, a file will be generated for you under /roles.
+# For production use, you should store them somewhere safer.
+root_role_url = "https://example.com/root.json"
+# SHA512 checksum of your root role JSON file.
+root_role_sha512 = "0123456789abcdef"
+
+# For reference, this is the Bottlerocket root role:
+#root_role_url = "https://cache.bottlerocket.aws/root.json"
+#root_role_sha512 = "a3c58bc73999264f6f28f3ed9bfcb325a5be943a782852c7d53e803881968e0a4698bd54c2f125493f4669610a9da83a1787eb58a8303b2ee488fa2a3f7d802f"
+
+# pubsys assumes a single publication key that signs the snapshot, targets,
+# and timestamp roles.  Here you specify where that key lives so we can sign
+# the created repo.  If you don't specify one here, a key will be generated for
+# you under /keys.  For production use, you should use a key stored in a
+# trusted service like KMS or SSM.
+# (Need inline table syntax until this is fixed: https://github.com/alexcrichton/toml-rs/issues/225)
+signing_keys = { file = { path = "/home/user/key.pem" } }
+#signing_keys = { kms = { key_id = "abc-def-123" } }
+#signing_keys = { ssm = { parameter = "/my/parameter" } }
+
+# If these URLs are uncommented, the repo will be pulled and used as a starting
+# point, and your images (and related files) will be added as a new update in
+# the created repo.  Otherwise, we build a new repo from scratch.
+metadata_base_url = "https://example.com/"
+targets_url = "https://example.com/targets/"
+
+[aws]
+# The list of regions in which you want to publish AMIs. We register an AMI in
+# the first region and copy it to all other regions.
+regions = ["us-west-2", "us-east-1", "us-east-2"]
+# If specified, we use this named profile from ~/.aws/credentials, rather than
+# the default path of trying credentials from the environment, from a
+# credential process, from the default profile, and then from an IAM instance
+# profile.
+profile = "my-profile"
+# If specified, we assume this role before making any API calls.
+role = "arn:aws:iam::012345678901:role/assume-global"
+# If specified, this string will be prefixed on all parameter names published to SSM.
+ssm_prefix = "/your/prefix/here"
+
+[aws.region.us-west-2]
+# If specified, we assume this role before making any API calls in this region.
+# (This is assumed after the "global" aws.role, if that is also specified.)
+role = "arn:aws:iam::012345678901:role/assume-regional"
+
+[vmware]
+# A list of datacenter names to which you would like to upload an OVA.  These
+# are "friendly" names, and do not need to be the actual name of the
+# software-defined datacenter, but can be.  For example, you may have have
+# multiple vSphere instances with datacenters that still carry the default
+# "SDDC-Datacenter" name; this field allows you to differentiate them.
+datacenters = ["north", "south"]
+
+# ***
+# GOVC_* environment variables set in the current environment override any
+# configuration set in the sections below!
+# ***
+
+# Optional common configuration
+# This configuration allow values to be set in a single place if they are common in
+# multiple datacenters.  They can be overridden in the datacenter's block below.
+[vmware.common]
+network = "a_network"
+
+# Datacenter specific configuration
+# This specifies all of the values necessary to communicate with this
+# datacenter via `govc`.  Each value maps directly to the GOVC_* environment
+# variable in the corresponding comment.  If any of these values is missing and
+# isn't in the environment, we will look for them in `vmware.common`.
+[vmware.datacenter.north]
+vsphere_url = "https://vcenter.1234.vmwarevmc.com" # GOVC_URL
+datacenter = "SDDC-Datacenter" # GOVC_DATACENTER
+datastore = "WorkloadDatastore" # GOVC_DATASTORE
+network = "sddc-cgw-network-1" # GOVC_NETWORK
+folder = "my_folder" # GOVC_FOLDER
+resource_pool = "/SDDC-Datacenter/host/Cluster/Resources/Compute-ResourcePool" # GOVC_RESOURCE_POOL
