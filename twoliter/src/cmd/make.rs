@@ -1,6 +1,6 @@
 use crate::common::exec;
 use crate::project;
-use crate::tools::install_tools;
+use crate::tools::{install_tools, tools_tempdir};
 use anyhow::Result;
 use clap::Parser;
 use log::trace;
@@ -32,7 +32,8 @@ pub(crate) struct Make {
 impl Make {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let tempdir = install_tools().await?;
+        let tempdir = tools_tempdir()?;
+        install_tools(&tempdir).await?;
         let makefile_path = tempdir.path().join("Makefile.toml");
 
         let mut args = vec![
@@ -52,8 +53,12 @@ impl Make {
             }
         }
 
-        args.push("-e".to_string());
-        args.push(format!("CARGO_HOME={}", self.cargo_home.display()));
+        args.push(format!("-e=CARGO_HOME={}", self.cargo_home.display()));
+        args.push(format!(
+            "-e=TWOLITER_TOOLS_DIR={}",
+            tempdir.path().display()
+        ));
+
         args.push(self.makefile_task.clone());
 
         for cargo_make_arg in &self.additional_args {

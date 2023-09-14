@@ -15,3 +15,8 @@ members = [
     "tools/update-metadata",
     "twoliter",
 ]
+
+[profile.release]
+strip = "debuginfo"
+codegen-units = 1
+lto = true

@@ -1,5 +1,2 @@
 /target/
 .ignore/
-
-# generated file
-twoliter/src/tools_hash.rs

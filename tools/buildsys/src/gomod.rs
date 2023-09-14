@@ -146,7 +146,7 @@ impl GoMod {
                 .context(error::WriteFileSnafu { path: &script_path })?;
         }
 
-        let res = docker_go(root_dir, &args);
+        let res = docker_go(&args);
         fs::remove_file(&script_path).context(error::RemoveFileSnafu { path: &script_path })?;
         res
     }
@@ -170,7 +170,7 @@ struct DockerGoArgs<'a> {
 }
 
 /// Run `docker-go` with the specified arguments.
-fn docker_go(root_dir: &Path, dg_args: &DockerGoArgs) -> Result<()> {
+fn docker_go(dg_args: &DockerGoArgs) -> Result<()> {
     let args = vec![
         "--module-path",
         dg_args
@@ -188,8 +188,11 @@ fn docker_go(root_dir: &Path, dg_args: &DockerGoArgs) -> Result<()> {
         &dg_args.command,
     ];
     let arg_string = args.join(" ");
-    let program = root_dir.join("tools/docker-go");
-    println!("program: {}", program.to_string_lossy());
+    let twoliter_tools_dir = env::var("TWOLITER_TOOLS_DIR").context(error::EnvironmentSnafu {
+        var: "TWOLITER_TOOLS_DIR",
+    })?;
+    let program = PathBuf::from(twoliter_tools_dir).join("docker-go");
+    eprintln!("program: {}", program.to_string_lossy());
     let output = cmd(program, args)
         .stderr_to_stdout()
         .stdout_capture()

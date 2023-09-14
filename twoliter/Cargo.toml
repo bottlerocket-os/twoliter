@@ -14,12 +14,22 @@ async-recursion = "1"
 clap = { version = "4", features = ["derive", "env", "std"] }
 env_logger = "0.10"
 flate2 = "1"
+hex = "0.4"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 tar = "0.4"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread"] }
 toml = "0.7"
+uuid = { version = "1", features = [ "v4" ] }
+
+# Binary dependencies. These are binaries that we want to embed in the Twoliter binary.
+buildsys = { version = "0.1.0", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }
+pubsys = { version = "0.1.0", artifact = [ "bin:pubsys" ], path = "../tools/pubsys" }
+pubsys-setup = { version = "0.1.0", artifact = [ "bin:pubsys-setup" ], path = "../tools/pubsys-setup" }
+testsys = { version = "0.1.0", artifact = [ "bin:testsys" ], path = "../tools/testsys" }
+tuftool = { version = "0.9", artifact = [ "bin:tuftool" ] }
 
 [build-dependencies]
 bytes = "1"
