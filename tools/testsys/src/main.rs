@@ -16,6 +16,7 @@ use uninstall::Uninstall;
 mod aws_ecs;
 mod aws_k8s;
 mod aws_resources;
+mod base64;
 mod crds;
 mod delete;
 mod error;

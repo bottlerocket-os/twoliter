@@ -1,3 +1,4 @@
+use crate::base64;
 use crate::error::{self, Result};
 use crate::run::{KnownTestType, TestType};
 use bottlerocket_types::agent_config::TufRepoConfig;
