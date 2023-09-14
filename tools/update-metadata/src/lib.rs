@@ -452,7 +452,7 @@ mod tests {
 
     fn test_time() -> DateTime<Utc> {
         // DateTime for 1/1/2000 00:00:00
-        DateTime::<Utc>::from_utc(
+        DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDate::from_ymd_opt(2000, 1, 1)
                 .unwrap()
                 .and_hms_milli_opt(0, 0, 0, 0)
@@ -641,7 +641,7 @@ mod tests {
         };
         let seed = 1024;
         // Construct a DateTime object for 1/1/2000 00:00:00
-        let time = DateTime::<Utc>::from_utc(
+        let time = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDate::from_ymd_opt(2000, 1, 1)
                 .unwrap()
                 .and_hms_milli_opt(0, 0, 0, 0)
