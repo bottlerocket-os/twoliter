@@ -637,7 +637,8 @@ mod error {
     pub(crate) enum Error {
         #[snafu(display("Failed to add new update to manifest: {}", source))]
         AddUpdate {
-            source: update_metadata::error::Error,
+            #[snafu(source(from(update_metadata::error::Error, Box::new)))]
+            source: Box<update_metadata::error::Error>,
         },
 
         #[snafu(display("Failed to add new target '{}' to repo: {}", path.display(), source))]
@@ -697,7 +698,8 @@ mod error {
         #[snafu(display("Failed to write Manifest to '{}': {}", path.display(), source))]
         ManifestWrite {
             path: PathBuf,
-            source: update_metadata::error::Error,
+            #[snafu(source(from(update_metadata::error::Error, Box::new)))]
+            source: Box<update_metadata::error::Error>,
         },
 
         #[snafu(display("Infra.toml is missing {}", missing))]
@@ -791,7 +793,8 @@ mod error {
         #[snafu(display("Failed to set waves from '{}': {}", wave_policy_path.display(), source))]
         SetWaves {
             wave_policy_path: PathBuf,
-            source: update_metadata::error::Error,
+            #[snafu(source(from(update_metadata::error::Error, Box::new)))]
+            source: Box<update_metadata::error::Error>,
         },
 
         #[snafu(display("Failed to create temporary file: {}", source))]
@@ -800,7 +803,8 @@ mod error {
         #[snafu(display("Failed to read update metadata '{}': {}", path.display(), source))]
         UpdateMetadataRead {
             path: PathBuf,
-            source: update_metadata::error::Error,
+            #[snafu(source(from(update_metadata::error::Error, Box::new)))]
+            source: Box<update_metadata::error::Error>,
         },
     }
 }
