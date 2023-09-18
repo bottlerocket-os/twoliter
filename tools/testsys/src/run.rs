@@ -1,5 +1,6 @@
 use crate::aws_ecs::AwsEcsCreator;
 use crate::aws_k8s::AwsK8sCreator;
+use crate::base64;
 use crate::crds::{CrdCreator, CrdInput};
 use crate::error;
 use crate::error::Result;

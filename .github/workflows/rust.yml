@@ -22,7 +22,4 @@ jobs:
       labels: bottlerocket_ubuntu-latest_16-core
     steps:
       - uses: actions/checkout@v3
-      - run: cargo build --locked
-      - run: cargo test --locked
-      - run: cargo fmt -- --check
-      - run: cargo clippy --locked -- -D warnings --no-deps
+      - run: make build

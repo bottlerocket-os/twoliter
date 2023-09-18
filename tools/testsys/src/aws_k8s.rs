@@ -1,4 +1,5 @@
 use crate::aws_resources::{ami, ami_name, ec2_crd, ec2_karpenter_crd, get_ami_id};
+use crate::base64;
 use crate::crds::{
     BottlerocketInput, ClusterInput, CrdCreator, CrdInput, CreateCrdOutput, MigrationInput,
     TestInput,

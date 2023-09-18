@@ -1,3 +1,4 @@
+use crate::base64;
 use crate::crds::TestInput;
 use crate::error::{self, Result};
 use crate::run::KnownTestType;

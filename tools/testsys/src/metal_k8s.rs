@@ -1,3 +1,4 @@
+use crate::base64;
 use crate::crds::{
     BottlerocketInput, ClusterInput, CrdCreator, CrdInput, CreateCrdOutput, MigrationInput,
     TestInput,

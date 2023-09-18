@@ -22,7 +22,7 @@ clap = { version = "4", features = ["derive"] }
 coldsnap = { version = "0.6", default-features = false, features = ["aws-sdk-rust-rustls"] }
 duct = "0.13"
 futures = "0.3"
-governor = "0.5"
+governor = "0.6"
 indicatif = "0.17"
 lazy_static = "1"
 log = "0.4"
@@ -44,7 +44,7 @@ tempfile = "3"
 tinytemplate = "1"
 tokio = { version = "1", features = ["full"] }  # LTS
 tokio-stream = { version = "0.1", features = ["time"] }
-toml = "0.5"
+toml = "0.8"
 tough = { version = "0.14", features = ["http"] }
 tough-kms = "0.6"
 tough-ssm = "0.9"

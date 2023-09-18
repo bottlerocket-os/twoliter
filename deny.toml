@@ -71,14 +71,18 @@ skip = [
     { name = "bitflags", version = "=1.3" },
     # several dependencies are using an old version of serde_yaml
     { name = "serde_yaml", version = "=0.8" },
-    # governor uses an old version of wasi
-    { name = "wasi", version = "=0.10.2" },
     # aws-sdk-rust is using an old version of fastrand
     { name = "fastrand", version = "=1.9" },
+    # tuftool is using an old clap (v3) which is using old hermit-abi
+    { name = "hermit-abi", version = "0.1" },
     # aws-sdk-rust is using an old version of rustls, hyper-rustls, and tokio-rustls
     { name = "rustls", version = "=0.20" },
     { name = "hyper-rustls", version = "=0.23" },
     { name = "tokio-rustls", version = "=0.23" },
+    # hyper and tokio are using different versions of socket2
+    { name = "socket2", version = "0.4" },
+    # Testsys is using a feature of TOML 0.5 that has been removed in subsequent versions.
+    { name = "toml", version = "0.5" },
     # kube-client uses an old version of redox_syscall
     { name = "redox_syscall", version = "=0.2" },
 ]
@@ -89,7 +93,7 @@ skip-tree = [
     # dependency tree because windows-sys has many sub-crates
     # that differ in major version.
     { name = "windows-sys" },
-    # generate-readme uses an old version of clap and other dependencies
+    # tuftool uses an old version of clap and other dependencies
     { name = "generate-readme", version = "0.1.0" }
 ]
 
