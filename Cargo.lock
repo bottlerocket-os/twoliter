@@ -644,7 +644,6 @@ dependencies = [
 name = "bottlerocket-variant"
 version = "0.1.0"
 dependencies = [
- "generate-readme",
  "serde",
  "snafu",
 ]
@@ -723,20 +722,6 @@ checksum = "e47d3a8076e283f3acd27400535992edb3ba4b5bb72f8891ad8fbe7932a7d4b9"
 dependencies = [
  "bytes",
  "either",
-]
-
-[[package]]
-name = "cargo-readme"
-version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10217a8c6eb2ad03cacb4ef2e2839b69abcc7cefb37a83906b331418eb8f6f0a"
-dependencies = [
- "clap 4.4.3",
- "lazy_static",
- "percent-encoding",
- "regex",
- "serde",
- "toml 0.7.8",
 ]
 
 [[package]]
@@ -1303,14 +1288,6 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
-]
-
-[[package]]
-name = "generate-readme"
-version = "0.1.0"
-dependencies = [
- "cargo-readme",
- "snafu",
 ]
 
 [[package]]
@@ -2070,7 +2047,6 @@ name = "parse-datetime"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "generate-readme",
  "snafu",
 ]
 
@@ -3297,18 +3273,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd79e69d3b627db300ff956027cc6c3798cef26d22526befdfcd12feeb6d2257"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "toml"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c226a7bba6d859b63c92c4b4fe69c5b6b72d0cb897dbc8e6012298e6154cb56e"
@@ -3316,7 +3280,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.20.0",
+ "toml_edit",
 ]
 
 [[package]]
@@ -3326,19 +3290,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cda73e2f1397b1262d6dfdcef8aafae14d1de7748d66822d3bfeeb6d03e5e4b"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "toml_edit"
-version = "0.19.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
-dependencies = [
- "indexmap 2.0.0",
- "serde",
- "serde_spanned",
- "toml_datetime",
- "winnow",
 ]
 
 [[package]]
