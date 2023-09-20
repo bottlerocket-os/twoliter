@@ -241,8 +241,8 @@ fn deserialize_offset<'de, D>(deserializer: D) -> std::result::Result<Duration, 
 where
     D: Deserializer<'de>,
 {
-    let s: &str = Deserialize::deserialize(deserializer)?;
-    parse_offset(s).map_err(serde::de::Error::custom)
+    let s: String = Deserialize::deserialize(deserializer)?;
+    parse_offset(&s).map_err(serde::de::Error::custom)
 }
 
 mod error {
@@ -277,3 +277,14 @@ mod error {
 }
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, error::Error>;
+
+#[test]
+fn repo_expiration_deserialization_test() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("pubsys")
+        .join("policies")
+        .join("repo-expiration")
+        .join("2w-2w-1w.toml");
+    let _ = RepoExpirationPolicy::from_path(path).unwrap();
+}
