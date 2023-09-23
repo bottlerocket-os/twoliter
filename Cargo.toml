@@ -6,6 +6,7 @@ members = [
     "tools/buildsys",
     "tools/buildsys-config",
     "tools/parse-datetime",
+    "tools/pipesys",
     "tools/pubsys",
     "tools/pubsys-config",
     "tools/pubsys-setup",
