@@ -86,15 +86,6 @@ lazy_static! {
 
 static DOCKER_BUILD_MAX_ATTEMPTS: NonZeroU16 = nonzero!(10u16);
 
-/// The list of tools.
-const TOOLS: &[&str] = &[
-    "docker-go",
-    "partyplanner",
-    "rpm2img",
-    "rpm2kmodkit",
-    "rpm2migrations",
-];
-
 pub(crate) struct PackageBuilder;
 
 impl PackageBuilder {
@@ -132,11 +123,6 @@ impl PackageBuilder {
                 env::var(src_env_var).context(error::EnvironmentSnafu { var: src_env_var })?;
             args.build_arg(target_env_var, src_env_val);
         }
-
-        // Add the tools directory as a secret since it is not in the context directory.
-        args.extend(tools_secret_args(&PathBuf::from(
-            env::var(TOOLS_DIR).context(error::EnvironmentSnafu { var: TOOLS_DIR })?,
-        )));
 
         let tag = format!(
             "buildsys-pkg-{package}-{arch}",
@@ -235,11 +221,6 @@ impl VariantBuilder {
 
         // Add known secrets to the build argments.
         add_secrets(&mut args)?;
-
-        // Add the tools directory as a secret since it is not in the context directory.
-        args.extend(tools_secret_args(&PathBuf::from(
-            env::var(TOOLS_DIR).context(error::EnvironmentSnafu { var: TOOLS_DIR })?,
-        )));
 
         // Always rebuild variants since they are located in a different workspace,
         // and don't directly track changes in the underlying packages.
@@ -675,13 +656,4 @@ where
     fn split_string(&self) -> Vec<String> {
         self.as_ref().split(' ').map(String::from).collect()
     }
-}
-
-fn tools_secret_args(tools_dir: &Path) -> impl Iterator<Item = String> {
-    let mut secrets = Vec::new();
-    for &tool in TOOLS {
-        let id = format!("tools-{}", tool.to_lowercase().replace('.', "-"));
-        secrets.build_secret("file", &id, &tools_dir.join(tool).display().to_string())
-    }
-    secrets.into_iter()
 }

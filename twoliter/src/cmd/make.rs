@@ -1,9 +1,10 @@
 use crate::cargo_make::CargoMake;
-use crate::project;
-use crate::tools::{install_tools, tools_tempdir};
+use crate::project::{self};
+use crate::tools::install_tools;
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
+use tokio::fs;
 
 /// Run a cargo make command in Twoliter's build environment. Known Makefile.toml environment
 /// variables will be passed-through to the cargo make invocation.
@@ -33,12 +34,13 @@ pub(crate) struct Make {
 impl Make {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let tempdir = tools_tempdir()?;
-        install_tools(&tempdir).await?;
-        let makefile_path = tempdir.path().join("Makefile.toml");
+        let toolsdir = project.project_dir().join("build/tools");
+        fs::remove_dir_all(&toolsdir).await?;
+        install_tools(&toolsdir).await?;
+        let makefile_path = toolsdir.join("Makefile.toml");
         CargoMake::new(&project, &self.arch)?
             .env("CARGO_HOME", self.cargo_home.display().to_string())
-            .env("TWOLITER_TOOLS_DIR", tempdir.path().display().to_string())
+            .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .makefile(makefile_path)
             .project_dir(project.project_dir())
