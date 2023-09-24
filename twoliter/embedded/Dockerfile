@@ -125,7 +125,7 @@ RUN --mount=target=/host \
         --repofrompath repo,./rpmbuild/RPMS \
         --enablerepo 'repo' \
         --nogpgcheck \
-	--forcearch "${ARCH}" \
+        --forcearch "${ARCH}" \
         builddep rpmbuild/SPECS/${PACKAGE}.spec
 
 # We use the "nocache" writable space to generate code where necessary, like the variant-
@@ -176,7 +176,7 @@ RUN --mount=target=/host \
         --nogpgcheck \
         --downloadonly \
         --downloaddir . \
-	--forcearch "${ARCH}" \
+        --forcearch "${ARCH}" \
         install $(printf "bottlerocket-%s\n" ${PACKAGES}) \
     && mv *.rpm /local/rpms \
     && createrepo_c /local/rpms \
