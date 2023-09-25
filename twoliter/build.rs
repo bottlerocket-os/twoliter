@@ -26,6 +26,7 @@ fn main() {
     ));
 
     paths.copy_file("Dockerfile");
+    paths.copy_file("Dockerfile.dockerignore");
     paths.copy_file("Makefile.toml");
     paths.copy_file("docker-go");
     paths.copy_file("partyplanner");

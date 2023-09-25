@@ -31,7 +31,7 @@ ARG TOKEN
 # We can't create directories via RUN in a scratch container, so take an existing one.
 COPY --chown=1000:1000 --from=sdk /tmp /cache
 # Ensure the ARG variables are used in the layer to prevent reuse by other builds.
-COPY --chown=1000:1000 .dockerignore /cache/.${PACKAGE}.${ARCH}.${TOKEN}
+COPY --chown=1000:1000 .gitignore /cache/.${PACKAGE}.${ARCH}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Some builds need to modify files in the source directory, for example Rust software using
@@ -52,7 +52,7 @@ ARG TOKEN
 # We can't create directories via RUN in a scratch container, so take an existing one.
 COPY --chown=1000:1000 --from=sdk /tmp /variantcache
 # Ensure the ARG variables are used in the layer to prevent reuse by other builds.
-COPY --chown=1000:1000 .dockerignore /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
+COPY --chown=1000:1000 .gitignore /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Builds an RPM package from a spec file.
