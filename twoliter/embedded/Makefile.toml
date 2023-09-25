@@ -49,6 +49,8 @@ PUBLISH_INFRA_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Infra.toml"
 # Default repo to read from PUBLISH_INFRA_CONFIG_PATH
 PUBLISH_REPO = "default"
 
+PUBLISH_LOG_LEVEL = "info"
+
 # This can be overridden with -e to change the path to the file containing SSM
 # parameter templates.  This file determines the parameter names and values
 # that will be published to SSM when you run `cargo make ssm`.  See
@@ -133,6 +135,8 @@ TESTSYS_STARTING_VERSION = { script = ["git tag --list --sort=version:refname 'v
 TESTSYS_STARTING_COMMIT = { script = ["git describe --tag ${TESTSYS_STARTING_VERSION} --always --exclude '*' || echo 00000000"] }
 TESTSYS_TESTS_DIR = "${BUILDSYS_ROOT_DIR}/tests"
 TESTSYS_TEST_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Test.toml"
+
+TESTSYS_LOG_LEVEL = "info"
 
 [env.development]
 # Certain variables are defined here to allow us to override a component value
@@ -873,6 +877,7 @@ if [ "${ALLOW_MISSING_KEY}" = "true" ]; then
 fi
 
 pubsys-setup \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    --root-role-path "${PUBLISH_REPO_ROOT_JSON}" \
    --default-key-path "${PUBLISH_REPO_KEY}" \
@@ -957,6 +962,7 @@ if [ -s "${BUILDSYS_OVF_TEMPLATE}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    repo \
@@ -1001,6 +1007,7 @@ if [ "${REPO_VALIDATE_TARGETS}" = "true" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    validate-repo \
@@ -1024,6 +1031,7 @@ set -e
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    check-repo-expirations \
@@ -1051,6 +1059,7 @@ if [ "${REPO_UNSAFE_REFRESH}" = "true" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    refresh-repo \
@@ -1117,6 +1126,7 @@ ami_output_latest="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_VARIANT}-${AMI_DATA_F
 ami_name="${PUBLISH_AMI_NAME:-${PUBLISH_AMI_NAME_DEFAULT}}"
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    ami \
@@ -1158,6 +1168,7 @@ if [ ! -s "${ami_input}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    publish-ami \
@@ -1188,6 +1199,7 @@ if [ ! -s "${ami_input}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    publish-ami \
@@ -1223,6 +1235,7 @@ if [ ! -s "${ami_input}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    publish-ami \
@@ -1261,6 +1274,7 @@ if [ ! -s "${ami_input}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    publish-ami \
@@ -1294,6 +1308,7 @@ if [ ! -s "${expected_amis_path}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    validate-ami \
@@ -1326,6 +1341,7 @@ fi
 ssm_parameter_output="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-${SSM_DATA_FILE_SUFFIX}"
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    ssm \
@@ -1361,6 +1377,7 @@ fi
 ssm_parameter_output="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-${SSM_DATA_FILE_SUFFIX}"
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    promote-ssm \
@@ -1395,6 +1412,7 @@ if [ ! -s "${expected_parameters_path}" ]; then
 fi
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    validate-ssm \
@@ -1428,6 +1446,7 @@ fi
 vm_name="${VMWARE_VM_NAME:-${VMWARE_VM_NAME_DEFAULT}}"
 
 pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
    --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
    \
    upload-ova \
@@ -1548,7 +1567,7 @@ script = [
     '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys ${CARGO_MAKE_TESTSYS_ARGS} install
+    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} install
     '''
 ]
 
@@ -1566,7 +1585,7 @@ script = [
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
     # The ami that is selected from `amis.json` is determined by `TESTSYS_REGION` if set; otherwise,
     # it is the first region listed in `Infra.toml` (for aws variants).
-    testsys ${CARGO_MAKE_TESTSYS_ARGS} run ${TESTSYS_TEST} \
+    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} run ${TESTSYS_TEST} \
       ${testsys_ami_input} \
       ${TESTSYS_AWS_SECRET_NAME:+--secret ${TESTSYS_AWS_SECRET_NAME}} \
       ${@}
@@ -1582,7 +1601,7 @@ script = [
     '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys ${CARGO_MAKE_TESTSYS_ARGS} delete --test ${@}
+    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test ${@}
     '''
 ]
 
@@ -1592,7 +1611,7 @@ script = [
     '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys ${CARGO_MAKE_TESTSYS_ARGS} delete ${@}
+    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete ${@}
     '''
 ]
 
@@ -1602,7 +1621,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys ${CARGO_MAKE_TESTSYS_ARGS} uninstall
+   testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} uninstall
    '''
 ]
 
@@ -1619,7 +1638,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   watch -- testsys ${CARGO_MAKE_TESTSYS_ARGS} status --test ${@}
+   watch -- testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status --test ${@}
    '''
 ]
 
@@ -1631,7 +1650,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   watch -- testsys ${CARGO_MAKE_TESTSYS_ARGS} status ${@}
+   watch -- testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status ${@}
    '''
 ]
 
@@ -1642,7 +1661,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys ${CARGO_MAKE_TESTSYS_ARGS} logs --test ${@}
+   testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} logs --test ${@}
    '''
 ]
 
@@ -1652,7 +1671,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys ${CARGO_MAKE_TESTSYS_ARGS} ${@}
+   testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} ${@}
    '''
 ]
 
