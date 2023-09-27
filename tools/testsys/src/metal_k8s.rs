@@ -66,11 +66,24 @@ impl CrdCreator for MetalK8sCreator {
                 })?,
         )?;
 
+        let kube_image_id = cluster_input
+            .image_id
+            .to_string()
+            .replace(['.', '/'], "_")
+            .chars()
+            .rev()
+            .take(60)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+
         let labels = cluster_input.crd_input.labels(btreemap! {
             "testsys/type".to_string() => "cluster".to_string(),
             "testsys/cluster".to_string() => cluster_name.clone(),
             "testsys/controlPlaneEndpoint".to_string() => control_plane_endpoint_ip,
-            "testsys/k8sVersion".to_string() => k8s_version
+            "testsys/k8sVersion".to_string() => k8s_version,
+            "testsys/imageId".to_string() => kube_image_id,
         });
 
         // Check if the cluster already has a CRD
@@ -83,6 +96,7 @@ impl CrdCreator for MetalK8sCreator {
                     "testsys/type",
                     "testsys/controlPlaneEndpoint",
                     "testsys/k8sVersion",
+                    "testsys/imageId",
                 ],
             )
             .await?
@@ -152,7 +166,7 @@ impl CrdCreator for MetalK8sCreator {
                     .to_owned(),
             )
             .privileged(true)
-            .build(cluster_name)
+            .build(cluster_name + "-" + &cluster_input.crd_input.test_type.to_string())
             .context(error::BuildSnafu {
                 what: "metal K8s cluster CRD",
             })?;
