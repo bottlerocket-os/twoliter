@@ -307,7 +307,7 @@ pub(crate) async fn ec2_karpenter_crd<'a>(
         .region_template(cluster_name, "region")
         .subnet_ids_template(cluster_name, "publicSubnetIds")
         .endpoint_template(cluster_name, "endpoint")
-        .cluster_sg_template(cluster_name, "clustersharedSg")
+        .cluster_sg_template(cluster_name, "clusterSg")
         .device_mappings(device_mappings)
         .assume_role(bottlerocket_input.crd_input.config.agent_role.clone())
         .depends_on(cluster_name)
