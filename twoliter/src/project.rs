@@ -1,12 +1,17 @@
-use crate::docker::{ImageArchUri, DEFAULT_REGISTRY, DEFAULT_SDK_NAME, DEFAULT_SDK_VERSION};
+use crate::docker::ImageArchUri;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
 use log::{debug, trace};
+use non_empty_string::NonEmptyString;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+
+const DEFAULT_REGISTRY: &str = "public.ecr.aws/bottlerocket";
+const DEFAULT_SDK_NAME: &str = "bottlerocket-sdk";
+const DEFAULT_SDK_VERSION: &str = "v0.34.1";
 
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
@@ -24,14 +29,22 @@ pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<P
 }
 
 /// Represents the structure of a `Twoliter.toml` project file.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Project {
     #[serde(skip)]
     filepath: PathBuf,
     #[serde(skip)]
     project_dir: PathBuf,
-    pub(crate) schema_version: SchemaVersion<1>,
+
+    /// The version of this schema struct.
+    schema_version: SchemaVersion<1>,
+
+    /// The Bottlerocket SDK container image.
+    sdk: Option<ImageName>,
+
+    /// The Bottlerocket Toolchain container image.
+    toolchain: Option<ImageName>,
 }
 
 impl Project {
@@ -90,29 +103,61 @@ impl Project {
     pub(crate) fn project_dir(&self) -> PathBuf {
         self.project_dir.clone()
     }
-}
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) struct Sdk {
-    pub(crate) registry: Option<String>,
-    pub(crate) name: String,
-    pub(crate) version: String,
-}
+    pub(crate) fn sdk_name(&self) -> Option<&ImageName> {
+        self.sdk.as_ref()
+    }
 
-impl Default for Sdk {
-    fn default() -> Self {
-        Self {
-            registry: Some(DEFAULT_REGISTRY.to_string()),
-            name: DEFAULT_SDK_NAME.to_string(),
-            version: DEFAULT_SDK_VERSION.to_string(),
-        }
+    pub(crate) fn toolchain_name(&self) -> Option<&ImageName> {
+        self.toolchain.as_ref()
+    }
+
+    pub(crate) fn sdk(&self, arch: &str) -> Option<ImageArchUri> {
+        self.sdk_name().map(|s| s.uri(arch))
+    }
+
+    pub(crate) fn toolchain(&self, arch: &str) -> Option<ImageArchUri> {
+        self.toolchain_name().map(|s| s.uri(arch))
     }
 }
 
-impl Sdk {
-    pub(crate) fn uri<S: Into<String>>(&self, arch: S) -> ImageArchUri {
-        ImageArchUri::new(self.registry.clone(), &self.name, arch, &self.version)
+/// A base name for an image that can be suffixed using a naming convention. For example,
+/// `registry=public.ecr.aws/bottlerocket`, `name=bottlerocket`, `version=v0.50.0` can be suffixed
+/// via naming convention to produce:
+/// - `registry=public.ecr.aws/bottlerocket/bottlerocket-sdk-x86_64:v0.50.0`
+/// - `registry=public.ecr.aws/bottlerocket/bottlerocket-toolchain-aarch64:v0.50.0`
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct ImageName {
+    /// The registry, e.g. `public.ecr.aws/bottlerocket`. Optional because locally cached images may
+    /// not specify a registry.
+    pub(crate) registry: Option<NonEmptyString>,
+    /// The base name of the image that can be suffixed. For example `bottlerocket` can become
+    /// `bottlerocket-sdk` or `bottlerocket-toolchain`.
+    pub(crate) name: NonEmptyString,
+    /// The version tag, for example `v0.50.0`
+    pub(crate) version: NonEmptyString,
+}
+
+pub(crate) fn default_sdk() -> ImageName {
+    ImageName {
+        registry: Some(DEFAULT_REGISTRY.try_into().unwrap()),
+        name: DEFAULT_SDK_NAME.try_into().unwrap(),
+        version: DEFAULT_SDK_VERSION.try_into().unwrap(),
+    }
+}
+
+impl ImageName {
+    pub(crate) fn uri<S>(&self, arch: S) -> ImageArchUri
+    where
+        S: AsRef<str>,
+    {
+        ImageArchUri::new(
+            self.registry.as_ref().map(|s| s.to_string()),
+            self.name.clone(),
+            arch.as_ref(),
+            &self.version,
+        )
     }
 }
 
@@ -192,6 +237,23 @@ mod test {
 
         // Add checks here as desired to validate deserialization.
         assert_eq!(SchemaVersion::<1>::default(), deserialized.schema_version);
+        let sdk_name = deserialized.sdk_name().unwrap();
+        let toolchain_name = deserialized.toolchain_name().unwrap();
+        assert_eq!("a.com/b", sdk_name.registry.as_ref().unwrap().as_str());
+        assert_eq!(
+            "my-bottlerocket-sdk",
+            deserialized.sdk_name().unwrap().name.as_str()
+        );
+        assert_eq!("v1.2.3", deserialized.sdk_name().unwrap().version.as_str());
+        assert_eq!("c.co/d", toolchain_name.registry.as_ref().unwrap().as_str());
+        assert_eq!(
+            "toolchainz",
+            deserialized.toolchain_name().unwrap().name.as_str()
+        );
+        assert_eq!(
+            "v3.4.5",
+            deserialized.toolchain_name().unwrap().version.as_str()
+        );
     }
 
     /// Ensure that a `Twoliter.toml` cannot be serialized if the `schema_version` is incorrect.
@@ -221,5 +283,33 @@ mod test {
 
         // Ensure that the file we loaded was the one we expected to load.
         assert_eq!(project.filepath(), twoliter_toml_path);
+    }
+
+    #[test]
+    fn test_sdk_toolchain_uri() {
+        let project = Project {
+            filepath: Default::default(),
+            project_dir: Default::default(),
+            schema_version: Default::default(),
+            sdk: Some(ImageName {
+                registry: Some("example.com".try_into().unwrap()),
+                name: "foo-abc".try_into().unwrap(),
+                version: "version1".try_into().unwrap(),
+            }),
+            toolchain: Some(ImageName {
+                registry: Some("example.com".try_into().unwrap()),
+                name: "foo-def".try_into().unwrap(),
+                version: "version2".try_into().unwrap(),
+            }),
+        };
+
+        assert_eq!(
+            "example.com/foo-abc-x86_64:version1",
+            project.sdk("x86_64").unwrap().to_string()
+        );
+        assert_eq!(
+            "example.com/foo-def-aarch64:version2",
+            project.toolchain("aarch64").unwrap().to_string()
+        );
     }
 }

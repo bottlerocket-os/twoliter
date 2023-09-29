@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 /// Represents a docker image URI such as `public.ecr.aws/myregistry/myrepo:v0.1.0`. The registry is
 /// optional as it is when using `docker`. That is, it will be looked for locally first, then at
 /// `dockerhub.io` when the registry is absent.
@@ -71,15 +73,15 @@ impl ImageArchUri {
     /// Create a new `ImageArchUri`.
     pub(crate) fn new<S1, S2, S3>(registry: Option<String>, name: S1, arch: S2, tag: S3) -> Self
     where
-        S1: Into<String>,
-        S2: Into<String>,
-        S3: Into<String>,
+        S1: AsRef<str>,
+        S2: AsRef<str>,
+        S3: AsRef<str>,
     {
         Self {
             registry,
-            name: name.into(),
-            arch: arch.into(),
-            tag: tag.into(),
+            name: name.as_ref().into(),
+            arch: arch.as_ref().into(),
+            tag: tag.as_ref().into(),
         }
     }
 
@@ -90,6 +92,12 @@ impl ImageArchUri {
             None => format!("{}-{}:{}", self.name, self.arch, self.tag),
             Some(registry) => format!("{}/{}-{}:{}", registry, self.name, self.arch, self.tag),
         }
+    }
+}
+
+impl Display for ImageArchUri {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.uri(), f)
     }
 }
 

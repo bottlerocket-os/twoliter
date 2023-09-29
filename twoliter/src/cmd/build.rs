@@ -1,5 +1,5 @@
-use crate::docker;
-use crate::project::{Project, Sdk};
+use crate::project::Project;
+use crate::{docker, project};
 use anyhow::Result;
 use clap::Parser;
 use log::debug;
@@ -44,7 +44,7 @@ impl BuildVariant {
             Some(p) => Project::load(p).await?,
         };
         // TODO - get smart about sdk: https://github.com/bottlerocket-os/twoliter/issues/11
-        let sdk = Sdk::default();
+        let sdk = project::default_sdk();
         let _ = docker::create_twoliter_image_if_not_exists(&sdk.uri(&self.arch)).await?;
         Ok(())
     }
