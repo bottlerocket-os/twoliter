@@ -31,12 +31,6 @@ BUILDSYS_NAME = "bottlerocket"
 # If you're building a Bottlerocket remix, you'd want to set this to something like
 # "Bottlerocket Remix by ${CORP}" or "${CORP}'s Bottlerocket Remix"
 BUILDSYS_PRETTY_NAME = "Bottlerocket OS"
-# SDK name used for building
-BUILDSYS_SDK_NAME="bottlerocket"
-# SDK version used for building
-BUILDSYS_SDK_VERSION="v0.33.0"
-# Site for fetching the SDK
-BUILDSYS_REGISTRY="public.ecr.aws/bottlerocket"
 
 # These can be overridden with -e to change configuration for pubsys (`cargo
 # make repo`).  In addition, you can set RELEASE_START_TIME to determine when
@@ -142,11 +136,6 @@ TESTSYS_LOG_LEVEL = "info"
 # Certain variables are defined here to allow us to override a component value
 # on the command line.
 
-# Depends on ${BUILDSYS_ARCH}, ${BUILDSYS_REGISTRY}, ${BUILDSYS_SDK_NAME}, and
-# ${BUILDSYS_SDK_VERSION}.
-BUILDSYS_SDK_IMAGE = { script = [ "echo ${BUILDSYS_REGISTRY}/${BUILDSYS_SDK_NAME}-sdk-${BUILDSYS_ARCH}:${BUILDSYS_SDK_VERSION}" ] }
-BUILDSYS_TOOLCHAIN = { script = [ "echo ${BUILDSYS_REGISTRY}/${BUILDSYS_SDK_NAME}-toolchain-${BUILDSYS_ARCH}:${BUILDSYS_SDK_VERSION}" ] }
-
 # Depends on ${BUILDSYS_JOBS}.
 CARGO_MAKE_CARGO_LIMIT_JOBS = "--jobs ${BUILDSYS_JOBS}"
 CARGO_MAKE_CARGO_ARGS = "--offline --locked"
@@ -238,7 +227,17 @@ fi
 '''
 ] }
 
+# These are variables that are not meant to be set by users of `twoliter make`. These are intended
+# to be set only by Twoliter itself when it invokes `cargo make`.
+[env.private]
+# The URIs for the SDK image and the toolchain image must be provided.
+TLPRIVATE_SDK_IMAGE = ""
+TLPRIVATE_TOOLCHAIN = ""
+
+####################################################################################################
+
 [tasks.setup]
+script_runner = "bash"
 script = [
 '''
 # Ensure we use a supported architecture
@@ -253,6 +252,13 @@ esac
 # Ensure the tools directory has been set
 if [ -z "${TWOLITER_TOOLS_DIR}" ];then
    echo "TWOLITER_TOOLS_DIR must be defined and must be non-zero in length."
+   exit 1
+fi
+
+# Ensure TLPRIVATE_SDK_IMAGE and TLPRIVATE_TOOLCHAIN are set
+if [[ -z "${TLPRIVATE_SDK_IMAGE}" || -z "{TLPRIVATE_TOOLCHAIN}" ]];then
+   echo "TLPRIVATE_SDK_IMAGE and TLPRIVATE_TOOLCHAIN must be defined and must be non-zero in length."
+   echo "Are you using Twoliter? It is a bug if Twoliter has invoked cargo make without these."
    exit 1
 fi
 
@@ -290,9 +296,9 @@ dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
 '''
-if ! docker image inspect "${BUILDSYS_SDK_IMAGE}" >/dev/null 2>&1 ; then
-  if ! docker pull "${BUILDSYS_SDK_IMAGE}" ; then
-    echo "failed to pull '${BUILDSYS_SDK_IMAGE}'" >&2
+if ! docker image inspect "${TLPRIVATE_SDK_IMAGE}" >/dev/null 2>&1 ; then
+  if ! docker pull "${TLPRIVATE_SDK_IMAGE}" ; then
+    echo "failed to pull '${TLPRIVATE_SDK_IMAGE}'" >&2
     exit 1
   fi
 fi
@@ -304,7 +310,7 @@ dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
 '''
-if docker image inspect "${BUILDSYS_TOOLCHAIN}-${BUILDSYS_ARCH}" >/dev/null 2>&1 ; then
+if docker image inspect "${TLPRIVATE_TOOLCHAIN}-${BUILDSYS_ARCH}" >/dev/null 2>&1 ; then
   exit 0
 fi
 
@@ -315,14 +321,14 @@ esac
 
 # We want the image with the target's native toolchain, rather than one that matches the
 # host architecture.
-if ! docker pull --platform "${docker_arch}" "${BUILDSYS_TOOLCHAIN}" ; then
-  echo "could not pull '${BUILDSYS_TOOLCHAIN}' for ${docker_arch}" >&2
+if ! docker pull --platform "${docker_arch}" "${TLPRIVATE_TOOLCHAIN}" ; then
+  echo "could not pull '${TLPRIVATE_TOOLCHAIN}' for ${docker_arch}" >&2
   exit 1
 fi
 
 # Apply a tag to distinguish the image from other architectures.
-if ! docker tag "${BUILDSYS_TOOLCHAIN}" "${BUILDSYS_TOOLCHAIN}-${BUILDSYS_ARCH}" ; then
-  echo "could not tag '${BUILDSYS_TOOLCHAIN}-${BUILDSYS_ARCH}'" >&2
+if ! docker tag "${TLPRIVATE_TOOLCHAIN}" "${TLPRIVATE_TOOLCHAIN}-${BUILDSYS_ARCH}" ; then
+  echo "could not tag '${TLPRIVATE_TOOLCHAIN}-${BUILDSYS_ARCH}'" >&2
   exit 1
 fi
 '''
@@ -350,7 +356,7 @@ go_fetch() {
   module="${1:?}"
   ${TWOLITER_TOOLS_DIR}/docker-go \
     --module-path "${BUILDSYS_SOURCES_DIR}/${module}" \
-    --sdk-image ${BUILDSYS_SDK_IMAGE} \
+    --sdk-image ${TLPRIVATE_SDK_IMAGE} \
     --go-mod-cache ${GO_MOD_CACHE} \
     --command "go list -mod=readonly ./... >/dev/null && go mod vendor"
 }
@@ -379,7 +385,7 @@ test_go_module() {
   module="${1:?}"
   ${TWOLITER_TOOLS_DIR}/docker-go \
     --module-path "${BUILDSYS_SOURCES_DIR}/${module}" \
-    --sdk-image ${BUILDSYS_SDK_IMAGE} \
+    --sdk-image ${TLPRIVATE_SDK_IMAGE} \
     --go-mod-cache ${GO_MOD_CACHE} \
     --command "cd cmd/$module; go test -v"
 }
@@ -410,7 +416,7 @@ go_fmt() {
   module="${1:?}"
   ${TWOLITER_TOOLS_DIR}/docker-go \
     --module-path "${BUILDSYS_SOURCES_DIR}/${module}" \
-    --sdk-image ${BUILDSYS_SDK_IMAGE} \
+    --sdk-image ${TLPRIVATE_SDK_IMAGE} \
     --go-mod-cache ${GO_MOD_CACHE} \
     --command "gofmt -l cmd/$module"
 }
@@ -429,7 +435,7 @@ if ! docker run --rm \
    -e CARGO_HOME="/tmp/.cargo" \
    -v "${CARGO_HOME}":/tmp/.cargo \
    -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
-   "${BUILDSYS_SDK_IMAGE}" \
+   "${TLPRIVATE_SDK_IMAGE}" \
    cargo fmt \
   --manifest-path /tmp/sources/Cargo.toml \
   --message-format short \
@@ -466,7 +472,7 @@ if ! docker run --rm \
    -v "${CARGO_HOME}":/tmp/.cargo \
    -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
    -e VARIANT \
-   "${BUILDSYS_SDK_IMAGE}" \
+   "${TLPRIVATE_SDK_IMAGE}" \
    cargo clippy \
   --manifest-path /tmp/sources/Cargo.toml \
   --locked -- -D warnings --no-deps; then
@@ -491,7 +497,7 @@ if ! docker run --rm \
   --user "$(id -u):$(id -g)" \
   --security-opt="label=disable" \
   -v "${BUILDSYS_TOOLS_DIR}":/tmp/tools \
-  "${BUILDSYS_SDK_IMAGE}" \
+  "${TLPRIVATE_SDK_IMAGE}" \
   bash -c \
     'flagged_scripts=0 && \
     cd /tmp/tools && \
@@ -657,7 +663,7 @@ echo "Generating local keys." >&2
 
 mkdir -p "${BUILDSYS_SBKEYS_PROFILE_DIR}"
 ${BUILDSYS_SBKEYS_DIR}/generate-local-sbkeys \
-  --sdk-image "${BUILDSYS_SDK_IMAGE}" \
+  --sdk-image "${TLPRIVATE_SDK_IMAGE}" \
   --output-dir "${BUILDSYS_SBKEYS_PROFILE_DIR}"
 '''
 ]
@@ -714,7 +720,7 @@ docker run --rm \
    --security-opt="label=disable" \
    -v "${BOOT_CONFIG_INPUT}":/tmp/bootconfig-input \
    -v "${boot_config}":/tmp/bootconfig.data \
-   "${BUILDSYS_SDK_IMAGE}" \
+   "${TLPRIVATE_SDK_IMAGE}" \
    bootconfig -a /tmp/bootconfig-input /tmp/bootconfig.data
 
 if [ -e "${boot_config_tmp}" ] ; then
@@ -734,7 +740,7 @@ docker run --rm \
    --user "$(id -u):$(id -g)" \
    --security-opt="label=disable" \
    -v "${BOOT_CONFIG}":/tmp/bootconfig.data \
-   "${BUILDSYS_SDK_IMAGE}" \
+   "${TLPRIVATE_SDK_IMAGE}" \
    bootconfig -l /tmp/bootconfig.data
 '''
 ]
@@ -816,7 +822,7 @@ docker run --rm \
   -e CARGO_HOME="/tmp/.cargo" \
   -v "${CARGO_HOME}":/tmp/.cargo \
   -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
-  "${BUILDSYS_SDK_IMAGE}" \
+  "${TLPRIVATE_SDK_IMAGE}" \
   bash -c "${run_cargo_deny}"
 [ "${?}" -eq 0 ] || [ "${BUILDSYS_ALLOW_FAILED_LICENSE_CHECK}" = "true" ]
 '''
@@ -854,7 +860,7 @@ docker run --rm \
   -v "${CARGO_HOME}":/tmp/.cargo \
   -v "${BUILDSYS_ROOT_DIR}/licenses:/tmp/licenses" \
   -v "${BUILDSYS_ROOT_DIR}/Licenses.toml:/tmp/Licenses.toml" \
-  "${BUILDSYS_SDK_IMAGE}" \
+  "${TLPRIVATE_SDK_IMAGE}" \
   bash -c "${run_fetch_licenses}"
 '''
 ]

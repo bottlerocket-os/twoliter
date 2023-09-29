@@ -7,6 +7,7 @@ the repository's top-level Dockerfile.
 pub(crate) mod error;
 use error::Result;
 
+use crate::constants::{SDK_VAR, TOOLCHAIN_VAR};
 use duct::cmd;
 use lazy_static::lazy_static;
 use nonzero_ext::nonzero;
@@ -283,8 +284,8 @@ fn build(
     let tag = format!("{}-{}", tag, token);
 
     // Our SDK and toolchain are picked by the external `cargo make` invocation.
-    let sdk = getenv("BUILDSYS_SDK_IMAGE")?;
-    let toolchain = getenv("BUILDSYS_TOOLCHAIN")?;
+    let sdk = getenv(SDK_VAR)?;
+    let toolchain = getenv(TOOLCHAIN_VAR)?;
 
     // Avoid using a cached layer from a previous build.
     let nocache = rand::thread_rng().gen::<u32>();
