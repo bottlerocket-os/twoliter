@@ -18,6 +18,7 @@ when the docker-go script is invoked.
 pub(crate) mod error;
 use error::Result;
 
+use crate::constants::SDK_VAR;
 use buildsys::manifest;
 use duct::cmd;
 use snafu::{ensure, OptionExt, ResultExt};
@@ -111,9 +112,7 @@ impl GoMod {
         );
 
         // Our SDK and toolchain are picked by the external `cargo make` invocation.
-        let sdk = env::var("BUILDSYS_SDK_IMAGE").context(error::EnvironmentSnafu {
-            var: "BUILDSYS_SDK_IMAGE",
-        })?;
+        let sdk = env::var(SDK_VAR).context(error::EnvironmentSnafu { var: SDK_VAR })?;
 
         let args = DockerGoArgs {
             module_path: package_dir,

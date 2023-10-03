@@ -1,7 +1,9 @@
 use crate::common::exec;
+use crate::docker::ImageArchUri;
 use crate::project;
+use crate::project::Project;
 use crate::tools::{install_tools, tools_tempdir};
-use anyhow::Result;
+use anyhow::{bail, ensure, Result};
 use clap::Parser;
 use log::trace;
 use std::path::PathBuf;
@@ -45,14 +47,34 @@ impl Make {
             project.project_dir().display().to_string(),
         ];
 
+        let mut arch = String::new();
+
         for (key, val) in std::env::vars() {
             if is_build_system_env(key.as_str()) {
                 trace!("Passing env var {} to cargo make", key);
                 args.push("-e".to_string());
                 args.push(format!("{}={}", key, val));
             }
+
+            // To avoid confusion, environment variables whose values have been moved to
+            // Twoliter.toml are expressly disallowed here.
+            check_for_disallowed_var(&key)?;
+
+            if key == "BUILDSYS_ARCH" {
+                arch = val.clone();
+            }
         }
 
+        ensure!(
+            !arch.is_empty(),
+            "It is required to pass a non-zero string as the value of environment variable \
+            'BUILDSYS_ARCH' when running twoliter make"
+        );
+
+        let (sdk, toolchain) = require_sdk(&project, &arch)?;
+
+        args.push(format!("-e=TLPRIVATE_SDK_IMAGE={}", sdk));
+        args.push(format!("-e=TLPRIVATE_TOOLCHAIN={}", toolchain));
         args.push(format!("-e=CARGO_HOME={}", self.cargo_home.display()));
         args.push(format!(
             "-e=TWOLITER_TOOLS_DIR={}",
@@ -86,6 +108,13 @@ const ENV_VARS: [&str; 12] = [
     "VMWARE_VM_NAME_DEFAULT",
 ];
 
+const DISALLOWED_SDK_VARS: [&str; 4] = [
+    "BUILDSYS_SDK_NAME",
+    "BUILDSYS_SDK_VERSION",
+    "BUILDSYS_REGISTRY",
+    "BUILDSYS_TOOLCHAIN",
+];
+
 /// Returns `true` if `key` is an environment variable that needs to be passed to `cargo make`.
 fn is_build_system_env(key: impl AsRef<str>) -> bool {
     let key = key.as_ref();
@@ -96,6 +125,26 @@ fn is_build_system_env(key: impl AsRef<str>) -> bool {
         || key.starts_with("BOOT_CONFIG")
         || key.starts_with("AWS_")
         || ENV_VARS.contains(&key)
+}
+
+fn check_for_disallowed_var(key: &str) -> Result<()> {
+    if DISALLOWED_SDK_VARS.contains(&key) {
+        bail!(
+            "The environment variable '{}' can no longer be used. Specify the SDK in Twoliter.toml",
+            key
+        )
+    }
+    Ok(())
+}
+
+fn require_sdk(project: &Project, arch: &str) -> Result<(ImageArchUri, ImageArchUri)> {
+    match (project.sdk(arch), project.toolchain(arch)) {
+        (Some(s), Some(t)) => Ok((s, t)),
+        _ => bail!(
+            "When using twoliter make, it is required that the SDK and toolchain be specified in \
+            Twoliter.toml"
+        ),
+    }
 }
 
 #[test]
@@ -112,4 +161,10 @@ fn test_is_build_system_env() {
     assert!(!is_build_system_env("PATH"));
     assert!(!is_build_system_env("HOME"));
     assert!(!is_build_system_env("COLORTERM"));
+}
+
+#[test]
+fn test_check_for_disallowed_var() {
+    assert!(check_for_disallowed_var("BUILDSYS_REGISTRY").is_err());
+    assert!(check_for_disallowed_var("BUILDSYS_PRETTY_NAME").is_ok());
 }

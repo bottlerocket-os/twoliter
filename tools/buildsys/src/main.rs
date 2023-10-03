@@ -10,6 +10,7 @@ The implementation is closely tied to the top-level Dockerfile.
 */
 mod builder;
 mod cache;
+mod constants;
 mod gomod;
 mod project;
 mod spec;

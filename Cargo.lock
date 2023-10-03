@@ -1021,6 +1021,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "082a24a9967533dc5d743c602157637116fc1b52806d694a5a45e6f32567fcdd"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "deranged"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1894,6 +1905,16 @@ name = "no-std-compat"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
+
+[[package]]
+name = "non-empty-string"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb438f1eb418cb32cdf63f67ce050d821354faaea45a0869f707a9eeaccaea7a"
+dependencies = [
+ "delegate",
+ "serde",
+]
 
 [[package]]
 name = "nonzero_ext"
@@ -3526,6 +3547,7 @@ dependencies = [
  "flate2",
  "hex",
  "log",
+ "non-empty-string",
  "pubsys",
  "pubsys-setup",
  "serde",
