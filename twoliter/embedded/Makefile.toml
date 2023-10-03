@@ -1573,7 +1573,7 @@ script = [
     '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} install
+    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} install
     '''
 ]
 
@@ -1591,7 +1591,7 @@ script = [
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
     # The ami that is selected from `amis.json` is determined by `TESTSYS_REGION` if set; otherwise,
     # it is the first region listed in `Infra.toml` (for aws variants).
-    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} run ${TESTSYS_TEST} \
+    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} run ${TESTSYS_TEST} \
       ${testsys_ami_input} \
       ${TESTSYS_AWS_SECRET_NAME:+--secret ${TESTSYS_AWS_SECRET_NAME}} \
       ${@}
@@ -1607,7 +1607,7 @@ script = [
     '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test ${@}
+    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test ${@}
     '''
 ]
 
@@ -1617,7 +1617,7 @@ script = [
     '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete ${@}
+    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete ${@}
     '''
 ]
 
@@ -1627,7 +1627,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} uninstall
+   testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} uninstall
    '''
 ]
 
@@ -1644,7 +1644,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   watch -- testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status --test ${@}
+   watch -- testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status --test ${@}
    '''
 ]
 
@@ -1656,7 +1656,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   watch -- testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status ${@}
+   watch -- testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status ${@}
    '''
 ]
 
@@ -1667,7 +1667,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} logs --test ${@}
+   testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} logs --test ${@}
    '''
 ]
 
@@ -1677,7 +1677,7 @@ script = [
    '''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys ${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} ${@}
+   testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} ${@}
    '''
 ]
 
