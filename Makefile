@@ -22,7 +22,7 @@ test:
 	cargo test --release --locked
 
 .PHONY: check
-check: fmt clippy test
+check: fmt clippy deny test
 
 .PHONY: build
 build: check
