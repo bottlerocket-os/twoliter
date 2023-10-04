@@ -89,8 +89,6 @@ skip = [
     { name = "socket2", version = "0.4" },
     # multiple deps are using an older version of syn
     { name = "syn", version = "1" },
-    # Testsys is using a feature of TOML 0.5 that has been removed in subsequent versions.
-    { name = "toml", version = "0.5" },
 
     # aws-sdk-rust is using an old version of rustls, hyper-rustls, and tokio-rustls
     { name = "rustls", version = "=0.20" },
