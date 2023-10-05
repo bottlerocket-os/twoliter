@@ -21,7 +21,7 @@ pub struct TestConfig {
     /// High level configuration for TestSys
     pub test: Option<Test>,
 
-    #[serde(flatten, serialize_with = "toml::ser::tables_last")]
+    #[serde(flatten)]
     /// Configuration for testing variants
     pub configs: HashMap<String, GenericConfig>,
 }
