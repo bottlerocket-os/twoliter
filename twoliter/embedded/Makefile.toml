@@ -1495,6 +1495,7 @@ dependencies = [
   "clean-images",
   "clean-repos",
   "clean-state",
+  "clean-tools",
 ]
 
 [tasks.clean-sources]
@@ -1542,6 +1543,16 @@ script_runner = "bash"
 script = [
 '''
 rm -rf ${BUILDSYS_STATE_DIR}
+'''
+]
+
+[tasks.clean-tools]
+script_runner = "bash"
+script = [
+'''
+if [ -n "${TWOLITER_TOOLS_DIR}" ] ; then
+  rm -rf "${TWOLITER_TOOLS_DIR}"
+fi
 '''
 ]
 
