@@ -101,6 +101,12 @@ impl Display for ImageArchUri {
     }
 }
 
+impl Into<String> for ImageArchUri {
+    fn into(self) -> String {
+        return self.to_string();
+    }
+}
+
 #[test]
 fn image_arch_uri_no_registry() {
     let uri = ImageArchUri::new(None, "my-sdk", "i386", "v0.33.1");

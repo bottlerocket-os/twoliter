@@ -1,0 +1,15 @@
+[repo.default]
+metadata_base_url = "https://d2evc20wfryw7s.cloudfront.net/"
+targets_url = "https://d2evc20wfryw7s.cloudfront.net/targets/"
+
+[aws]
+regions = ["us-west-2"]
+
+
+
+
+# [repo.default]
+# root_role_url = "https://cache.bottlerocket.aws/root.json"
+# root_role_sha512 = "b81af4d8eb86743539fbc4709d33ada7b118d9f929f0c2f6c04e1d41f46241ed80423666d169079d736ab79965b4dd25a5a6db5f01578b397496d49ce11a3aa2"
+# metadata_base_url = "https://updates.bottlerocket.aws/2020-07-07/"
+# targets_url = "https://updates.bottlerocket.aws/targets/"

@@ -15,14 +15,20 @@ BUILDSYS_IMAGES_DIR = "${BUILDSYS_BUILD_DIR}/images"
 BUILDSYS_TOOLS_DIR = "${BUILDSYS_ROOT_DIR}/tools"
 BUILDSYS_SOURCES_DIR = "${BUILDSYS_ROOT_DIR}/sources"
 BUILDSYS_SBKEYS_DIR = "${BUILDSYS_ROOT_DIR}/sbkeys"
-BUILDSYS_SBKEYS_PROFILE = { script = ['echo "${BUILDSYS_SBKEYS_PROFILE:-local}"'] }
+BUILDSYS_SBKEYS_PROFILE = { script = [
+   'echo "${BUILDSYS_SBKEYS_PROFILE:-local}"',
+] }
 BUILDSYS_TIMESTAMP = { script = ["date +%s"] }
-BUILDSYS_VERSION_BUILD = { script = ["git describe --always --dirty --exclude '*' || echo 00000000"] }
+BUILDSYS_VERSION_BUILD = { script = [
+   "git describe --always --dirty --exclude '*' || echo 00000000",
+] }
 # For now, release config path can't be overridden with -e, because it's used
 # later in this section.  You have to edit the path here in Makefile.toml to
 # use a different Release.toml.
 BUILDSYS_RELEASE_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Release.toml"
-BUILDSYS_VERSION_IMAGE = { script = ["awk -F '[ =\"]+' '$1 == \"version\" {print $2}' ${BUILDSYS_RELEASE_CONFIG_PATH}"] }
+BUILDSYS_VERSION_IMAGE = { script = [
+   "awk -F '[ =\"]+' '$1 == \"version\" {print $2}' ${BUILDSYS_RELEASE_CONFIG_PATH}",
+] }
 # This can be overridden with -e to build a different variant from the variants/ directory
 BUILDSYS_VARIANT = { script = ['echo "${BUILDSYS_VARIANT:-aws-k8s-1.24}"'] }
 # Product name used for file and directory naming
@@ -89,7 +95,7 @@ BUILDSYS_ALLOW_FAILED_LICENSE_CHECK = "false"
 
 # Disallow pulling licenses from Upstream URLs. To fetch licenses from the upstream source,
 # override this on the command line and set it to 'true'
-BUILDSYS_UPSTREAM_LICENSE_FETCH= "false"
+BUILDSYS_UPSTREAM_LICENSE_FETCH = "false"
 
 # This controls how many `docker build` commands we'll invoke at once.
 BUILDSYS_JOBS = "8"
@@ -124,9 +130,13 @@ TESTSYS_TEST = "quick"
 # The default path to the testsys cluster's kubeconfig file. This is used for all testsys calls.
 CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH = "${BUILDSYS_ROOT_DIR}/testsys.kubeconfig"
 # The last released version of bottlerocket.
-TESTSYS_STARTING_VERSION = { script = ["git tag --list --sort=version:refname 'v*' | tail -1"] }
+TESTSYS_STARTING_VERSION = { script = [
+   "git tag --list --sort=version:refname 'v*' | tail -1",
+] }
 # The commit for the last release of bottlerocket.
-TESTSYS_STARTING_COMMIT = { script = ["git describe --tag ${TESTSYS_STARTING_VERSION} --always --exclude '*' || echo 00000000"] }
+TESTSYS_STARTING_COMMIT = { script = [
+   "git describe --tag ${TESTSYS_STARTING_VERSION} --always --exclude '*' || echo 00000000",
+] }
 TESTSYS_TESTS_DIR = "${BUILDSYS_ROOT_DIR}/tests"
 TESTSYS_TEST_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Test.toml"
 
@@ -144,11 +154,11 @@ CARGO_MAKE_CARGO_ARGS = "--offline --locked"
 BUILDSYS_OUTPUT_DIR = "${BUILDSYS_IMAGES_DIR}/${BUILDSYS_ARCH}-${BUILDSYS_VARIANT}"
 
 # Depends on a number of variables defined above, and each other.
-BUILDSYS_VERSION_FULL="${BUILDSYS_VERSION_IMAGE}-${BUILDSYS_VERSION_BUILD}"
+BUILDSYS_VERSION_FULL = "${BUILDSYS_VERSION_IMAGE}-${BUILDSYS_VERSION_BUILD}"
 # These names are used as prefixes for build and repo steps.
-BUILDSYS_NAME_VARIANT="${BUILDSYS_NAME}-${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}"
-BUILDSYS_NAME_VERSION="${BUILDSYS_NAME}-${BUILDSYS_VERSION_FULL}"
-BUILDSYS_NAME_FULL="${BUILDSYS_NAME_VARIANT}-${BUILDSYS_VERSION_FULL}"
+BUILDSYS_NAME_VARIANT = "${BUILDSYS_NAME}-${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}"
+BUILDSYS_NAME_VERSION = "${BUILDSYS_NAME}-${BUILDSYS_VERSION_FULL}"
+BUILDSYS_NAME_FULL = "${BUILDSYS_NAME_VARIANT}-${BUILDSYS_VERSION_FULL}"
 # This name does not include the build short SHA
 BUILDSYS_NAME_FRIENDLY = "${BUILDSYS_NAME_VARIANT}-v${BUILDSYS_VERSION_IMAGE}"
 
@@ -187,8 +197,8 @@ BOOT_CONFIG = "${BUILDSYS_ROOT_DIR}/bootconfig.data"
 
 # Determines the kubeconfig that should be used by testsys. If no kubeconfig was provided and the
 # default kubeconfig location does not exist, use the users default kubeconfig.
-CARGO_MAKE_TESTSYS_KUBECONFIG_ARG = {script = [
-'''
+CARGO_MAKE_TESTSYS_KUBECONFIG_ARG = { script = [
+   '''
 if ! [ -n "${TESTSYS_KUBECONFIG}" ] && [ -s "${TESTSYS_TESTS_DIR}/testsys.kubeconfig" ] && [ -s "${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}" ];then
    echo "No kubeconfig was specified and a kubeconfig was found in 2 possible locations: '${TESTSYS_TESTS_DIR}/testsys.kubeconfig' and '${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}'"
    exit 1
@@ -203,14 +213,14 @@ elif [ -s "${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}" ]; then
    # If the default kubeconfig exists it should be used.
    echo "--kubeconfig ${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}"
 fi
-'''
-]}
+''',
+] }
 
 # Args that will be passed into all testsys invocations.
 CARGO_MAKE_TESTSYS_ARGS = "${CARGO_MAKE_TESTSYS_KUBECONFIG_ARG}"
 
 TESTSYS_TEST_CONFIG_PATH = { script = [
-'''
+   '''
 if [ -s "${TESTSYS_TEST_CONFIG_PATH}" ] && [ -s "${TESTSYS_TESTS_DIR}/Test.toml" ];then
    echo "There can only be 1 config file. 2 config files were found: '${TESTSYS_TEST_CONFIG_PATH}' and '${TESTSYS_TESTS_DIR}/Test.toml'"
    exit 1
@@ -224,7 +234,7 @@ elif [ -s "${TESTSYS_TESTS_DIR}/Test.toml" ]; then
 else
    echo "${TESTSYS_TEST_CONFIG_PATH}"
 fi
-'''
+''',
 ] }
 
 # These are variables that are not meant to be set by users of `twoliter make`. These are intended
@@ -239,7 +249,7 @@ TLPRIVATE_TOOLCHAIN = ""
 [tasks.setup]
 script_runner = "bash"
 script = [
-'''
+   '''
 # Ensure we use a supported architecture
 case "${BUILDSYS_ARCH}" in
    x86_64|aarch64) ;;
@@ -267,49 +277,45 @@ mkdir -p ${BUILDSYS_OUTPUT_DIR}
 mkdir -p ${BUILDSYS_PACKAGES_DIR}
 mkdir -p ${BUILDSYS_STATE_DIR}
 mkdir -p ${GO_MOD_CACHE}
-'''
+''',
 ]
 
 [tasks.setup-build]
 dependencies = ["setup"]
-script = [
-'''
+script = ['''
 for cmd in docker gzip lz4; do
   if ! command -v ${cmd} >/dev/null 2>&1 ; then
     echo "required program '${cmd}' not found" >&2
     exit 1
   fi
 done
-'''
-]
+''']
 
 [tasks.fetch]
 dependencies = [
-  "fetch-sdk",
-  "fetch-toolchain",
-  "fetch-sources",
-  "fetch-vendored",
+   "fetch-sdk",
+   "fetch-toolchain",
+   "fetch-sources",
+   "fetch-vendored",
 ]
 
 [tasks.fetch-sdk]
 dependencies = ["setup-build"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 if ! docker image inspect "${TLPRIVATE_SDK_IMAGE}" >/dev/null 2>&1 ; then
   if ! docker pull "${TLPRIVATE_SDK_IMAGE}" ; then
     echo "failed to pull '${TLPRIVATE_SDK_IMAGE}'" >&2
     exit 1
   fi
 fi
-'''
-]
+''']
 
 [tasks.fetch-toolchain]
 dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
-'''
+   '''
 if docker image inspect "${TLPRIVATE_TOOLCHAIN}-${BUILDSYS_ARCH}" >/dev/null 2>&1 ; then
   exit 0
 fi
@@ -331,46 +337,41 @@ if ! docker tag "${TLPRIVATE_TOOLCHAIN}" "${TLPRIVATE_TOOLCHAIN}-${BUILDSYS_ARCH
   echo "could not tag '${TLPRIVATE_TOOLCHAIN}-${BUILDSYS_ARCH}'" >&2
   exit 1
 fi
-'''
+''',
 ]
 
 [tasks.fetch-sources]
 dependencies = ["setup"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 for ws in sources variants; do
   [ -d "${ws}" ] || continue
   cargo fetch --locked --manifest-path ${ws}/Cargo.toml
 done
 chmod -R o+r ${CARGO_HOME}
-'''
-]
+''']
 
 [tasks.fetch-vendored]
 dependencies = ["fetch-sdk"]
-script = [
-'''
+script = ['''
 go_fetch() {
   local module
   module="${1:?}"
+  echo $module
   ${TWOLITER_TOOLS_DIR}/docker-go \
     --module-path "${BUILDSYS_SOURCES_DIR}/${module}" \
     --sdk-image ${TLPRIVATE_SDK_IMAGE} \
     --go-mod-cache ${GO_MOD_CACHE} \
     --command "go list -mod=readonly ./... >/dev/null && go mod vendor"
 }
-
 for m in ${GO_MODULES}; do
   go_fetch ${m}
 done
-'''
-]
+''']
 
 [tasks.unit-tests]
 dependencies = ["fetch-sdk", "fetch-sources", "fetch-vendored"]
-script = [
-'''
+script = ['''
 export VARIANT="${BUILDSYS_VARIANT}"
 
 cargo test \
@@ -393,8 +394,7 @@ test_go_module() {
 for m in ${GO_MODULES}; do
   test_go_module ${m}
 done
-'''
-]
+''']
 
 # A top level target for devs to ensure review and patch readiness
 [tasks.check]
@@ -408,7 +408,7 @@ dependencies = [
 
 [tasks.check-fmt]
 script = [
-'''
+   '''
 rc=0
 # For golang first-party source code
 go_fmt() {
@@ -448,19 +448,15 @@ if [ "${rc}" -ne 0 ]; then
   echo "Found unformatted source files listed above. First-party source code is checked with gofmt and rustfmt." >&2
   exit $rc
 fi
-'''
+''',
 ]
 
 [tasks.check-lints]
-dependencies = [
-   "check-clippy",
-   "check-shell",
-   "check-golangci-lint",
-]
+dependencies = ["check-clippy", "check-shell", "check-golangci-lint"]
 
 [tasks.check-clippy]
 script = [
-'''
+   '''
 rc=0
 
 export VARIANT="${BUILDSYS_VARIANT}"
@@ -483,12 +479,12 @@ if [ "${rc}" -ne 0 ]; then
   echo "Found lint warnings. First-party source code is checked with clippy." >&2
   exit $rc
 fi
-'''
+''',
 ]
 
 [tasks.check-shell]
 script = [
-'''
+   '''
 rc=0
 
 # For bash first-party shell code
@@ -521,12 +517,11 @@ if [ "${rc}" -ne 0 ]; then
   echo "Found lint warnings. First-party shell code is checked with ShellCheck." >&2
   exit $rc
 fi
-'''
+''',
 ]
 
 [tasks.check-golangci-lint]
-script = [
-'''
+script = ['''
 top_path=$(pwd)
 config_path="${top_path}/.golangci.yaml"
 
@@ -540,13 +535,12 @@ for m in ${GO_MODULES}; do
         golangci/golangci-lint \
         golangci-lint run --config "${config_path}"
     cd "${top_path}"
-done'''
-]
+done''']
 
 [tasks.check-migrations]
 script_runner = "bash"
 script = [
-'''
+   '''
 # Collect all found problems and report in bulk; patterns become easier to see
 problems=()
 
@@ -619,14 +613,13 @@ if [[ ${#problems[@]} -gt 0 ]]; then
     printf "    - %s\n" "${problems[@]}"
     exit 1
 fi
-'''
+''',
 ]
 
 [tasks.build-sbkeys]
 dependencies = ["fetch"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 # Check the profile for all files needed for Secure Boot signing.
 profile="${BUILDSYS_SBKEYS_PROFILE_DIR}"
 
@@ -665,15 +658,14 @@ mkdir -p "${BUILDSYS_SBKEYS_PROFILE_DIR}"
 ${BUILDSYS_SBKEYS_DIR}/generate-local-sbkeys \
   --sdk-image "${TLPRIVATE_SDK_IMAGE}" \
   --output-dir "${BUILDSYS_SBKEYS_PROFILE_DIR}"
-'''
-]
+''']
 
 # We need Cargo version 1.51 or higher in order to build a workspace's
 # dependency during build-package
 [tasks.check-cargo-version]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -euo pipefail
 cargo_version=$(cargo --version | awk '{print $2}')
 strarr=(${cargo_version//./ })
@@ -687,14 +679,14 @@ if [ "${cargo_minor}" -lt "51" ] ; then
   echo "Error: Cargo 1.51.0 or greater is required, your version is ${cargo_version}" >&2
   exit 1
 fi
-'''
+''',
 ]
 
 [tasks.boot-config]
 dependencies = ["fetch-sdk"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -euo pipefail
 
 if [ ! -s "${BOOT_CONFIG_INPUT}" ]; then
@@ -727,14 +719,13 @@ if [ -e "${boot_config_tmp}" ] ; then
    mv "${boot_config_tmp}" "${BOOT_CONFIG}"
 fi
 echo "Boot configuration initrd may be found at ${BOOT_CONFIG}"
-'''
+''',
 ]
 
 [tasks.validate-boot-config]
 dependencies = ["fetch-sdk"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 docker run --rm \
    --network=none \
    --user "$(id -u):$(id -g)" \
@@ -742,15 +733,18 @@ docker run --rm \
    -v "${BOOT_CONFIG}":/tmp/bootconfig.data \
    "${TLPRIVATE_SDK_IMAGE}" \
    bootconfig -l /tmp/bootconfig.data
-'''
-]
+''']
 
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
-dependencies = ["check-cargo-version", "fetch-sdk", "publish-setup", "fetch-licenses"]
+dependencies = [
+   "check-cargo-version",
+   "fetch-sdk",
+   "publish-setup",
+   "fetch-licenses",
+]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 set -e
 if [ -z "${PACKAGE}" ]; then
     echo "The PACKAGE environment variable must be set. For example:"
@@ -777,13 +771,11 @@ cargo build \
   ${CARGO_MAKE_CARGO_LIMIT_JOBS} \
   --manifest-path "variants/Cargo.toml" \
   --package "${PACKAGE}"
-'''
-]
+''']
 
 [tasks.build-variant]
 dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup"]
-script = [
-'''
+script = ['''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
 # Parse the variant into its components and set additional variables.
@@ -804,13 +796,12 @@ cargo build \
   ${CARGO_MAKE_CARGO_LIMIT_JOBS} \
   --manifest-path variants/${BUILDSYS_VARIANT}/Cargo.toml
 ln -snf "${BUILDSYS_VERSION_FULL}" "${BUILDSYS_OUTPUT_DIR}/latest"
-'''
-]
+''']
 
 [tasks.check-licenses]
 dependencies = ["fetch"]
 script = [
-'''
+   '''
 run_cargo_deny="
 (cd /tmp/sources && cargo deny --all-features check --disable-fetch licenses bans sources)
 "
@@ -825,13 +816,13 @@ docker run --rm \
   "${TLPRIVATE_SDK_IMAGE}" \
   bash -c "${run_cargo_deny}"
 [ "${?}" -eq 0 ] || [ "${BUILDSYS_ALLOW_FAILED_LICENSE_CHECK}" = "true" ]
-'''
+''',
 ]
 
 [tasks.fetch-licenses]
 dependencies = ["fetch"]
 script = [
-'''
+   '''
 if [ "${BUILDSYS_UPSTREAM_LICENSE_FETCH}" = "false" ]; then
   echo "Skipping fetching licenses"
   exit 0
@@ -862,19 +853,14 @@ docker run --rm \
   -v "${BUILDSYS_ROOT_DIR}/Licenses.toml:/tmp/Licenses.toml" \
   "${TLPRIVATE_SDK_IMAGE}" \
   bash -c "${run_fetch_licenses}"
-'''
+''',
 ]
 
 [tasks.build]
-dependencies = [
-    "check-licenses",
-    "fetch-licenses",
-    "build-variant",
-]
+dependencies = ["check-licenses", "fetch-licenses", "build-variant"]
 
 [tasks.publish-setup]
-script = [
-'''
+script = ['''
 set -e
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
@@ -889,8 +875,7 @@ pubsys-setup \
    --default-key-path "${PUBLISH_REPO_KEY}" \
    --repo "${PUBLISH_REPO}" \
    ${ALLOW_MISSING_KEY_ARG}
-'''
-]
+''']
 
 [tasks.publish-setup-without-key]
 env = { "ALLOW_MISSING_KEY" = "true" }
@@ -906,7 +891,7 @@ run_task = "publish-setup"
 dependencies = ["publish-setup", "fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 cleanup() {
@@ -996,14 +981,13 @@ pubsys \
    --outdir "${PUBLISH_REPO_OUTPUT_DIR}"
 
 ln -sfn "${PUBLISH_REPO_OUTPUT_DIR##*/}" "${PUBLISH_REPO_OUTPUT_DIR%/*}/latest"
-'''
+''',
 ]
 
 [tasks.validate-repo]
 dependencies = ["publish-setup-without-key", "fetch-sources"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1024,14 +1008,12 @@ pubsys \
    \
    --root-role-path "${PUBLISH_REPO_ROOT_JSON}" \
    ${REPO_VALIDATE_TARGETS_ARG}
-'''
-]
+''']
 
 [tasks.check-repo-expirations]
 dependencies = ["publish-setup-without-key", "fetch-sources"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1048,14 +1030,12 @@ pubsys \
    \
    --root-role-path "${PUBLISH_REPO_ROOT_JSON}" \
    --expiration-limit "${REPO_METADATA_EXPIRING_WITHIN}"
-'''
-]
+''']
 
 [tasks.refresh-repo]
 dependencies = ["publish-setup", "fetch-sources"]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1079,8 +1059,7 @@ pubsys \
    --repo-expiration-policy-path "${PUBLISH_EXPIRATION_POLICY_PATH}" \
    ${REPO_UNSAFE_REFRESH_ARG} \
    --outdir "${PUBLISH_REPO_OUTPUT_DIR}"
-'''
-]
+''']
 
 [tasks.ami]
 # Rather than depend on "build", which currently rebuilds images each run, we
@@ -1089,7 +1068,7 @@ pubsys \
 dependencies = ["setup-build", "fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1152,7 +1131,7 @@ pubsys \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
 
 ln -snf "${ami_output##*/}" "${ami_output_latest}"
-'''
+''',
 ]
 
 [tasks.ami-public]
@@ -1162,7 +1141,7 @@ ln -snf "${ami_output##*/}" "${ami_output_latest}"
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1183,7 +1162,7 @@ pubsys \
    \
    --ami-input "${ami_input}" \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
-'''
+''',
 ]
 
 [tasks.ami-private]
@@ -1193,7 +1172,7 @@ pubsys \
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1214,7 +1193,7 @@ pubsys \
    \
    --ami-input "${ami_input}" \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
-'''
+''',
 ]
 
 [tasks.grant-ami]
@@ -1224,7 +1203,7 @@ pubsys \
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1253,7 +1232,7 @@ pubsys \
    \
    --ami-input "${ami_input}" \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
-'''
+''',
 ]
 
 [tasks.revoke-ami]
@@ -1263,7 +1242,7 @@ pubsys \
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1292,7 +1271,7 @@ pubsys \
    \
    --ami-input "${ami_input}" \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
-'''
+''',
 ]
 
 [tasks.validate-ami]
@@ -1302,7 +1281,7 @@ pubsys \
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1323,7 +1302,7 @@ pubsys \
    \
    ${AMI_VALIDATION_RESULTS_FILTER:+--write-results-filter "${AMI_VALIDATION_RESULTS_FILTER}"} \
    ${AMI_VALIDATION_RESULTS_PATH:+--write-results-path "${AMI_VALIDATION_RESULTS_PATH}"}
-'''
+''',
 ]
 
 [tasks.ssm]
@@ -1333,7 +1312,7 @@ pubsys \
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1361,14 +1340,14 @@ pubsys \
    \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"} \
    ${ALLOW_CLOBBER:+--allow-clobber}
-'''
+''',
 ]
 
 [tasks.promote-ssm]
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1396,7 +1375,7 @@ pubsys \
    --ssm-parameter-output "${ssm_parameter_output}" \
    \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
-'''
+''',
 ]
 
 [tasks.validate-ssm]
@@ -1406,7 +1385,7 @@ pubsys \
 dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1427,7 +1406,7 @@ pubsys \
    \
    ${SSM_VALIDATION_RESULTS_FILTER:+--write-results-filter "${SSM_VALIDATION_RESULTS_FILTER}"} \
    ${SSM_VALIDATION_RESULTS_PATH:+--write-results-path "${SSM_VALIDATION_RESULTS_PATH}"}
-'''
+''',
 ]
 
 [tasks._upload-ova-base]
@@ -1438,7 +1417,7 @@ pubsys \
 dependencies = ["setup-build", "fetch-sources"]
 script_runner = "bash"
 script = [
-'''
+   '''
 set -e
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -1464,7 +1443,7 @@ pubsys \
    ${MARK_OVA_AS_TEMPLATE:+--mark-as-template} \
    \
    ${VMWARE_DATACENTERS:+--datacenters "${VMWARE_DATACENTERS}"}
-'''
+''',
 ]
 
 # This task runs `_upload-ova-base` which will upload the OVA and *not* mark it
@@ -1483,67 +1462,54 @@ extend = "_upload-ova-base"
 
 [tasks.clean]
 dependencies = [
-  "clean-sources",
-  "clean-packages",
-  "clean-images",
-  "clean-repos",
-  "clean-state",
+   "clean-sources",
+   "clean-packages",
+   "clean-images",
+   "clean-repos",
+   "clean-state",
 ]
 
 [tasks.clean-sources]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 for ws in sources; do
   [ -d "${ws}" ] || continue
   cargo clean --manifest-path ${ws}/Cargo.toml
 done
 rm -f ${BUILDSYS_TOOLS_DIR}/bin/*
-'''
-]
+''']
 
 [tasks.clean-packages]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 for ws in variants; do
   [ -d "${ws}" ] || continue
   cargo clean --manifest-path ${ws}/Cargo.toml
 done
 rm -rf ${BUILDSYS_PACKAGES_DIR}
-'''
-]
+''']
 
 [tasks.clean-images]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 rm -rf ${BUILDSYS_IMAGES_DIR}
-'''
-]
+''']
 
 [tasks.clean-repos]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 rm -rf ${PUBLISH_REPO_BASE_DIR}
-'''
-]
+''']
 
 [tasks.clean-state]
 script_runner = "bash"
-script = [
-'''
+script = ['''
 rm -rf ${BUILDSYS_STATE_DIR}
-'''
-]
+''']
 
 # Deletes cached code used for Bottlerocket builds
 [tasks.purge-cache]
-dependencies = [
-  "purge-go-vendor",
-  "purge-cargo",
-]
+dependencies = ["purge-go-vendor", "purge-cargo"]
 
 # This task will delete vendored Go code, primarily, the Go module cache.
 # The Go module cache is intentionally readonly and does not have writable
@@ -1552,36 +1518,30 @@ dependencies = [
 # See for more context: https://github.com/golang/go/issues/27455
 [tasks.purge-go-vendor]
 script_runner = "bash"
-script = [
-    '''
+script = ['''
     chmod -R 755 ${GO_MOD_CACHE}
     rm -rf ${GO_MOD_CACHE}
-    '''
-]
+    ''']
 
 # This task will remove all the cached Rust code found in the cargo home dir
 [tasks.purge-cargo]
 script_runner = "bash"
-script = [
-    '''
+script = ['''
     rm -rf ${CARGO_HOME}
-    '''
-]
+    ''']
 
 [tasks.setup-test]
-script = [
-    '''
+script = ['''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
     testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} install
-    '''
-]
+    ''']
 
 # This task is used to test bottlerocket build artifacts. By default the region first listed in Infra.toml
 # is used for testing; however, `TESTSYS_REGION` can be used to test in a different region.
 [tasks.test]
 script = [
-    '''
+   '''
     set -eu
     ami_input="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-${AMI_DATA_FILE_SUFFIX}"
     testsys_ami_input=""
@@ -1595,7 +1555,7 @@ script = [
       ${testsys_ami_input} \
       ${TESTSYS_AWS_SECRET_NAME:+--secret ${TESTSYS_AWS_SECRET_NAME}} \
       ${@}
-    '''
+    ''',
 ]
 
 # This task will clear all tests from the testsys cluster.
@@ -1604,36 +1564,34 @@ script = [
 # To delete all incomplete tests use `cargo make clean-test --running`
 [tasks.clean-test]
 script = [
-    '''
+   '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
     testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test ${@}
-    '''
+    ''',
 ]
 
 # This task will clear all tests and resources from the testsys cluster.
 [tasks.reset-test]
 script = [
-    '''
+   '''
     set -eu
     export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
     testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete ${@}
-    '''
+    ''',
 ]
 
 # This task will clear all testsys components from the testsys cluster.
 [tasks.uninstall-test]
-script = [
-   '''
+script = ['''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} uninstall
-   '''
-]
+   ''']
 
 # This task will clear all testsys components from the testsys cluster.
 [tasks.purge-test]
-dependencies = ["reset-test","uninstall-test"]
+dependencies = ["reset-test", "uninstall-test"]
 
 # This task will call watch on the `status` testsys command to show the results of all tests.
 # To see all passed tests use `cargo make watch-test --passed`
@@ -1645,7 +1603,7 @@ script = [
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
    watch -- testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status --test ${@}
-   '''
+   ''',
 ]
 
 # This task will call watch on the `status` testsys command to show the results of all tests and
@@ -1657,7 +1615,7 @@ script = [
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
    watch -- testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status ${@}
-   '''
+   ''',
 ]
 
 # This task will retrieve testsys logs from a test. You can add `--follow` to continue to receive
@@ -1668,18 +1626,16 @@ script = [
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} logs --test ${@}
-   '''
+   ''',
 ]
 
 # This task is useful for using the current tree's testsys without symlinks
 [tasks.testsys]
-script = [
-   '''
+script = ['''
    set -eu
    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} ${@}
-   '''
-]
+   ''']
 
 [tasks.default]
 alias = "build"

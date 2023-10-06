@@ -2,16 +2,15 @@
 resolver = "2"
 
 members = [
-    "tools/bottlerocket-variant",
-    "tools/buildsys",
-    "tools/parse-datetime",
-    "tools/pubsys",
-    "tools/pubsys-config",
-    "tools/pubsys-setup",
-    "tools/testsys",
-    "tools/testsys-config",
-    "tools/update-metadata",
-    "twoliter",
+    "bottlerocket-variant",
+    "buildsys",
+    "parse-datetime",
+    "pubsys",
+    "pubsys-config",
+    "pubsys-setup",
+    "testsys",
+    "testsys-config",
+    "update-metadata",
 ]
 
 [profile.release]

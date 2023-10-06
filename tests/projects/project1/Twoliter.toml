@@ -1,0 +1,11 @@
+schema-version = 1
+
+[sdk]
+registry = "twoliter.alpha"
+name = "bottlerocket-sdk"
+version = "latest"
+
+[toolchain]
+registry = "public.ecr.aws/bottlerocket"
+name = "bottlerocket-toolchain"
+version = "v0.34.1"

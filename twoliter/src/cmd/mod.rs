@@ -1,10 +1,12 @@
 mod build;
 mod debug;
 mod make;
+mod publish;
 
 use self::build::BuildCommand;
-use crate::cmd::debug::DebugAction;
-use crate::cmd::make::Make;
+use self::debug::DebugAction;
+use self::make::Make;
+use self::publish::PublishCommand;
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
@@ -32,6 +34,10 @@ pub(crate) enum Subcommand {
     #[clap(subcommand)]
     Build(BuildCommand),
 
+    /// Publish something, such as a Bottlerocket image or a kit of packages.
+    #[clap(subcommand)]
+    Publish(PublishCommand),
+
     Make(Make),
 
     /// Commands that are used for checking and troubleshooting Twoliter's internals.
@@ -43,6 +49,7 @@ pub(crate) enum Subcommand {
 pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
         Subcommand::Build(build_command) => build_command.run().await,
+        Subcommand::Publish(publish_command) => publish_command.run().await,
         Subcommand::Make(make_args) => make_args.run().await,
         Subcommand::Debug(debug_action) => debug_action.run().await,
     }

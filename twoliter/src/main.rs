@@ -7,6 +7,7 @@ mod common;
 mod docker;
 mod project;
 mod tools;
+mod cargo_make;
 
 /// Test code that should only be compiled when running tests.
 #[cfg(test)]
