@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 /// optional as it is when using `docker`. That is, it will be looked for locally first, then at
 /// `dockerhub.io` when the registry is absent.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[allow(unused)]
 pub(crate) struct ImageUri {
     /// e.g. public.ecr.aws/bottlerocket
     registry: Option<String>,
@@ -15,6 +16,7 @@ pub(crate) struct ImageUri {
 
 impl ImageUri {
     /// Create a new `ImageUri`.
+    #[allow(unused)]
     pub(crate) fn new<S1, S2>(registry: Option<String>, repo: S1, tag: S2) -> Self
     where
         S1: Into<String>,
@@ -28,6 +30,7 @@ impl ImageUri {
     }
 
     /// Returns the `ImageUri` for use with docker, e.g. `public.ecr.aws/myregistry/myrepo:v0.1.0`
+    #[allow(unused)]
     pub(crate) fn uri(&self) -> String {
         match &self.registry {
             None => format!("{}:{}", self.repo, self.tag),
