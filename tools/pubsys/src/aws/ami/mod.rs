@@ -85,7 +85,9 @@ pub(crate) async fn run(args: &Args, ami_args: &AmiArgs) -> Result<()> {
         Ok(amis) => {
             // Write the AMI IDs to file if requested
             if let Some(ref path) = ami_args.ami_output {
-                write_amis(path, &amis).context(error::WriteAmisSnafu { path })?;
+                write_amis(path, &amis)
+                    .await
+                    .context(error::WriteAmisSnafu { path })?;
             }
             Ok(())
         }

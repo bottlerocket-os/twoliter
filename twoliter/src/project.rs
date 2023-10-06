@@ -232,7 +232,7 @@ mod test {
         let deserialized = Project::load(path).await.unwrap();
 
         // Add checks here as desired to validate deserialization.
-        assert_eq!(SchemaVersion::<1>::default(), deserialized.schema_version);
+        assert_eq!(SchemaVersion::<1>, deserialized.schema_version);
         let sdk_name = deserialized.sdk_name().unwrap();
         let toolchain_name = deserialized.toolchain_name().unwrap();
         assert_eq!("a.com/b", sdk_name.registry.as_ref().unwrap().as_str());

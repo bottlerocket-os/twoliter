@@ -2,7 +2,7 @@
 //! checking the metadata expirations of a given TUF repository.
 
 use crate::repo::{error as repo_error, repo_urls};
-use crate::Args;
+use crate::{repo, Args};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use log::{error, info, trace, warn};
@@ -10,7 +10,6 @@ use parse_datetime::parse_datetime;
 use pubsys_config::InfraConfig;
 use snafu::{OptionExt, ResultExt};
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::PathBuf;
 use tough::{ExpirationEnforcement, Repository, RepositoryLoader};
 use url::Url;
@@ -73,7 +72,7 @@ fn find_upcoming_metadata_expiration(
     expirations
 }
 
-fn check_expirations(
+async fn check_expirations(
     root_role_path: &PathBuf,
     metadata_url: &Url,
     targets_url: &Url,
@@ -81,15 +80,14 @@ fn check_expirations(
 ) -> Result<()> {
     // Load the repository
     let repo = RepositoryLoader::new(
-        File::open(root_role_path).context(repo_error::FileSnafu {
-            path: root_role_path,
-        })?,
+        &repo::root_bytes(root_role_path).await?,
         metadata_url.clone(),
         targets_url.clone(),
     )
     // We're gonna check the expiration ourselves
     .expiration_enforcement(ExpirationEnforcement::Unsafe)
     .load()
+    .await
     .context(repo_error::RepoLoadSnafu {
         metadata_base_url: metadata_url.clone(),
     })?;
@@ -128,7 +126,7 @@ fn check_expirations(
 }
 
 /// Common entrypoint from main()
-pub(crate) fn run(args: &Args, check_expirations_args: &CheckExpirationsArgs) -> Result<()> {
+pub(crate) async fn run(args: &Args, check_expirations_args: &CheckExpirationsArgs) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(repo_error::ConfigSnafu)?;
@@ -157,7 +155,8 @@ pub(crate) fn run(args: &Args, check_expirations_args: &CheckExpirationsArgs) ->
         &repo_urls.0,
         repo_urls.1,
         check_expirations_args.expiration_limit,
-    )?;
+    )
+    .await?;
 
     Ok(())
 }

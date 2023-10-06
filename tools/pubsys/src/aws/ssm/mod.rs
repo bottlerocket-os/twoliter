@@ -119,6 +119,7 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
         ssm_args.template_path.display()
     );
     let template_parameters = template::get_parameters(&ssm_args.template_path, &build_context)
+        .await
         .context(error::FindTemplatesSnafu)?;
 
     if template_parameters.parameters.is_empty() {

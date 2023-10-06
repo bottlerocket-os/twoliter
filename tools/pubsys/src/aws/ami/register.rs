@@ -8,6 +8,7 @@ use buildsys::manifest::{self, ImageFeature};
 use coldsnap::{SnapshotUploader, SnapshotWaiter};
 use log::{debug, info, warn};
 use snafu::{ensure, OptionExt, ResultExt};
+use tokio::fs;
 
 const ROOT_DEVICE_NAME: &str = "/dev/xvda";
 const DATA_DEVICE_NAME: &str = "/dev/xvdb";
@@ -48,9 +49,11 @@ async fn _register_image(
     let (os_volume_size, data_volume_size) = image_layout.publish_image_sizes_gib();
 
     let uefi_data =
-        std::fs::read_to_string(&ami_args.uefi_data).context(error::LoadUefiDataSnafu {
-            path: &ami_args.uefi_data,
-        })?;
+        fs::read_to_string(&ami_args.uefi_data)
+            .await
+            .context(error::LoadUefiDataSnafu {
+                path: &ami_args.uefi_data,
+            })?;
 
     debug!("Uploading images into EBS snapshots in {}", region);
     let uploader = SnapshotUploader::new(ebs_client);

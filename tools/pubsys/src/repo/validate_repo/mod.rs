@@ -2,16 +2,15 @@
 //! a given TUF repository by attempting to load the repository and download its targets.
 
 use crate::repo::{error as repo_error, repo_urls};
-use crate::Args;
+use crate::{read_stream, repo, Args};
 use clap::Parser;
+use futures::{stream, StreamExt};
 use log::{info, trace};
 use pubsys_config::InfraConfig;
 use snafu::{OptionExt, ResultExt};
-use std::cmp::min;
-use std::fs::File;
-use std::io;
+use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use tokio::io;
 use tough::{Repository, RepositoryLoader, TargetName};
 use url::Url;
 
@@ -42,48 +41,25 @@ pub(crate) struct ValidateRepoArgs {
 /// downloads to this arbitrarily chosen maximum.
 const MAX_DOWNLOAD_THREADS: usize = 16;
 
-/// Retrieves listed targets and attempts to download them for validation purposes. We use a Rayon
-/// thread pool instead of tokio for async execution because `reqwest::blocking` creates a tokio
-/// runtime (and multiple tokio runtimes are not supported).
-fn retrieve_targets(repo: &Repository) -> Result<(), Error> {
-    let targets = &repo.targets().signed.targets;
-    let thread_pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(min(num_cpus::get(), MAX_DOWNLOAD_THREADS))
-        .build()
-        .context(error::ThreadPoolSnafu)?;
-
-    // create the channels through which our download results will be passed
-    let (tx, rx) = mpsc::channel();
-
-    for target in targets.keys() {
-        let repo = repo.clone();
-        let tx = tx.clone();
-        info!("Downloading target: {}", target.raw());
-        let target = target.clone();
-        thread_pool.spawn(move || {
-            tx.send(download_targets(&repo, target))
-                // inability to send on this channel is unrecoverable
-                .unwrap();
-        });
+/// Retrieves listed targets and attempts to download them for validation purposes.
+async fn retrieve_targets(repo: &Repository) -> Result<(), Error> {
+    let targets = repo.targets().signed.targets.clone();
+    let download_futures = stream::iter(
+        targets
+            .keys()
+            .map(|target_name| download_target(repo.clone(), target_name.clone())),
+    );
+    let mut buffered = download_futures.buffer_unordered(MAX_DOWNLOAD_THREADS);
+    while let Some(result) = buffered.next().await {
+        let _ = result?;
     }
-    // close all senders
-    drop(tx);
-
-    // block and await all downloads
-    let results: Vec<Result<u64, error::Error>> = rx.into_iter().collect();
-
-    // check all results and return the first error we see
-    for result in results {
-        result?;
-    }
-
-    // no errors were found, the targets are validated
     Ok(())
 }
 
-fn download_targets(repo: &Repository, target: TargetName) -> Result<u64, Error> {
-    let mut reader = match repo.read_target(&target) {
-        Ok(Some(reader)) => reader,
+async fn download_target(repo: Repository, target: TargetName) -> Result<u64, Error> {
+    info!("Downloading target: {}", target.raw());
+    let stream = match repo.read_target(&target).await {
+        Ok(Some(stream)) => stream,
         Ok(None) => {
             return error::TargetMissingSnafu {
                 target: target.raw(),
@@ -96,13 +72,16 @@ fn download_targets(repo: &Repository, target: TargetName) -> Result<u64, Error>
             })
         }
     };
+    let mut bytes = Cursor::new(read_stream(stream).await.context(error::StreamSnafu)?);
     // tough's `Read` implementation validates the target as it's being downloaded
-    io::copy(&mut reader, &mut io::sink()).context(error::TargetDownloadSnafu {
-        target: target.raw(),
-    })
+    io::copy(&mut bytes, &mut io::sink())
+        .await
+        .context(error::TargetDownloadSnafu {
+            target: target.raw(),
+        })
 }
 
-fn validate_repo(
+async fn validate_repo(
     root_role_path: &PathBuf,
     metadata_url: Url,
     targets_url: &Url,
@@ -110,27 +89,26 @@ fn validate_repo(
 ) -> Result<(), Error> {
     // Load the repository
     let repo = RepositoryLoader::new(
-        File::open(root_role_path).context(repo_error::FileSnafu {
-            path: root_role_path,
-        })?,
+        &repo::root_bytes(root_role_path).await?,
         metadata_url.clone(),
         targets_url.clone(),
     )
     .load()
+    .await
     .context(repo_error::RepoLoadSnafu {
         metadata_base_url: metadata_url.clone(),
     })?;
     info!("Loaded TUF repo: {}", metadata_url);
     if validate_targets {
         // Try retrieving listed targets
-        retrieve_targets(&repo)?;
+        retrieve_targets(&repo).await?;
     }
 
     Ok(())
 }
 
 /// Common entrypoint from main()
-pub(crate) fn run(args: &Args, validate_repo_args: &ValidateRepoArgs) -> Result<(), Error> {
+pub(crate) async fn run(args: &Args, validate_repo_args: &ValidateRepoArgs) -> Result<(), Error> {
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(repo_error::ConfigSnafu)?;
@@ -160,6 +138,7 @@ pub(crate) fn run(args: &Args, validate_repo_args: &ValidateRepoArgs) -> Result<
         repo_urls.1,
         validate_repo_args.validate_targets,
     )
+    .await
 }
 
 mod error {
@@ -169,6 +148,9 @@ mod error {
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(crate) enum Error {
+        #[snafu(display("Error running async code: {}", source))]
+        Async { source: std::io::Error },
+
         #[snafu(display("Invalid percentage specified: {} is greater than 100", percentage))]
         InvalidPercentage { percentage: u8 },
 
@@ -178,8 +160,17 @@ mod error {
             source: Box<crate::repo::Error>,
         },
 
+        #[snafu(display("Error parallelizing download tasks: {}", source))]
+        Semaphore { source: tokio::sync::AcquireError },
+
+        #[snafu(display("Error reading bytes from stream: {}", source))]
+        Stream { source: tough::error::Error },
+
         #[snafu(display("Failed to download and write target '{}': {}", target, source))]
         TargetDownload { target: String, source: io::Error },
+
+        #[snafu(display("Failed to complete download task: {}", source))]
+        Join { source: tokio::task::JoinError },
 
         #[snafu(display("Missing target: {}", target))]
         TargetMissing { target: String },
@@ -190,9 +181,6 @@ mod error {
             #[snafu(source(from(tough::error::Error, Box::new)))]
             source: Box<tough::error::Error>,
         },
-
-        #[snafu(display("Unable to create thread pool: {}", source))]
-        ThreadPool { source: rayon::ThreadPoolBuildError },
     }
 }
 pub(crate) use error::Error;

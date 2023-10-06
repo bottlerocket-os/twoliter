@@ -69,22 +69,18 @@ skip = [
     { name = "base64" },
     # several dependencies are using an old version of bitflags
     { name = "bitflags", version = "=1.3" },
-    # tuftool is using an older version of clap
-    { name = "clap", version = "3" },
-    { name = "clap_derive", version = "3" },
-    { name = "clap_lex", version = "0.2" },
     # several dependencies are using an old version of serde_yaml
     { name = "serde_yaml", version = "=0.8" },
     # aws-sdk-rust is using an old version of fastrand
     { name = "fastrand", version = "=1.9" },
     # multiple deps are using an older version of hashbrown
     { name = "hashbrown", version = "=0.12" },
-    # tuftool is using an old clap (v3) which is using old hermit-abi
-    { name = "hermit-abi", version = "0.1" },
     # multiple deps are using an older version of indexmap
     { name = "indexmap", version = "1" },
     # kube-client uses an old version of redox_syscall
     { name = "redox_syscall", version = "=0.2" },
+    # kube-client uses an older version of pem
+    { name = "pem", version = "=1" },
     # hyper and tokio are using different versions of socket2
     { name = "socket2", version = "0.4" },
     # multiple deps are using an older version of syn

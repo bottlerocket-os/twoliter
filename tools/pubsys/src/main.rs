@@ -26,15 +26,19 @@ mod aws;
 mod repo;
 mod vmware;
 
+use bytes::Bytes;
 use clap::Parser;
+use futures::Stream;
+use futures::TryStreamExt;
 use semver::Version;
 use simplelog::{CombinedLogger, Config as LogConfig, ConfigBuilder, LevelFilter, SimpleLogger};
 use snafu::ResultExt;
 use std::path::PathBuf;
-use std::process;
-use tokio::runtime::Runtime;
+use std::process::ExitCode;
+use std::result::Result as StdResult;
+use tough::error::Error as ToughError;
 
-fn run() -> Result<()> {
+async fn run() -> Result<()> {
     // Parse and store the args passed to the program
     let args = Args::parse();
 
@@ -72,75 +76,59 @@ fn run() -> Result<()> {
     }
 
     match args.subcommand {
-        SubCommands::Repo(ref repo_args) => repo::run(&args, repo_args).context(error::RepoSnafu),
+        SubCommands::Repo(ref repo_args) => {
+            repo::run(&args, repo_args).await.context(error::RepoSnafu)
+        }
         SubCommands::ValidateRepo(ref validate_repo_args) => {
-            repo::validate_repo::run(&args, validate_repo_args).context(error::ValidateRepoSnafu)
+            repo::validate_repo::run(&args, validate_repo_args)
+                .await
+                .context(error::ValidateRepoSnafu)
         }
         SubCommands::CheckRepoExpirations(ref check_expirations_args) => {
             repo::check_expirations::run(&args, check_expirations_args)
+                .await
                 .context(error::CheckExpirationsSnafu)
         }
         SubCommands::RefreshRepo(ref refresh_repo_args) => {
-            repo::refresh_repo::run(&args, refresh_repo_args).context(error::RefreshRepoSnafu)
+            repo::refresh_repo::run(&args, refresh_repo_args)
+                .await
+                .context(error::RefreshRepoSnafu)
         }
-        SubCommands::Ami(ref ami_args) => {
-            let rt = Runtime::new().context(error::RuntimeSnafu)?;
-            rt.block_on(async {
-                aws::ami::run(&args, ami_args)
-                    .await
-                    .context(error::AmiSnafu)
-            })
-        }
-        SubCommands::PublishAmi(ref publish_args) => {
-            let rt = Runtime::new().context(error::RuntimeSnafu)?;
-            rt.block_on(async {
-                aws::publish_ami::run(&args, publish_args)
-                    .await
-                    .context(error::PublishAmiSnafu)
-            })
-        }
-        SubCommands::Ssm(ref ssm_args) => {
-            let rt = Runtime::new().context(error::RuntimeSnafu)?;
-            rt.block_on(async {
-                aws::ssm::run(&args, ssm_args)
-                    .await
-                    .context(error::SsmSnafu)
-            })
-        }
-        SubCommands::PromoteSsm(ref promote_args) => {
-            let rt = Runtime::new().context(error::RuntimeSnafu)?;
-            rt.block_on(async {
-                aws::promote_ssm::run(&args, promote_args)
-                    .await
-                    .context(error::PromoteSsmSnafu)
-            })
-        }
+        SubCommands::Ami(ref ami_args) => aws::ami::run(&args, ami_args)
+            .await
+            .context(error::AmiSnafu),
+        SubCommands::PublishAmi(ref publish_args) => aws::publish_ami::run(&args, publish_args)
+            .await
+            .context(error::PublishAmiSnafu),
+        SubCommands::Ssm(ref ssm_args) => aws::ssm::run(&args, ssm_args)
+            .await
+            .context(error::SsmSnafu),
+        SubCommands::PromoteSsm(ref promote_args) => aws::promote_ssm::run(&args, promote_args)
+            .await
+            .context(error::PromoteSsmSnafu),
         SubCommands::ValidateSsm(ref validate_ssm_args) => {
-            let rt = Runtime::new().context(error::RuntimeSnafu)?;
-            rt.block_on(async {
-                aws::validate_ssm::run(&args, validate_ssm_args)
-                    .await
-                    .context(error::ValidateSsmSnafu)
-            })
+            aws::validate_ssm::run(&args, validate_ssm_args)
+                .await
+                .context(error::ValidateSsmSnafu)
         }
         SubCommands::ValidateAmi(ref validate_ami_args) => {
-            let rt = Runtime::new().context(error::RuntimeSnafu)?;
-            rt.block_on(async {
-                aws::validate_ami::run(&args, validate_ami_args)
-                    .await
-                    .context(error::ValidateAmiSnafu)
-            })
+            aws::validate_ami::run(&args, validate_ami_args)
+                .await
+                .context(error::ValidateAmiSnafu)
         }
-        SubCommands::UploadOva(ref upload_args) => {
-            vmware::upload_ova::run(&args, upload_args).context(error::UploadOvaSnafu)
-        }
+        SubCommands::UploadOva(ref upload_args) => vmware::upload_ova::run(&args, upload_args)
+            .await
+            .context(error::UploadOvaSnafu),
     }
 }
 
-fn main() {
-    if let Err(e) = run() {
+#[tokio::main]
+async fn main() -> ExitCode {
+    if let Err(e) = run().await {
         eprintln!("{}", e);
-        process::exit(1);
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -188,6 +176,19 @@ pub(crate) fn friendly_version(
     Version::parse(version_str)
 }
 
+type BytesResult = StdResult<Bytes, ToughError>;
+
+pub(crate) async fn read_stream(
+    stream: impl Stream<Item = BytesResult> + Send,
+) -> StdResult<Vec<u8>, ToughError> {
+    stream
+        .try_fold(Vec::new(), |mut acc, bytes| {
+            acc.extend(bytes.as_ref());
+            std::future::ready(Ok(acc))
+        })
+        .await
+}
+
 mod error {
     use snafu::Snafu;
 
@@ -231,9 +232,6 @@ mod error {
         RefreshRepo {
             source: crate::repo::refresh_repo::Error,
         },
-
-        #[snafu(display("Failed to create async runtime: {}", source))]
-        Runtime { source: std::io::Error },
 
         #[snafu(display("Failed to update SSM: {}", source))]
         Ssm { source: crate::aws::ssm::Error },

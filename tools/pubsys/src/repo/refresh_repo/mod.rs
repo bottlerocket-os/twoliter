@@ -4,16 +4,15 @@
 use crate::repo::{
     error as repo_error, get_signing_key_source, repo_urls, set_expirations, set_versions,
 };
-use crate::Args;
+use crate::{repo, Args};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use lazy_static::lazy_static;
 use log::{info, trace};
 use pubsys_config::{InfraConfig, RepoExpirationPolicy};
 use snafu::{ensure, OptionExt, ResultExt};
-use std::fs;
-use std::fs::File;
 use std::path::{Path, PathBuf};
+use tokio::fs;
 use tough::editor::RepositoryEditor;
 use tough::key_source::{KeySource, LocalKeySource};
 use tough::{ExpirationEnforcement, RepositoryLoader};
@@ -59,7 +58,7 @@ pub(crate) struct RefreshRepoArgs {
     unsafe_refresh: bool,
 }
 
-fn refresh_repo(
+async fn refresh_repo(
     root_role_path: &PathBuf,
     metadata_out_dir: &PathBuf,
     metadata_url: &Url,
@@ -85,18 +84,18 @@ fn refresh_repo(
 
     // Load the repository and get the repo editor for it
     let repo = RepositoryLoader::new(
-        File::open(root_role_path).context(repo_error::FileSnafu {
-            path: root_role_path,
-        })?,
+        &repo::root_bytes(root_role_path).await?,
         metadata_url.clone(),
         targets_url.clone(),
     )
     .expiration_enforcement(expiration_enforcement)
     .load()
+    .await
     .context(repo_error::RepoLoadSnafu {
         metadata_base_url: metadata_url.clone(),
     })?;
     let mut repo_editor = RepositoryEditor::from_repo(root_role_path, repo)
+        .await
         .context(repo_error::EditorFromRepoSnafu)?;
     info!("Loaded TUF repo: {}", metadata_url);
 
@@ -109,15 +108,19 @@ fn refresh_repo(
     // Sign the repository
     let signed_repo = repo_editor
         .sign(&[key_source])
+        .await
         .context(repo_error::RepoSignSnafu)?;
 
     // Write out the metadata files for the repository
     info!("Writing repo metadata to: {}", metadata_out_dir.display());
-    fs::create_dir_all(metadata_out_dir).context(repo_error::CreateDirSnafu {
-        path: &metadata_out_dir,
-    })?;
+    fs::create_dir_all(metadata_out_dir)
+        .await
+        .context(repo_error::CreateDirSnafu {
+            path: &metadata_out_dir,
+        })?;
     signed_repo
         .write(metadata_out_dir)
+        .await
         .context(repo_error::RepoWriteSnafu {
             path: &metadata_out_dir,
         })?;
@@ -126,7 +129,7 @@ fn refresh_repo(
 }
 
 /// Common entrypoint from main()
-pub(crate) fn run(args: &Args, refresh_repo_args: &RefreshRepoArgs) -> Result<(), Error> {
+pub(crate) async fn run(args: &Args, refresh_repo_args: &RefreshRepoArgs) -> Result<(), Error> {
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(repo_error::ConfigSnafu)?;
@@ -189,7 +192,8 @@ pub(crate) fn run(args: &Args, refresh_repo_args: &RefreshRepoArgs) -> Result<()
         key_source,
         &expiration,
         refresh_repo_args.unsafe_refresh,
-    )?;
+    )
+    .await?;
 
     Ok(())
 }
