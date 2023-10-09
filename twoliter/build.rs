@@ -20,6 +20,7 @@ fn main() {
     let paths = Paths::new();
     println!("cargo:rerun-if-changed={}", paths.data_input_dir.display());
 
+    let _ = fs::remove_dir_all(&paths.prep_dir);
     fs::create_dir_all(&paths.prep_dir).expect(&format!(
         "Unable to create directory '{}'",
         paths.prep_dir.display()
