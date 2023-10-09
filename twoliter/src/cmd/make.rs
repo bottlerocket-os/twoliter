@@ -1,4 +1,4 @@
-use crate::common::exec;
+use crate::common::exec_log;
 use crate::docker::ImageArchUri;
 use crate::project;
 use crate::project::Project;
@@ -87,7 +87,7 @@ impl Make {
             args.push(cargo_make_arg.clone());
         }
 
-        exec(Command::new("cargo").args(args)).await
+        exec_log(Command::new("cargo").args(args)).await
     }
 }
 
