@@ -1,4 +1,4 @@
-use crate::common::exec;
+use crate::common::exec_log;
 use crate::docker::ImageUri;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -84,7 +84,7 @@ impl DockerBuild {
                 .map(|(k, v)| format!("--build-arg={}={}", k, v)),
         );
         args.push(self.context_dir.display().to_string());
-        exec(
+        exec_log(
             Command::new("docker")
                 .args(args)
                 .env("DOCKER_BUILDKIT", "1"),
