@@ -9,10 +9,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
-const DEFAULT_REGISTRY: &str = "public.ecr.aws/bottlerocket";
-const DEFAULT_SDK_NAME: &str = "bottlerocket-sdk";
-const DEFAULT_SDK_VERSION: &str = "v0.34.1";
-
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
 /// found (this is the same as `user_path` if provided).
@@ -137,14 +133,6 @@ pub(crate) struct ImageName {
     pub(crate) name: NonEmptyString,
     /// The version tag, for example `v0.50.0`
     pub(crate) version: NonEmptyString,
-}
-
-pub(crate) fn default_sdk() -> ImageName {
-    ImageName {
-        registry: Some(DEFAULT_REGISTRY.try_into().unwrap()),
-        name: DEFAULT_SDK_NAME.try_into().unwrap(),
-        version: DEFAULT_SDK_VERSION.try_into().unwrap(),
-    }
 }
 
 impl ImageName {
