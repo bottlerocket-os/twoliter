@@ -4,7 +4,7 @@ This directory and module are for tests, test data, and re-usable test code. Thi
 be compiled for `cfg(test)`, which is accomplished at its declaration in `main.rs`.
 
 !*/
-
+mod cargo_make;
 use std::path::PathBuf;
 
 /// Return the canonical path to the directory where we store test data.
