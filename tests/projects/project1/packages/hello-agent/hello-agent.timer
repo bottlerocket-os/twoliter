@@ -1,0 +1,19 @@
+[Unit]
+Description=Scheduled Hello-Agent Pings
+
+[Timer]
+# Don't run missed executions
+Persistent=false
+# Run 5 seconds after startup
+OnStartupSec=5
+# Run every 5 sec thereafter
+OnUnitActiveSec=5
+# Don't fire at exactly the same second across machines started together.
+RandomizedDelaySec=1
+# We don't want to extend the startup report too long after the requested time.
+AccuracySec=1
+# File describing job to execute
+Unit=hello-agent.service
+
+[Install]
+WantedBy=timers.target
