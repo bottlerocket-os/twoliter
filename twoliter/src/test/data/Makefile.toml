@@ -1,0 +1,41 @@
+[env]
+PRESET_ENV_VARIABLE = "set"
+
+[tasks.verify-twoliter-env]
+script_runner = "bash"
+script = ['''
+    if ! [[ -v TLPRIVATE_SDK_IMAGE ]]; then
+        echo "TLPRIVATE_SDK_IMAGE is not set"
+        exit 1
+    fi
+    if ! [[ -v TLPRIVATE_TOOLCHAIN ]]; then
+        echo "TLPRIVATE_TOOLCHAIN is not set"
+        exit 1
+    fi
+''']
+
+[tasks.verify-env-set-with-arg]
+script_runner = "bash"
+script = ['''
+    if ! [[ -v ${1} ]]; then
+        exit 1
+    fi
+''']
+
+[tasks.verify-env-value-with-arg]
+script_runner = "bash"
+script = ['''
+    if ! [ ${!1} = ${2} ]; then
+        echo "${!1} != ${2}"
+        exit 1
+    fi
+''']
+
+[tasks.verify-current-dir-with-arg]
+script_runner = "bash"
+script = ['''
+    if ! [ $(pwd) = ${1} ]; then
+        echo "$(pwd) != ${1}"
+        exit 1
+    fi
+''']

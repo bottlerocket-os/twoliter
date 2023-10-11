@@ -2,6 +2,7 @@ use crate::cmd::{init_logger, Args};
 use anyhow::Result;
 use clap::Parser;
 
+mod cargo_make;
 mod cmd;
 mod common;
 mod docker;
