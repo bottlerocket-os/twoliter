@@ -23,9 +23,12 @@ use project::ProjectInfo;
 use serde::Deserialize;
 use snafu::{ensure, ResultExt};
 use spec::SpecInfo;
+use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
 use std::process;
+
+const MANIFEST_FILE: &str = "Cargo.toml";
 
 mod error {
     use snafu::Snafu;
@@ -88,6 +91,7 @@ type Result<T> = std::result::Result<T, error::Error>;
 enum Command {
     BuildPackage,
     BuildVariant,
+    VariantPaths,
 }
 
 fn usage() -> ! {
@@ -98,7 +102,8 @@ USAGE:
 
 SUBCOMMANDS:
     build-package           Build RPMs from a spec file and sources.
-    build-variant           Build filesystem and disk images from RPMs."
+    build-variant           Build filesystem and disk images from RPMs.
+    variant-paths           Get a list of all source paths that contribute to a variant."
     );
     process::exit(1)
 }
@@ -121,17 +126,17 @@ fn run() -> Result<()> {
     match command {
         Command::BuildPackage => build_package()?,
         Command::BuildVariant => build_variant()?,
+        Command::VariantPaths => variant_paths()?,
     }
     Ok(())
 }
 
 fn build_package() -> Result<()> {
-    let manifest_file = "Cargo.toml";
-    println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={}", MANIFEST_FILE);
 
     let root_dir: PathBuf = getenv("BUILDSYS_ROOT_DIR")?.into();
     let variant = getenv("BUILDSYS_VARIANT")?;
-    let variant_manifest_path = root_dir.join("variants").join(variant).join(manifest_file);
+    let variant_manifest_path = root_dir.join("variants").join(variant).join(MANIFEST_FILE);
     let variant_manifest =
         ManifestInfo::new(variant_manifest_path).context(error::ManifestParseSnafu)?;
     supported_arch(&variant_manifest)?;
@@ -139,7 +144,7 @@ fn build_package() -> Result<()> {
 
     let manifest_dir: PathBuf = getenv("CARGO_MANIFEST_DIR")?.into();
     let manifest =
-        ManifestInfo::new(manifest_dir.join(manifest_file)).context(error::ManifestParseSnafu)?;
+        ManifestInfo::new(manifest_dir.join(MANIFEST_FILE)).context(error::ManifestParseSnafu)?;
     let package_features = manifest.package_features();
 
     // For any package feature specified in the package manifest, track the corresponding
@@ -242,11 +247,10 @@ fn build_package() -> Result<()> {
 
 fn build_variant() -> Result<()> {
     let manifest_dir: PathBuf = getenv("CARGO_MANIFEST_DIR")?.into();
-    let manifest_file = "Cargo.toml";
-    println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={}", MANIFEST_FILE);
 
     let manifest =
-        ManifestInfo::new(manifest_dir.join(manifest_file)).context(error::ManifestParseSnafu)?;
+        ManifestInfo::new(manifest_dir.join(MANIFEST_FILE)).context(error::ManifestParseSnafu)?;
 
     supported_arch(&manifest)?;
 
@@ -265,6 +269,104 @@ fn build_variant() -> Result<()> {
         .context(error::BuildAttemptSnafu)?;
     } else {
         println!("cargo:warning=No included packages in manifest. Skipping variant build.");
+    }
+
+    Ok(())
+}
+
+// Get all repo paths that make up the source directories for a given variant.
+// Expects BUIDLSYS_ROOT_DIR and BUILDSYS_VARIANT environment variables to be
+// set to know the path to the root of the repo and the variant to inspect.
+fn variant_paths() -> Result<()> {
+    let root_dir: PathBuf = getenv("BUILDSYS_ROOT_DIR")?.into();
+    let root_dir = root_dir.canonicalize().unwrap_or(root_dir);
+
+    let variant = getenv("BUILDSYS_VARIANT")?;
+    let manifest_dir = root_dir.join("variants").join(variant);
+
+    let manifest =
+        ManifestInfo::new(manifest_dir.join(MANIFEST_FILE)).context(error::ManifestParseSnafu)?;
+
+    let mut results: HashSet<PathBuf> = HashSet::new();
+
+    // manifest.included_packages gives the RPM package names, which doesn't always match with the local
+    // package directory name. We need to use the [*dependencies] sections to find the real packages.
+    results.insert(manifest_dir.clone());
+    let dependencies = manifest.local_dependency_paths(&manifest_dir);
+    let info = ProjectInfo::crawl(&dependencies).context(error::ProjectCrawlSnafu)?;
+    for f in info.files {
+        results.insert(f);
+    }
+
+    for dependency in dependencies {
+        if add_package_paths(&root_dir, &dependency, &mut results).is_err() {
+            eprintln!(
+                "Error reading package information from '{}'",
+                &dependency.display()
+            );
+        }
+    }
+
+    // Print out our collected paths
+    for path in results {
+        // Normalize the paths to be relative to the repo root
+        let clean_path = path.strip_prefix(&root_dir).unwrap_or(&path);
+        println!("{}", clean_path.display());
+    }
+
+    Ok(())
+}
+
+// Given a directory path that contains a Cargo.toml file, this inspects the package metadata to determine
+// what its dependencies are and adds any relevant paths to the `paths` collection.
+fn add_package_paths(
+    root_dir: &PathBuf,
+    package_dir: &PathBuf,
+    paths: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    let manifest_path = root_dir.join(package_dir).join(MANIFEST_FILE);
+    if !manifest_path.exists() {
+        // This is normal if it is a Go package or something similar, just add root path
+        paths.insert(root_dir.join(package_dir));
+        return Ok(());
+    }
+
+    let manifest = ManifestInfo::new(manifest_path).context(error::ManifestParseSnafu)?;
+
+    // Add our package dependencies
+    let dependencies = manifest.local_dependency_paths(package_dir);
+
+    let info = ProjectInfo::crawl(&dependencies).context(error::ProjectCrawlSnafu)?;
+    for f in info.files {
+        paths.insert(f);
+    }
+
+    for dependency in dependencies {
+        if add_package_paths(root_dir, &dependency, paths).is_err() {
+            eprintln!(
+                "Error reading package information from '{}'",
+                &dependency.display()
+            );
+        }
+    }
+
+    // Make sure we get any references to local sources
+    if let Some(sources) = manifest.source_groups().cloned() {
+        let mut source_paths = Vec::new();
+        for source in sources {
+            let source_path = root_dir.join("sources").join(source);
+            if add_package_paths(root_dir, &source_path, paths).is_err() {
+                eprintln!(
+                    "Error reading package information from '{}'",
+                    &source_path.display()
+                );
+            }
+            source_paths.push(source_path);
+        }
+        let info = ProjectInfo::crawl(&source_paths).context(error::ProjectCrawlSnafu)?;
+        for f in info.files {
+            paths.insert(f);
+        }
     }
 
     Ok(())
