@@ -98,7 +98,6 @@ Twoliter will understand how to start a Bottlerocket build using the OOTB user's
 It will inject these directories into the existing build system by setting existing and new `Makefile.toml` variables.
 
 Twoliter will eliminate the need for all build-host software other than `docker`.
-A bootstrapping container will be created on-the-fly, enhancing the SDK with Bottlerocket build tools and scripts needed to kick off and sustain a `cargo make` build command.
 
 ## Kits
 
@@ -273,29 +272,33 @@ These will not be available and need to be added to the Bottlerocket SDK:
 - RPM macros.
 - Bootconfig files.
 
-### Twoliter Container
+### Twoliter Tools
 
-Twoliter needs an environment that includes the build system tools in order to kick off builds.
-It will create this container on the fly by having all the required data embedded into its binary.
-(TODO - #6 for refinement.)
-It will use the SDK as a base-layer add the following items to it:
+The existing build system relies on certain binaries, scripts and static files, such as
+
 - buildsys, pubsys, testsys, etc.
-- Scripts accessed by cargo make, such as `docker-go`.
-- `Makefile.toml`
+- rpm2img, Dockerfile, and Makefile.toml
+
+These tools and files will be embedded into the Twoliter binary and  installed on-the-fly when Twoliter runs.
+The binaries will be built and embedded using the unstable Cargo feature [bindeps].
+This means a nightly build of Cargo and Rust will be needed.
+We can pin the project to a specific toolchain using `rust-toolchain.toml` and we can introduce the `bindeps` feature using `.cargo/config.toml`.
+
+[bindeps]: https://rust-lang.github.io/rfcs/3028-cargo-binary-dependencies.html
 
 ### Enhanced SDK
 
 Certain scripts used during the Bottlerocket build system are tightly coupled to the operation of twoliter.
 These will be moved out of the Bottlerocket monorepo and into the twoliter git repository.
 Before using the SDK, these scripts will need to be copied into it.
-(TODO - this is challenging. These need to be either mountable from the host, or exist in the SDK, they cannot exist in the Twoliter container. There are a few options here, TBD.)
-- `rpm2img`
-- `rpm2kmodkit`
-- `partyplanner`.
+These will be copied as part of the build system's main Dockerfile.
 
 ### Docker Domain Socket
 
-Twoliter will mount the host's docker socket (i.e. `/var/run/docker.sock`).
+Depending on how we choose to eliminate the requirement of Cargo and `cargo make` on the host,
+we may choose to invoke `cargo make` from within a container.
+If this is the case, we will need to mount the host's docker domain socket (i.e. `/var/run/docker.sock`) because the build involves additional `docker` commands that need to run on the host.
+
 This means that `docker` commands inside the Twoliter container environment will be interacting with the host's daemon.
 This presents certain challenges because directories need to be mounted from "within" this container.
 In particular:
@@ -582,3 +585,21 @@ This will require passing all `-e BUILDSYS_SOMETHING=foo` variables to the `twol
 Getting the Bottlerocket build cut-over to using `twoliter make` is the first milestone of the Twoliter project.
 
 `*` Another option is to use rewrite Bottlerocket's `Makefile.toml` to explicitly call `twoliter make` in each of its targets.
+
+## Twoliter Alpha
+
+Once Bottlerocket's build system has been moved to Twoliter, we want to introduce the ability to create variants sooner rather than later.
+The introduction of kits into the build is complicated and needs to be done thoughtfully.
+Rather than rush the development of kits, we want to introduce a `twoliter build variant` command that does not require kits.
+We call this Twoliter Alpha, and it can be thought of as a minimum viable product.
+Ideally the interface of the `twoliter build variant` command will not change much once kits are introduced.
+Project structure will change once kits are introduced and backward compatibility with Twoliter Alpha is not likely.
+Thus, Alpha should be used for development and experimentation, not production.
+
+In order to build Bottlerocket with kits, we need access to the built packages from a Bottlerocket build.
+This will be accomplished by building Bottlerocket and copying RPMs into the SDK.
+Twoliter will require this package-enhanced SDK, called the Twoliter Alpha SDK, to build a variant.
+
+The project structure will look similar to that of the Bottlerocket main project.
+The variant's Cargo.toml will refer to packages that are expected to exist from the Bottlerocket main project.
+Custom packages can be added to that list, if they are defined in the project.
