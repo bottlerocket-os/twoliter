@@ -238,7 +238,6 @@ INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<< "${INVENTORY_DATA}" | jq '{"Co
 printf "%s\n" "${INVENTORY_DATA}" > "${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
 # install licenses
-install -p -m 0644 /host/{COPYRIGHT,LICENSE-APACHE,LICENSE-MIT} "${ROOT_MOUNT}"/usr/share/licenses/
 mksquashfs \
   "${ROOT_MOUNT}"/usr/share/licenses \
   "${ROOT_MOUNT}"/usr/share/bottlerocket/licenses.squashfs \
