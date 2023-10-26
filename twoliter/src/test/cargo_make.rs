@@ -7,7 +7,7 @@ async fn test_cargo_make() {
     let cargo_make = CargoMake::new(&project, "arch")
         .unwrap()
         .makefile(data_dir().join("Makefile.toml"));
-    cargo_make._exec("verify-twoliter-env").await.unwrap();
+    cargo_make.exec("verify-twoliter-env").await.unwrap();
     cargo_make
         .clone()
         .env("FOO", "bar")

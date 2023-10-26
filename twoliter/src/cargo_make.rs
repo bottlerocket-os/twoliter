@@ -128,7 +128,7 @@ impl CargoMake {
     }
 
     /// Execute the `cargo make` task
-    pub(crate) async fn _exec<S>(&self, task: S) -> Result<()>
+    pub(crate) async fn exec<S>(&self, task: S) -> Result<()>
     where
         S: Into<String>,
     {
