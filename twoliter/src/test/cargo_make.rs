@@ -29,23 +29,4 @@ async fn test_cargo_make() {
         )
         .await
         .unwrap();
-    cargo_make
-        .clone()
-        ._arg("--env")
-        ._arg("FOO=bar")
-        .exec_with_args("verify-env-value-with-arg", ["FOO", "bar"])
-        .await
-        .unwrap();
-    cargo_make
-        .clone()
-        ._args(["--env", "FOO=bar"])
-        .exec_with_args("verify-env-value-with-arg", ["FOO", "bar"])
-        .await
-        .unwrap();
-    cargo_make
-        .clone()
-        ._envs([("FOO", "bar"), ("BAR", "baz")])
-        .exec_with_args("verify-env-value-with-arg", ["BAR", "baz"])
-        .await
-        .unwrap();
 }

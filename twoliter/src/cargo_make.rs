@@ -94,39 +94,6 @@ impl CargoMake {
         self
     }
 
-    /// Specify environment variables that should be applied for this comand
-    pub(crate) fn _envs<S1, S2, V>(mut self, env_vars: V) -> Self
-    where
-        S1: Into<String>,
-        S2: Into<String>,
-        V: Into<Vec<(S1, S2)>>,
-    {
-        for (key, value) in env_vars.into() {
-            self.args
-                .push(format!("-e={}={}", key.into(), value.into()));
-        }
-        self
-    }
-
-    /// Specify `cargo make` arguments that should be applied for this comand
-    pub(crate) fn _arg<S>(mut self, arg: S) -> Self
-    where
-        S: Into<String>,
-    {
-        self.args.push(arg.into());
-        self
-    }
-
-    /// Specify `cargo make` arguments that should be applied for this comand
-    pub(crate) fn _args<V, S>(mut self, args: V) -> Self
-    where
-        S: Into<String>,
-        V: Into<Vec<S>>,
-    {
-        self.args.extend(args.into().into_iter().map(Into::into));
-        self
-    }
-
     /// Execute the `cargo make` task
     pub(crate) async fn exec<S>(&self, task: S) -> Result<()>
     where
