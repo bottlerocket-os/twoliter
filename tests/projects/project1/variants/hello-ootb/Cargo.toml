@@ -1,0 +1,49 @@
+[package]
+name = "hello-ootb"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+# Don't rebuild crate just because of changes to README.
+exclude = ["README.md"]
+
+[package.metadata.build-variant.image-features]
+grub-set-private-var = true
+unified-cgroup-hierarchy = true
+uefi-secure-boot = true
+xfs-data-partition = true
+systemd-networkd = true
+
+[package.metadata.build-variant]
+included-packages = [
+    # core
+    "release",
+    "kernel-6.1",
+    # docker
+    "docker-cli",
+    "docker-engine",
+    "docker-init",
+    "docker-proxy",
+    # tools
+    "login",
+    "iputils",
+    "strace",
+    "chrony-tools",
+    #other
+    "hello-agent",
+    "hello-go",
+]
+kernel-parameters = [
+    "console=tty0",
+    "console=ttyS0,115200n8",
+    "net.ifnames=0",
+    "netdog.default-interface=eth0:dhcp4,dhcp6?",
+    "quiet",
+]
+
+[lib]
+path = "../variants.rs"
+
+[build-dependencies]
+hello-agent = { path = "../../packages/hello-agent" }
+hello-go = { path = "../../packages/hello-go" }

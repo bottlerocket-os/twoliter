@@ -1,0 +1,9 @@
+[Unit]
+Description=Send a hello-go Ping
+
+[Service]
+Type=oneshot
+RemainAfterExit=false
+StandardError=journal+console
+ExecStart=/usr/bin/hello-go
+TimeoutStartSec=30s
