@@ -41,6 +41,7 @@ pub(crate) struct BuildVariant {
 impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
+        let token = project.token();
         let tempdir = tools_tempdir()?;
         install_tools(&tempdir).await?;
         let makefile_path = tempdir.path().join("Makefile.toml");
@@ -51,7 +52,7 @@ impl BuildVariant {
         fs::create_dir_all(&packages_dir)?;
 
         let sdk_container = DockerContainer::new(
-            "sdk",
+            format!("sdk-{}", token),
             project
                 .sdk(&self.arch)
                 .context(format!(
