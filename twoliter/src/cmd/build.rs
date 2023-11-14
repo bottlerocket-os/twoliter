@@ -107,6 +107,7 @@ impl BuildVariant {
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)
             .env("BUILDSYS_SBKEYS_DIR", sbkeys_dir.display().to_string())
+            .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .makefile(makefile_path)
             .project_dir(project.project_dir())
             .exec("build")

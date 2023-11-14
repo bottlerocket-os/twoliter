@@ -3487,6 +3487,7 @@ dependencies = [
  "pubsys",
  "pubsys-setup",
  "serde",
+ "serde_json",
  "sha2",
  "tar",
  "tempfile",

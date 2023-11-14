@@ -51,7 +51,8 @@ impl DockerContainer {
         let mut args = vec!["cp".to_string()];
         args.push(format!("{}:{}", self.name, src.as_ref().display()));
         args.push(dest.as_ref().display().to_string());
-        exec(Command::new("docker").args(args), true).await
+        exec(Command::new("docker").args(args), true).await?;
+        Ok(())
     }
 }
 

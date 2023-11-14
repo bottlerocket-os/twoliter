@@ -95,7 +95,7 @@ impl Project {
         self.project_dir.clone()
     }
 
-    pub(crate) fn _release_version(&self) -> &str {
+    pub(crate) fn release_version(&self) -> &str {
         self.release_version.as_str()
     }
 
