@@ -1,5 +1,7 @@
 mod commands;
+mod container;
 mod image;
 
-#[allow(unused)]
+pub(crate) use self::container::DockerContainer;
+#[allow(unused_imports)]
 pub(crate) use self::image::{ImageArchUri, ImageUri};

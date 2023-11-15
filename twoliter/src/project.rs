@@ -5,6 +5,7 @@ use log::{debug, trace};
 use non_empty_string::NonEmptyString;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use sha2::{Digest, Sha512};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -114,6 +115,13 @@ impl Project {
 
     pub(crate) fn toolchain(&self, arch: &str) -> Option<ImageArchUri> {
         self.toolchain_name().map(|s| s.uri(arch))
+    }
+
+    pub(crate) fn token(&self) -> String {
+        let mut d = Sha512::new();
+        d.update(self.filepath().display().to_string());
+        let digest = hex::encode(d.finalize());
+        (digest[..12]).to_string()
     }
 }
 

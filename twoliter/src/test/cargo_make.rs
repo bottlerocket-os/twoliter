@@ -7,7 +7,7 @@ async fn test_cargo_make() {
     let cargo_make = CargoMake::new(&project, "arch")
         .unwrap()
         .makefile(data_dir().join("Makefile.toml"));
-    cargo_make._exec("verify-twoliter-env").await.unwrap();
+    cargo_make.exec("verify-twoliter-env").await.unwrap();
     cargo_make
         .clone()
         .env("FOO", "bar")
@@ -27,25 +27,6 @@ async fn test_cargo_make() {
             "verify-current-dir-with-arg",
             [data_dir().display().to_string()],
         )
-        .await
-        .unwrap();
-    cargo_make
-        .clone()
-        ._arg("--env")
-        ._arg("FOO=bar")
-        .exec_with_args("verify-env-value-with-arg", ["FOO", "bar"])
-        .await
-        .unwrap();
-    cargo_make
-        .clone()
-        ._args(["--env", "FOO=bar"])
-        .exec_with_args("verify-env-value-with-arg", ["FOO", "bar"])
-        .await
-        .unwrap();
-    cargo_make
-        .clone()
-        ._envs([("FOO", "bar"), ("BAR", "baz")])
-        .exec_with_args("verify-env-value-with-arg", ["BAR", "baz"])
         .await
         .unwrap();
 }
