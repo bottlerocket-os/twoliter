@@ -419,14 +419,15 @@ Directory descriptions:
 #### Project Variations
 
 Twoliter projects can serve one or both of two purposes.
-Twoliter projects may be used to create Bottlerocket variant images or kits.
-Each of the above purposes may be achieved with or without depending on external kits[^1].
+1) A Twoliter project may be used to create variant images.
+2) A Twoliter project may be used to create kits.
+Each of the above purposes may be achieved with or without depending on external kits[^nokits].
 
-When a user has no intention of creating a kit, it should not be necessary to define one in a kits directory.
-When a user has no intention of creating a variant image, it should not be necessary to define a variants directory.
-
-[^1]: The use case of creating a variant without depending on external kits may seem remote.
+[^nokits]: The use case of creating a variant without depending on external kits may seem remote.
     But at least initially, this is what the Bottlerocket monorepo will be doing.
+
+When a user has no intention of creating a kit, it should not be necessary to define a kit in the kits directory.
+When a user has no intention of creating a variant image, it should not be necessary to define a variant in the variants directory.
 
 ### Twoliter New
 
