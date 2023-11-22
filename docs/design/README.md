@@ -421,6 +421,7 @@ Directory descriptions:
 Twoliter projects can serve one or both of two purposes.
 1) A Twoliter project may be used to create variant images.
 2) A Twoliter project may be used to create kits.
+
 Each of the above purposes may be achieved with or without depending on external kits[^nokits].
 
 [^nokits]: The use case of creating a variant without depending on external kits may seem remote.
@@ -428,6 +429,45 @@ Each of the above purposes may be achieved with or without depending on external
 
 When a user has no intention of creating a kit, it should not be necessary to define a kit in the kits directory.
 When a user has no intention of creating a variant image, it should not be necessary to define a variant in the variants directory.
+
+To further complicate matters, some users may have projects with which have started with the [alpha](#twoliter-alpha) version of Twoliter.
+For the time being, if we assume backward compatibility with these projects, then they introduce another use case.
+In the Alpha use case we can assume that variants are being created and that no kits are defined.
+
+Putting all of this together, we get a matrix that enumerates our use case and testing scenarios.
+
+| Name                                   | Variants | Kits | External Kits | Alpha |
+|----------------------------------------|----------|------|---------------|-------|
+| Alpha                                  | X        |      |               | X     |
+| Legacy Monorepo                        | X        |      |               |       |
+| Kits with no Dependencies              |          | X    |               |       |
+| Kits with External Kits                |          | X    | X             |       |
+| Variants with External Kits            | X        |      | X             |       |
+| Variants with Kits (Bottlerocket Core) | X        | X    |               |       |
+| Variants with Kits and External Kits   | X        | X    | X             |       |
+
+**Alpha** and **Bottlerocket Monorepo** look similar.
+The difference is that an Alpha variant depends on packages (in its variant Cargo.toml) that do not exist in-tree.
+The Alpha build will assume these are available in the SDK.
+The Bottlerocket Monorepo has all packages defined in-tree.
+
+**Kits with no Dependencies**:
+Bottlerocket's core kits are likely to be the first example of this.
+This is a project that wants to publish a kit of packages but does not need to depend on any packages to do so.
+
+**Kits with External Kits**:
+This is a project that wants to publish a kit, but relies on some packages from other kits.
+An example might be a Kubernetes-specific kit which has packages depending on things like glibc or libxcrypt.
+
+**Variants with External Kits**:
+This use case represents a maintainer that needs to customize their variant without adding any packages of their own.
+Alternatively, this maintainer may be compositing packages from various external sources to create a custom variant.
+
+**Variants with Kits (Bottlerocket Core)**:
+This represents a maintainer that does not need any externally-defined kits in order to build the kits defined in their project.
+Additionally, this user is creating variants in their project.
+The Bottlerocket team is the most likely example of this.
+There may be a few kits and a sample variant defined in the same tree for testing (e.g. `aws-dev`).
 
 ### Twoliter New
 
@@ -606,6 +646,10 @@ The requirements needing further design are:
   This may be limited to changes in the Bottlerocket tree (`partyplanner` and variant `Cargo.toml` metadata, for example).
 
 ---
+
+# Interim Milestones
+
+The following are strategic waypoints achievable before the entirety of Twoliter functionality is available.
 
 ## Twoliter Make
 
