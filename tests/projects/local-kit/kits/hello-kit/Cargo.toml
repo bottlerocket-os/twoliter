@@ -1,0 +1,22 @@
+[package]
+name = "hello-kit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+# Don't rebuild crate just because of changes to README.
+exclude = ["README.md"]
+
+[package.metadata.build-kit]
+included-packages = [
+    # in-tree packages
+    "hello-agent",
+    "hello-go",
+]
+
+[lib]
+path = "../kits.rs"
+
+[build-dependencies]
+hello-agent = { path = "../../packages/hello-agent" }
+hello-go = { path = "../../packages/hello-go" }
