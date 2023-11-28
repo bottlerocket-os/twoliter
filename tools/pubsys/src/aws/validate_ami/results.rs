@@ -210,7 +210,7 @@ mod test {
             (Region::new("us-west-2"), HashSet::from([])),
             (Region::new("us-east-1"), HashSet::from([])),
         ]));
-        let results_filtered = results.get_results_for_status(&vec![
+        let results_filtered = results.get_results_for_status(&[
             AmiValidationResultStatus::Correct,
             AmiValidationResultStatus::Incorrect,
             AmiValidationResultStatus::Missing,
@@ -355,7 +355,7 @@ mod test {
             ),
         ]));
         let results_filtered =
-            results.get_results_for_status(&vec![AmiValidationResultStatus::Correct]);
+            results.get_results_for_status(&[AmiValidationResultStatus::Correct]);
 
         assert_eq!(
             results_filtered,
@@ -525,7 +525,7 @@ mod test {
                 ]),
             ),
         ]));
-        let results_filtered = results.get_results_for_status(&vec![
+        let results_filtered = results.get_results_for_status(&[
             AmiValidationResultStatus::Correct,
             AmiValidationResultStatus::Incorrect,
         ]);
@@ -756,7 +756,7 @@ mod test {
                 )]),
             ),
         ]));
-        let results_filtered = results.get_results_for_status(&vec![
+        let results_filtered = results.get_results_for_status(&[
             AmiValidationResultStatus::Correct,
             AmiValidationResultStatus::Incorrect,
             AmiValidationResultStatus::Missing,
@@ -1027,7 +1027,7 @@ mod test {
             ),
         ]));
         let results_filtered =
-            results.get_results_for_status(&vec![AmiValidationResultStatus::Missing]);
+            results.get_results_for_status(&[AmiValidationResultStatus::Missing]);
 
         assert_eq!(results_filtered, HashSet::new());
     }

@@ -14,8 +14,8 @@ use log::{error, info, trace};
 use pubsys_config::InfraConfig;
 use snafu::ResultExt;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::path::PathBuf;
+use tokio::fs;
 
 /// Validates SSM parameters and AMIs
 #[derive(Debug, Parser)]
@@ -128,13 +128,13 @@ pub async fn validate(
         };
 
         // Write the results as JSON
-        serde_json::to_writer_pretty(
-            &File::create(write_results_path).context(error::WriteValidationResultsSnafu {
+        let json = serde_json::to_string_pretty(&results)
+            .context(error::SerializeValidationResultsSnafu)?;
+        fs::write(write_results_path, &json)
+            .await
+            .context(error::WriteValidationResultsSnafu {
                 path: write_results_path,
-            })?,
-            &results,
-        )
-        .context(error::SerializeValidationResultsSnafu)?;
+            })?;
     }
 
     Ok(validation_results)
@@ -206,15 +206,15 @@ type ParameterValue = String;
 pub(crate) async fn parse_parameters(
     expected_parameters_file: &PathBuf,
 ) -> Result<HashMap<Region, HashMap<SsmKey, String>>> {
+    let file_bytes = fs::read(expected_parameters_file.clone()).await.context(
+        error::ReadExpectedParameterFileSnafu {
+            path: expected_parameters_file,
+        },
+    )?;
     // Parse the JSON file as a HashMap of region_name, mapped to a HashMap of parameter_name and
     // parameter_value
     let expected_parameters: HashMap<RegionName, HashMap<ParameterName, ParameterValue>> =
-        serde_json::from_reader(&File::open(expected_parameters_file.clone()).context(
-            error::ReadExpectedParameterFileSnafu {
-                path: expected_parameters_file,
-            },
-        )?)
-        .context(error::ParseExpectedParameterFileSnafu)?;
+        serde_json::from_slice(&file_bytes).context(error::ParseExpectedParameterFileSnafu)?;
 
     // Iterate over the parsed HashMap, converting the nested HashMap into a HashMap of Region
     // mapped to a HashMap of SsmKey, String

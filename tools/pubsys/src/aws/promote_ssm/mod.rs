@@ -114,6 +114,7 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     // in their naming
     let template_parameters =
         template::get_parameters(&promote_args.template_path, &source_build_context)
+            .await
             .context(error::FindTemplatesSnafu)?;
 
     if template_parameters.parameters.is_empty() {

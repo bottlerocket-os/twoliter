@@ -23,9 +23,9 @@ use log::{debug, error, info, trace};
 use pubsys_config::InfraConfig;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::iter::FromIterator;
 use std::path::PathBuf;
+use tokio::fs;
 
 #[derive(Debug, Parser)]
 #[group(id = "who", required = true, multiple = true)]
@@ -82,12 +82,16 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
         "Using AMI data from path: {}",
         publish_args.ami_input.display()
     );
-    let file = File::open(&publish_args.ami_input).context(error::FileSnafu {
-        op: "open",
-        path: &publish_args.ami_input,
-    })?;
+
+    let ami_input_bytes = fs::read(&publish_args.ami_input)
+        .await
+        .context(error::FileSnafu {
+            op: "open",
+            path: &publish_args.ami_input,
+        })?;
+
     let mut ami_input: HashMap<String, Image> =
-        serde_json::from_reader(file).context(error::DeserializeSnafu {
+        serde_json::from_slice(&ami_input_bytes).context(error::DeserializeSnafu {
             path: &publish_args.ami_input,
         })?;
     trace!("Parsed AMI input: {:?}", ami_input);
@@ -218,19 +222,19 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
             .into_iter()
             .map(|(region, image)| (region.to_string(), image))
             .collect::<HashMap<String, Image>>(),
-    )?;
+    )
+    .await?;
 
     Ok(())
 }
 
-pub(crate) fn write_amis(path: &PathBuf, amis: &HashMap<String, Image>) -> Result<()> {
-    let file = File::create(path).context(error::FileSnafu {
+pub(crate) async fn write_amis(path: &PathBuf, amis: &HashMap<String, Image>) -> Result<()> {
+    let json = serde_json::to_string_pretty(&amis).context(error::SerializeSnafu { path })?;
+    fs::write(path, &json).await.context(error::FileSnafu {
         op: "write AMIs to file",
         path,
     })?;
-    serde_json::to_writer_pretty(file, &amis).context(error::SerializeSnafu { path })?;
     info!("Wrote AMI data to {}", path.display());
-
     Ok(())
 }
 

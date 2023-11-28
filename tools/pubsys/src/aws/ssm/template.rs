@@ -8,9 +8,9 @@ use log::trace;
 use serde::{Deserialize, Serialize};
 use snafu::{ensure, ResultExt};
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use tinytemplate::TinyTemplate;
+use tokio::fs;
 
 /// Represents a single SSM parameter
 #[derive(Debug, Deserialize)]
@@ -36,14 +36,16 @@ pub(crate) struct TemplateParameters {
 
 /// Deserializes template parameters from the template file, taking into account conditional
 /// parameters that may or may not apply based on our build context.
-pub(crate) fn get_parameters(
+pub(crate) async fn get_parameters(
     template_path: &Path,
     build_context: &BuildContext<'_>,
 ) -> Result<TemplateParameters> {
-    let templates_str = fs::read_to_string(template_path).context(error::FileSnafu {
-        op: "read",
-        path: &template_path,
-    })?;
+    let templates_str = fs::read_to_string(template_path)
+        .await
+        .context(error::FileSnafu {
+            op: "read",
+            path: &template_path,
+        })?;
     let mut template_parameters: TemplateParameters =
         toml::from_str(&templates_str).context(error::InvalidTomlSnafu {
             path: &template_path,

@@ -4,7 +4,7 @@ pub(crate) mod check_expirations;
 pub(crate) mod refresh_repo;
 pub(crate) mod validate_repo;
 
-use crate::{friendly_version, Args};
+use crate::{friendly_version, read_stream, Args};
 use aws_sdk_kms::{config::Region, Client as KmsClient};
 use chrono::{DateTime, Utc};
 use clap::Parser;
@@ -17,10 +17,10 @@ use pubsys_config::{
 use semver::Version;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::convert::TryInto;
-use std::fs::{self, File};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
+use tokio::fs;
 use tokio::runtime::Runtime;
 use tough::{
     editor::signed::PathExists,
@@ -100,6 +100,12 @@ pub(crate) struct RepoArgs {
     #[arg(long)]
     /// Where to store the created repo
     outdir: PathBuf,
+}
+
+pub(crate) async fn root_bytes(path: impl AsRef<Path>) -> Result<Vec<u8>> {
+    fs::read(path.as_ref()).await.context(error::FileSnafu {
+        path: path.as_ref(),
+    })
 }
 
 /// Adds update, migrations, and waves to the Manifest
@@ -229,7 +235,7 @@ fn set_versions(editor: &mut RepositoryEditor) -> Result<()> {
 }
 
 /// Adds targets, expirations, and version to the RepositoryEditor
-fn update_editor<'a, P>(
+async fn update_editor<'a, P>(
     repo_args: &'a RepoArgs,
     editor: &mut RepositoryEditor,
     targets: impl Iterator<Item = &'a PathBuf>,
@@ -244,12 +250,16 @@ where
         debug!("Adding target from path: {}", target_path.display());
         editor
             .add_target_path(target_path)
+            .await
             .context(error::AddTargetSnafu { path: &target_path })?;
     }
 
-    let manifest_target = Target::from_path(&manifest_path).context(error::BuildTargetSnafu {
-        path: manifest_path.as_ref(),
-    })?;
+    let manifest_target =
+        Target::from_path(&manifest_path)
+            .await
+            .context(error::BuildTargetSnafu {
+                path: manifest_path.as_ref(),
+            })?;
     debug!("Adding target for manifest.json");
     editor
         .add_target("manifest.json", manifest_target)
@@ -329,7 +339,7 @@ fn repo_urls<'a>(
 /// Builds an editor and manifest; will start from an existing repo if one is specified in the
 /// configuration.  Returns Err if we fail to read from the repo.  Returns Ok(None) if we detect
 /// that the repo does not exist.
-fn load_editor_and_manifest<'a, P>(
+async fn load_editor_and_manifest<'a, P>(
     root_role_path: P,
     metadata_url: &'a Url,
     targets_url: &'a Url,
@@ -338,37 +348,35 @@ where
     P: AsRef<Path>,
 {
     let root_role_path = root_role_path.as_ref();
+    let root = root_bytes(root_role_path).await?;
 
     // Try to load the repo...
-    let repo_load_result = RepositoryLoader::new(
-        File::open(root_role_path).context(error::FileSnafu {
-            path: root_role_path,
-        })?,
-        metadata_url.clone(),
-        targets_url.clone(),
-    )
-    .load();
+    let repo_load_result =
+        RepositoryLoader::new(&root, metadata_url.clone(), targets_url.clone()).load();
 
-    match repo_load_result {
+    match repo_load_result.await {
         // If we load it successfully, build an editor and manifest from it.
         Ok(repo) => {
             let target = "manifest.json";
             let target = target
                 .try_into()
                 .context(error::ParseTargetNameSnafu { target })?;
-            let reader = repo
+            let stream = repo
                 .read_target(&target)
+                .await
                 .context(error::ReadTargetSnafu {
                     target: target.raw(),
                 })?
                 .with_context(|| error::NoManifestSnafu {
                     metadata_url: metadata_url.clone(),
                 })?;
-            let manifest = serde_json::from_reader(reader).context(error::InvalidJsonSnafu {
+            let bytes = read_stream(stream).await.context(error::StreamSnafu)?;
+            let manifest = serde_json::from_slice(&bytes).context(error::InvalidJsonSnafu {
                 path: "manifest.json",
             })?;
 
             let editor = RepositoryEditor::from_repo(root_role_path, repo)
+                .await
                 .context(error::EditorFromRepoSnafu)?;
 
             Ok(Some((editor, manifest)))
@@ -444,7 +452,7 @@ async fn async_get_client(region: &str) -> KmsClient {
 }
 
 /// Common entrypoint from main()
-pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
+pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
     let metadata_out_dir = repo_args
         .outdir
         .join(&repo_args.variant)
@@ -492,7 +500,8 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
     let (mut editor, mut manifest) = if let Some((metadata_url, targets_url)) = maybe_urls.as_ref()
     {
         info!("Found metadata and target URLs, loading existing repository");
-        match load_editor_and_manifest(&repo_args.root_role_path, metadata_url, targets_url)? {
+        match load_editor_and_manifest(&repo_args.root_role_path, metadata_url, targets_url).await?
+        {
             Some((editor, manifest)) => (editor, manifest),
             None => {
                 warn!(
@@ -501,6 +510,7 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
                 );
                 (
                     RepositoryEditor::new(&repo_args.root_role_path)
+                        .await
                         .context(error::NewEditorSnafu)?,
                     Manifest::default(),
                 )
@@ -509,7 +519,9 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
     } else {
         info!("Did not find metadata and target URLs in infra config, creating a new repository");
         (
-            RepositoryEditor::new(&repo_args.root_role_path).context(error::NewEditorSnafu)?,
+            RepositoryEditor::new(&repo_args.root_role_path)
+                .await
+                .context(error::NewEditorSnafu)?,
             Manifest::default(),
         )
     };
@@ -533,7 +545,7 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
     ]);
     let all_targets = copy_targets.iter().chain(link_targets.clone());
 
-    update_editor(repo_args, &mut editor, all_targets, &manifest_path)?;
+    update_editor(repo_args, &mut editor, all_targets, &manifest_path).await?;
 
     // Sign repo   =^..^=   =^..^=   =^..^=   =^..^=
 
@@ -555,15 +567,20 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
         })
     };
 
-    let signed_repo = editor.sign(&[key_source]).context(error::RepoSignSnafu)?;
+    let signed_repo = editor
+        .sign(&[key_source])
+        .await
+        .context(error::RepoSignSnafu)?;
 
     // Write repo   =^..^=   =^..^=   =^..^=   =^..^=
 
     // Write targets first so we don't have invalid metadata if targets fail
     info!("Writing repo targets to: {}", targets_out_dir.display());
-    fs::create_dir_all(&targets_out_dir).context(error::CreateDirSnafu {
-        path: &targets_out_dir,
-    })?;
+    fs::create_dir_all(&targets_out_dir)
+        .await
+        .context(error::CreateDirSnafu {
+            path: &targets_out_dir,
+        })?;
 
     // Copy manifest with proper name instead of tempfile name
     debug!("Copying manifest.json into {}", targets_out_dir.display());
@@ -579,6 +596,7 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
             PathExists::Fail,
             Some(&target),
         )
+        .await
         .context(error::CopyTargetSnafu {
             target: &manifest_path,
             path: &targets_out_dir,
@@ -593,6 +611,7 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
         );
         signed_repo
             .copy_target(copy_target, &targets_out_dir, PathExists::Skip, None)
+            .await
             .context(error::CopyTargetSnafu {
                 target: copy_target,
                 path: &targets_out_dir,
@@ -606,6 +625,7 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
         );
         signed_repo
             .link_target(link_target, &targets_out_dir, PathExists::Skip, None)
+            .await
             .context(error::LinkTargetSnafu {
                 target: link_target,
                 path: &targets_out_dir,
@@ -613,11 +633,14 @@ pub(crate) fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
     }
 
     info!("Writing repo metadata to: {}", metadata_out_dir.display());
-    fs::create_dir_all(&metadata_out_dir).context(error::CreateDirSnafu {
-        path: &metadata_out_dir,
-    })?;
+    fs::create_dir_all(&metadata_out_dir)
+        .await
+        .context(error::CreateDirSnafu {
+            path: &metadata_out_dir,
+        })?;
     signed_repo
         .write(&metadata_out_dir)
+        .await
         .context(error::RepoWriteSnafu {
             path: &repo_args.outdir,
         })?;
@@ -795,6 +818,12 @@ mod error {
             wave_policy_path: PathBuf,
             #[snafu(source(from(update_metadata::error::Error, Box::new)))]
             source: Box<update_metadata::error::Error>,
+        },
+
+        #[snafu(display("Error reading bytes from stream: {}", source))]
+        Stream {
+            #[snafu(source(from(tough::error::Error, Box::new)))]
+            source: Box<tough::error::Error>,
         },
 
         #[snafu(display("Failed to create temporary file: {}", source))]

@@ -15,8 +15,8 @@ use log::{error, info, trace};
 use pubsys_config::InfraConfig;
 use snafu::ResultExt;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::path::PathBuf;
+use tokio::fs;
 
 /// Validates EC2 images by calling `describe-images` on all images in the file given by
 /// `expected-amis-path` and ensuring that the returned `public`, `ena-support`,
@@ -134,13 +134,13 @@ pub(crate) async fn validate(
         };
 
         // Write the results as JSON
-        serde_json::to_writer_pretty(
-            &File::create(write_results_path).context(error::WriteValidationResultsSnafu {
+        let json = serde_json::to_string_pretty(&results)
+            .context(error::SerializeValidationResultsSnafu)?;
+        fs::write(&write_results_path, &json).await.context(
+            error::WriteValidationResultsSnafu {
                 path: write_results_path,
-            })?,
-            &results,
-        )
-        .context(error::SerializeValidationResultsSnafu)?;
+            },
+        )?;
     }
 
     Ok(validation_results)
@@ -199,12 +199,14 @@ pub(crate) async fn parse_expected_amis(
     expected_amis_path: &PathBuf,
 ) -> Result<HashMap<Region, Vec<ImageDef>>> {
     // Parse the JSON file as a `HashMap` of region_name, mapped to an `ImageData` struct
-    let expected_amis: HashMap<RegionName, ImageData> = serde_json::from_reader(
-        &File::open(expected_amis_path.clone()).context(error::ReadExpectedImagesFileSnafu {
-            path: expected_amis_path,
-        })?,
-    )
-    .context(error::ParseExpectedImagesFileSnafu)?;
+    let file_bytes =
+        fs::read(&expected_amis_path)
+            .await
+            .context(error::ReadExpectedImagesFileSnafu {
+                path: expected_amis_path,
+            })?;
+    let expected_amis: HashMap<RegionName, ImageData> =
+        serde_json::from_slice(&file_bytes).context(error::ParseExpectedImagesFileSnafu)?;
 
     // Extract the `Vec<ImageDef>` from the `ImageData` structs
     let vectored_images = expected_amis

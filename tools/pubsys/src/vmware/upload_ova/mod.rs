@@ -11,10 +11,10 @@ use pubsys_config::vmware::{
 use pubsys_config::InfraConfig;
 use serde::Serialize;
 use snafu::{ensure, OptionExt, ResultExt};
-use std::fs;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tinytemplate::TinyTemplate;
+use tokio::fs;
 
 const SPEC_TEMPLATE_NAME: &str = "spec_template";
 
@@ -43,7 +43,7 @@ pub(crate) struct UploadArgs {
 }
 
 /// Common entrypoint from main()
-pub(crate) fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
+pub(crate) async fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml or default
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, true)
         .context(error::InfraConfigSnafu)?;
@@ -89,10 +89,13 @@ pub(crate) fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
     let dc_common = vmware.common.as_ref();
 
     // Read the import spec as a template
-    let import_spec_str = fs::read_to_string(&upload_args.spec).context(error::FileSnafu {
-        action: "read",
-        path: &upload_args.spec,
-    })?;
+    let import_spec_str =
+        fs::read_to_string(&upload_args.spec)
+            .await
+            .context(error::FileSnafu {
+                action: "read",
+                path: &upload_args.spec,
+            })?;
     let mut tt = TinyTemplate::new();
     tt.add_template(SPEC_TEMPLATE_NAME, &import_spec_str)
         .context(error::AddTemplateSnafu {
@@ -129,10 +132,12 @@ pub(crate) fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
         // Render the import spec with this datacenter's details and write to temp file
         let rendered_spec = render_spec(&tt, &datacenter.network, upload_args.mark_as_template)?;
         let import_spec = NamedTempFile::new().context(error::TempFileSnafu)?;
-        fs::write(import_spec.path(), &rendered_spec).context(error::FileSnafu {
-            action: "write",
-            path: import_spec.path(),
-        })?;
+        fs::write(import_spec.path(), &rendered_spec)
+            .await
+            .context(error::FileSnafu {
+                action: "write",
+                path: import_spec.path(),
+            })?;
         trace!("Import spec: {}", &rendered_spec);
 
         if upload_args.mark_as_template {
