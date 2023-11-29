@@ -149,6 +149,7 @@ do
   # We need the sbkeys scripts in a location that is not .dockerignored but is .gitignored
   rm -rf "${bottlerocket_dir}/build/sbkeys"
   mkdir -p "${bottlerocket_dir}/build/sbkeys"
+  mkdir -p "${bottlerocket_dir}/.cargo/sbkeys"
   cp "${bottlerocket_dir}/sbkeys/generate-aws-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
   cp "${bottlerocket_dir}/sbkeys/generate-local-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
 
