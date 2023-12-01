@@ -37,6 +37,9 @@ pub(crate) struct Project {
     /// The version of this schema struct.
     schema_version: SchemaVersion<1>,
 
+    /// The version that will be given to released artifacts such as kits and variants.
+    release_version: String,
+
     /// The Bottlerocket SDK container image.
     sdk: Option<ImageName>,
 
@@ -99,6 +102,10 @@ impl Project {
 
     pub(crate) fn project_dir(&self) -> PathBuf {
         self.project_dir.clone()
+    }
+
+    pub(crate) fn _release_version(&self) -> &str {
+        self.release_version.as_str()
     }
 
     pub(crate) fn sdk_name(&self) -> Option<&ImageName> {
@@ -287,6 +294,7 @@ mod test {
             filepath: Default::default(),
             project_dir: Default::default(),
             schema_version: Default::default(),
+            release_version: String::from("1.0.0"),
             sdk: Some(ImageName {
                 registry: Some("example.com".try_into().unwrap()),
                 name: "foo-abc".try_into().unwrap(),

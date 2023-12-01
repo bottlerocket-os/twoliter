@@ -1,6 +1,5 @@
 schema-version = 1
-project-name = "sample-project"
-project-version = "v1.0.0"
+release-version = "1.0.0"
 
 [sdk]
 registry = "a.com/b"
