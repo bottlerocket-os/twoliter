@@ -2,12 +2,13 @@ use crate::docker::ImageArchUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
-use log::{debug, trace};
+use log::{debug, info, trace, warn};
 use non_empty_string::NonEmptyString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use toml::Table;
 
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
@@ -25,7 +26,7 @@ pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<P
 }
 
 /// Represents the structure of a `Twoliter.toml` project file.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Project {
     #[serde(skip)]
@@ -53,20 +54,11 @@ impl Project {
         let data = fs::read_to_string(&path)
             .await
             .context(format!("Unable to read project file '{}'", path.display()))?;
-        let mut project: Self = toml::from_str(&data).context(format!(
+        let unvalidated: UnvalidatedProject = toml::from_str(&data).context(format!(
             "Unable to deserialize project file '{}'",
             path.display()
         ))?;
-        project.filepath = path.into();
-        project.project_dir = project
-            .filepath
-            .parent()
-            .context(format!(
-                "Unable to find the parent directory of '{}'",
-                project.filepath.display(),
-            ))?
-            .into();
-        Ok(project)
+        unvalidated.validate(path).await
     }
 
     /// Recursively search for a file named `Twoliter.toml` starting in `dir`. If it is not found,
@@ -160,6 +152,88 @@ impl ImageName {
             arch.as_ref(),
             &self.version,
         )
+    }
+}
+
+/// This is used to `Deserialize` a project, then run validation code before returning a valid
+/// [`Project`]. This is necessary both because there is no post-deserialization serde hook for
+/// validation and, even if there was, we need to know the project directory path in order to check
+/// some things.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct UnvalidatedProject {
+    schema_version: SchemaVersion<1>,
+    release_version: String,
+    sdk: Option<ImageName>,
+    toolchain: Option<ImageName>,
+}
+
+impl UnvalidatedProject {
+    /// Constructs a [`Project`] from an [`UnvalidatedProject`] after validating fields.
+    async fn validate(self, path: impl AsRef<Path>) -> Result<Project> {
+        let filepath: PathBuf = path.as_ref().into();
+        let project_dir = filepath
+            .parent()
+            .context(format!(
+                "Unable to find the parent directory of '{}'",
+                filepath.display(),
+            ))?
+            .to_path_buf();
+
+        self.check_release_toml(&project_dir).await?;
+
+        Ok(Project {
+            filepath,
+            project_dir,
+            schema_version: self.schema_version,
+            release_version: self.release_version,
+            sdk: self.sdk,
+            toolchain: self.toolchain,
+        })
+    }
+
+    /// Issues a warning if `Release.toml` is found and, if so, ensures that it contains the same
+    /// version (i.e. `release-version`) as the `Twoliter.toml` project file.
+    async fn check_release_toml(&self, project_dir: &Path) -> Result<()> {
+        let path = project_dir.join("Release.toml");
+        if !path.exists() || !path.is_file() {
+            // There is no Release.toml file. This is a good thing!
+            trace!("This project does not have a Release.toml file (this is not a problem)");
+            return Ok(());
+        }
+        warn!(
+            "A Release.toml file was found. Release.toml is deprecated. Please remove it from \
+             your project."
+        );
+        let content = fs::read_to_string(&path).await.context(format!(
+            "Error while checking Release.toml file at '{}'",
+            path.display()
+        ))?;
+        let toml: Table = match toml::from_str(&content) {
+            Ok(toml) => toml,
+            Err(e) => {
+                warn!(
+                    "Unable to parse Release.toml to ensure that its version matches the \
+                     release-version in Twoliter.toml: {e}",
+                );
+                return Ok(());
+            }
+        };
+        let version = match toml.get("version") {
+            Some(version) => version,
+            None => {
+                info!("Release.toml does not contain a version key. Ignoring it.");
+                return Ok(());
+            }
+        }
+        .to_string();
+        ensure!(
+            version == self.release_version,
+            "The version found in Release.toml, '{version}', does not match the release-version \
+            found in Twoliter.toml '{}'",
+            self.release_version
+        );
+        Ok(())
     }
 }
 
