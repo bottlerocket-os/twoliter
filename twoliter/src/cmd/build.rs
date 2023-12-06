@@ -83,12 +83,6 @@ impl BuildVariant {
             // Create a sbkeys directory in the main project
             debug!("sbkeys dir not found. Creating a temporary directory");
             fs::create_dir_all(&sbkeys_dir)?;
-            sdk_container
-                .cp_out(
-                    Path::new("twoliter/alpha/sbkeys/generate-local-sbkeys"),
-                    &sbkeys_dir,
-                )
-                .await?;
         };
 
         // TODO: Remove once models is no longer conditionally compiled.

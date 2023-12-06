@@ -32,6 +32,7 @@ fn main() {
     paths.copy_file("rpm2img");
     paths.copy_file("rpm2kmodkit");
     paths.copy_file("rpm2migrations");
+    paths.copy_file("generate-local-sbkeys");
 
     // Create tarball in memory.
     println!("Starting tarball creation at {:?}", SystemTime::now());

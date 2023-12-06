@@ -663,7 +663,7 @@ echo "No Secure Boot signing profile found in ${profile}." >&2
 echo "Generating local keys." >&2
 
 mkdir -p "${BUILDSYS_SBKEYS_PROFILE_DIR}"
-${BUILDSYS_SBKEYS_DIR}/generate-local-sbkeys \
+${TWOLITER_TOOLS_DIR}/generate-local-sbkeys \
   --sdk-image "${TLPRIVATE_SDK_IMAGE}" \
   --output-dir "${BUILDSYS_SBKEYS_PROFILE_DIR}"
 '''
