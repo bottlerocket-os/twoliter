@@ -98,6 +98,19 @@ skip-tree = [
     # dependency tree because windows-sys has many sub-crates
     # that differ in major version.
     { name = "windows-sys" },
+
+    # We needed a fix in tuftool 0.10.2, but it also included AWS Rust SDK updates. We cannot update
+    # tough, tough-kms and tough-ssm at the same time, though, because of these issues:
+    # - https://github.com/awslabs/tough/issues/733
+    # - https://github.com/awslabs/coldsnap/issues/301
+    # - https://github.com/awslabs/coldsnap/issues/302
+    #
+    # For the time being, this means that we are building multiple versions of the AWS Rust SDK
+    # which increases build times and needs to be addressed as soon as possible.
+    # - https://github.com/bottlerocket-os/twoliter/issues/124
+    { name = "tough", version = "0.15" },
+    { name = "tough-kms", version = "0.7" },
+    { name = "tough-ssm", version = "0.10" },
 ]
 
 [sources]
