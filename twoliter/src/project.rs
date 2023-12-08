@@ -1,14 +1,14 @@
 use crate::docker::ImageArchUri;
+use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
-use log::{debug, trace};
+use log::{debug, info, trace, warn};
 use non_empty_string::NonEmptyString;
-use serde::de::Error;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
-use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use toml::Table;
 
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
@@ -26,7 +26,7 @@ pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<P
 }
 
 /// Represents the structure of a `Twoliter.toml` project file.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Project {
     #[serde(skip)]
@@ -36,6 +36,9 @@ pub(crate) struct Project {
 
     /// The version of this schema struct.
     schema_version: SchemaVersion<1>,
+
+    /// The version that will be given to released artifacts such as kits and variants.
+    release_version: String,
 
     /// The Bottlerocket SDK container image.
     sdk: Option<ImageName>,
@@ -51,20 +54,11 @@ impl Project {
         let data = fs::read_to_string(&path)
             .await
             .context(format!("Unable to read project file '{}'", path.display()))?;
-        let mut project: Self = toml::from_str(&data).context(format!(
+        let unvalidated: UnvalidatedProject = toml::from_str(&data).context(format!(
             "Unable to deserialize project file '{}'",
             path.display()
         ))?;
-        project.filepath = path.into();
-        project.project_dir = project
-            .filepath
-            .parent()
-            .context(format!(
-                "Unable to find the parent directory of '{}'",
-                project.filepath.display(),
-            ))?
-            .into();
-        Ok(project)
+        unvalidated.validate(path).await
     }
 
     /// Recursively search for a file named `Twoliter.toml` starting in `dir`. If it is not found,
@@ -99,6 +93,10 @@ impl Project {
 
     pub(crate) fn project_dir(&self) -> PathBuf {
         self.project_dir.clone()
+    }
+
+    pub(crate) fn release_version(&self) -> &str {
+        self.release_version.as_str()
     }
 
     pub(crate) fn sdk_name(&self) -> Option<&ImageName> {
@@ -157,64 +155,85 @@ impl ImageName {
     }
 }
 
-/// We need to constrain the `Project` struct to a valid version. Unfortunately `serde` does not
-/// have an after-deserialization validation hook, so we have this struct to limit the version to a
-/// single acceptable value.
-#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub(crate) struct SchemaVersion<const N: u32>;
-
-impl<const N: u32> SchemaVersion<N> {
-    pub(crate) fn get(&self) -> u32 {
-        N
-    }
-
-    pub(crate) fn get_static() -> u32 {
-        N
-    }
+/// This is used to `Deserialize` a project, then run validation code before returning a valid
+/// [`Project`]. This is necessary both because there is no post-deserialization serde hook for
+/// validation and, even if there was, we need to know the project directory path in order to check
+/// some things.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct UnvalidatedProject {
+    schema_version: SchemaVersion<1>,
+    release_version: String,
+    sdk: Option<ImageName>,
+    toolchain: Option<ImageName>,
 }
 
-impl<const N: u32> From<SchemaVersion<N>> for u32 {
-    fn from(value: SchemaVersion<N>) -> Self {
-        value.get()
-    }
-}
+impl UnvalidatedProject {
+    /// Constructs a [`Project`] from an [`UnvalidatedProject`] after validating fields.
+    async fn validate(self, path: impl AsRef<Path>) -> Result<Project> {
+        let filepath: PathBuf = path.as_ref().into();
+        let project_dir = filepath
+            .parent()
+            .context(format!(
+                "Unable to find the parent directory of '{}'",
+                filepath.display(),
+            ))?
+            .to_path_buf();
 
-impl<const N: u32> fmt::Debug for SchemaVersion<N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt::Debug::fmt(&self.get(), f)
-    }
-}
+        self.check_release_toml(&project_dir).await?;
 
-impl<const N: u32> fmt::Display for SchemaVersion<N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt::Display::fmt(&self.get(), f)
+        Ok(Project {
+            filepath,
+            project_dir,
+            schema_version: self.schema_version,
+            release_version: self.release_version,
+            sdk: self.sdk,
+            toolchain: self.toolchain,
+        })
     }
-}
 
-impl<const N: u32> Serialize for SchemaVersion<N> {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u32(self.get())
-    }
-}
-
-impl<'de, const N: u32> Deserialize<'de> for SchemaVersion<N> {
-    fn deserialize<D>(deserializer: D) -> Result<SchemaVersion<N>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value: u32 = Deserialize::deserialize(deserializer)?;
-        if value != Self::get_static() {
-            Err(Error::custom(format!(
-                "Incorrect project schema_version: got '{}', expected '{}'",
-                value,
-                Self::get_static()
-            )))
-        } else {
-            Ok(Self)
+    /// Issues a warning if `Release.toml` is found and, if so, ensures that it contains the same
+    /// version (i.e. `release-version`) as the `Twoliter.toml` project file.
+    async fn check_release_toml(&self, project_dir: &Path) -> Result<()> {
+        let path = project_dir.join("Release.toml");
+        if !path.exists() || !path.is_file() {
+            // There is no Release.toml file. This is a good thing!
+            trace!("This project does not have a Release.toml file (this is not a problem)");
+            return Ok(());
         }
+        warn!(
+            "A Release.toml file was found. Release.toml is deprecated. Please remove it from \
+             your project."
+        );
+        let content = fs::read_to_string(&path).await.context(format!(
+            "Error while checking Release.toml file at '{}'",
+            path.display()
+        ))?;
+        let toml: Table = match toml::from_str(&content) {
+            Ok(toml) => toml,
+            Err(e) => {
+                warn!(
+                    "Unable to parse Release.toml to ensure that its version matches the \
+                     release-version in Twoliter.toml: {e}",
+                );
+                return Ok(());
+            }
+        };
+        let version = match toml.get("version") {
+            Some(version) => version,
+            None => {
+                info!("Release.toml does not contain a version key. Ignoring it.");
+                return Ok(());
+            }
+        }
+        .to_string();
+        ensure!(
+            version == self.release_version,
+            "The version found in Release.toml, '{version}', does not match the release-version \
+            found in Twoliter.toml '{}'",
+            self.release_version
+        );
+        Ok(())
     }
 }
 
@@ -287,6 +306,7 @@ mod test {
             filepath: Default::default(),
             project_dir: Default::default(),
             schema_version: Default::default(),
+            release_version: String::from("1.0.0"),
             sdk: Some(ImageName {
                 registry: Some("example.com".try_into().unwrap()),
                 name: "foo-abc".try_into().unwrap(),

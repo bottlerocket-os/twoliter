@@ -39,6 +39,7 @@ impl Make {
         CargoMake::new(&project, &self.arch)?
             .env("CARGO_HOME", self.cargo_home.display().to_string())
             .env("TWOLITER_TOOLS_DIR", tempdir.path().display().to_string())
+            .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .makefile(makefile_path)
             .project_dir(project.project_dir())
             .exec_with_args(&self.makefile_task, self.additional_args.clone())

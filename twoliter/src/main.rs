@@ -7,6 +7,7 @@ mod cmd;
 mod common;
 mod docker;
 mod project;
+mod schema_version;
 mod tools;
 
 /// Test code that should only be compiled when running tests.

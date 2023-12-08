@@ -22,7 +22,6 @@ BUILDSYS_VERSION_BUILD = { script = ["git describe --always --dirty --exclude '*
 # later in this section.  You have to edit the path here in Makefile.toml to
 # use a different Release.toml.
 BUILDSYS_RELEASE_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Release.toml"
-BUILDSYS_VERSION_IMAGE = { script = ["awk -F '[ =\"]+' '$1 == \"version\" {print $2}' ${BUILDSYS_RELEASE_CONFIG_PATH}"] }
 # This can be overridden with -e to build a different variant from the variants/ directory
 BUILDSYS_VARIANT = { script = ['echo "${BUILDSYS_VARIANT:-aws-k8s-1.24}"'] }
 # Product name used for file and directory naming
@@ -260,6 +259,13 @@ fi
 if [[ -z "${TLPRIVATE_SDK_IMAGE}" || -z "{TLPRIVATE_TOOLCHAIN}" ]];then
    echo "TLPRIVATE_SDK_IMAGE and TLPRIVATE_TOOLCHAIN must be defined and must be non-zero in length."
    echo "Are you using Twoliter? It is a bug if Twoliter has invoked cargo make without these."
+   exit 1
+fi
+
+# Ensure BUILDSYS_VERSION_IMAGE is set
+if [[ -z "${BUILDSYS_VERSION_IMAGE}" ]];then
+   echo "BUILDSYS_VERSION_IMAGE must be defined and must be non-zero in length."
+   echo "Are you using Twoliter? It is a bug if Twoliter has invoked cargo make without this."
    exit 1
 fi
 

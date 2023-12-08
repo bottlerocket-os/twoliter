@@ -3,14 +3,6 @@
 version = 3
 
 [[package]]
-name = "aws-test-1"
-version = "0.1.0"
-dependencies = [
- "hello-agent",
- "hello-go",
-]
-
-[[package]]
 name = "hello-agent"
 version = "0.1.0"
 
