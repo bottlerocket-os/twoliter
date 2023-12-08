@@ -226,7 +226,8 @@ impl UnvalidatedProject {
                 return Ok(());
             }
         }
-        .to_string();
+        .as_str()
+        .context("The version in Release.toml is not a string")?;
         ensure!(
             version == self.release_version,
             "The version found in Release.toml, '{version}', does not match the release-version \
@@ -327,5 +328,64 @@ mod test {
             "example.com/foo-def-aarch64:version2",
             project.toolchain("aarch64").unwrap().to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn test_release_toml_check_error() {
+        let tempdir = TempDir::new().unwrap();
+        let p = tempdir.path();
+        let from = data_dir();
+        let twoliter_toml_from = from.join("Twoliter-1.toml");
+        let twoliter_toml_to = p.join("Twoliter.toml");
+        let release_toml_from = from.join("Release-2.toml");
+        let release_toml_to = p.join("Release.toml");
+        fs::copy(&twoliter_toml_from, &twoliter_toml_to)
+            .await
+            .expect(&format!(
+                "Unable to copy {} to {}",
+                twoliter_toml_from.display(),
+                twoliter_toml_to.display()
+            ));
+        fs::copy(&release_toml_from, &release_toml_to)
+            .await
+            .expect(&format!(
+                "Unable to copy {} to {}",
+                release_toml_from.display(),
+                release_toml_to.display()
+            ));
+        let result = Project::find_and_load(&p).await;
+        assert!(
+            result.is_err(),
+            "Expected the loading of the project to fail because of a mismatched version in \
+            Release.toml, but the project loaded without an error."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_release_toml_check_ok() {
+        let tempdir = TempDir::new().unwrap();
+        let p = tempdir.path();
+        let from = data_dir();
+        let twoliter_toml_from = from.join("Twoliter-1.toml");
+        let twoliter_toml_to = p.join("Twoliter.toml");
+        let release_toml_from = from.join("Release-1.toml");
+        let release_toml_to = p.join("Release.toml");
+        fs::copy(&twoliter_toml_from, &twoliter_toml_to)
+            .await
+            .expect(&format!(
+                "Unable to copy {} to {}",
+                twoliter_toml_from.display(),
+                twoliter_toml_to.display()
+            ));
+        fs::copy(&release_toml_from, &release_toml_to)
+            .await
+            .expect(&format!(
+                "Unable to copy {} to {}",
+                release_toml_from.display(),
+                release_toml_to.display()
+            ));
+
+        // The project should load because Release.toml and Twoliter.toml versions match.
+        Project::find_and_load(&p).await.unwrap();
     }
 }
