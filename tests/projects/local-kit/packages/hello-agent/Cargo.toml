@@ -1,0 +1,21 @@
+[package]
+name = "hello-agent"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+
+[package.metadata.build-package]
+variant-sensitive = false
+source-groups = ["hello-agent"]
+
+[lib]
+path = "../packages.rs"
+
+# RPM BuildRequires
+[build-dependencies]
+# None
+
+# RPM Requires
+[dependencies]
+# None

@@ -1,0 +1,7 @@
+[package]
+name = "hello-agent"
+version = "0.1.0"
+authors = ["Ethan Pullen <pullenep@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+publish = false
