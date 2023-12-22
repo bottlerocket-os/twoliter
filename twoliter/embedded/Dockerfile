@@ -13,16 +13,6 @@ ARG ARCH
 ARG GOARCH
 
 FROM ${SDK} as sdk
-USER root
-RUN \
-     --mount=type=secret,id=tools-docker-go,mode=755,target=/tmp/tools/docker-go \
-     --mount=type=secret,id=tools-partyplanner,mode=755,target=/tmp/tools/partyplanner \
-     --mount=type=secret,id=tools-rpm2img,mode=755,target=/tmp/tools/rpm2img \
-     --mount=type=secret,id=tools-rpm2kmodkit,mode=755,target=/tmp/tools/rpm2kmodkit \
-     --mount=type=secret,id=tools-rpm2migrations,mode=755,target=/tmp/tools/rpm2migrations \
-     cp -a /tmp/tools/ /tools/
-USER builder
-
 FROM --platform=linux/${GOARCH} ${TOOLCHAIN}-${ARCH} as toolchain
 
 ############################################################################################
@@ -41,7 +31,7 @@ ARG TOKEN
 # We can't create directories via RUN in a scratch container, so take an existing one.
 COPY --chown=1000:1000 --from=sdk /tmp /cache
 # Ensure the ARG variables are used in the layer to prevent reuse by other builds.
-COPY --chown=1000:1000 .dockerignore /cache/.${PACKAGE}.${ARCH}.${TOKEN}
+COPY --chown=1000:1000 .gitignore /cache/.${PACKAGE}.${ARCH}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Some builds need to modify files in the source directory, for example Rust software using
@@ -62,7 +52,7 @@ ARG TOKEN
 # We can't create directories via RUN in a scratch container, so take an existing one.
 COPY --chown=1000:1000 --from=sdk /tmp /variantcache
 # Ensure the ARG variables are used in the layer to prevent reuse by other builds.
-COPY --chown=1000:1000 .dockerignore /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
+COPY --chown=1000:1000 .gitignore /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Builds an RPM package from a spec file.
@@ -135,7 +125,7 @@ RUN --mount=target=/host \
         --repofrompath repo,./rpmbuild/RPMS \
         --enablerepo 'repo' \
         --nogpgcheck \
-	--forcearch "${ARCH}" \
+        --forcearch "${ARCH}" \
         builddep rpmbuild/SPECS/${PACKAGE}.spec
 
 # We use the "nocache" writable space to generate code where necessary, like the variant-
@@ -186,7 +176,7 @@ RUN --mount=target=/host \
         --nogpgcheck \
         --downloadonly \
         --downloaddir . \
-	--forcearch "${ARCH}" \
+        --forcearch "${ARCH}" \
         install $(printf "bottlerocket-%s\n" ${PACKAGES}) \
     && mv *.rpm /local/rpms \
     && createrepo_c /local/rpms \
@@ -232,7 +222,7 @@ RUN --mount=target=/host \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
     --mount=type=secret,id=aws-session-token.env,target=/root/.aws/aws-session-token.env \
-    /tools/rpm2img \
+    /host/build/tools/rpm2img \
       --package-dir=/local/rpms \
       --output-dir=/local/output \
       --output-fmt="${IMAGE_FORMAT}" \
@@ -265,7 +255,7 @@ RUN --mount=target=/host \
         -name "bottlerocket-migrations-*.rpm" \
         -not -iname '*debuginfo*' \
         -exec cp '{}' '/local/migrations/' ';' \
-    && /tools/rpm2migrations \
+    && /host/build/tools/rpm2migrations \
         --package-dir=/local/migrations \
         --output-dir=/local/output \
     && echo ${NOCACHE}
@@ -291,7 +281,7 @@ RUN --mount=target=/host \
     && find /host/build/rpms/ -maxdepth 1 -type f \
         -name "bottlerocket-${KERNEL}-archive-*.rpm" \
         -exec cp '{}' '/local/archives/' ';' \
-    && /tools/rpm2kmodkit \
+    && /host/build/tools/rpm2kmodkit \
         --archive-dir=/local/archives \
         --toolchain-dir=/local/toolchain \
         --output-dir=/local/output \

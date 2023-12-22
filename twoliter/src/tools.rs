@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+use filetime::{set_file_handle_times, set_file_mtime, FileTime};
 use flate2::read::ZlibDecoder;
 use log::debug;
 use std::path::Path;
 use tar::Archive;
-use tempfile::TempDir;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
@@ -16,13 +16,6 @@ const PUBSYS_SETUP: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_PUBSYS_SETUP"));
 const TESTSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_TESTSYS"));
 const TUFTOOL: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_TUFTOOL"));
 
-/// Create a `TempDir` object and provide a tools-centric error message if it fails. Make sure you
-/// hang on to the `TempDir` for as long as you need it. It will be deleted when it goes out of
-/// scope.
-pub(crate) fn tools_tempdir() -> Result<TempDir> {
-    TempDir::new().context("Unable to create a tempdir for Twoliter's tools")
-}
-
 /// Install tools into the given `tools_dir`. If you use a `TempDir` object, make sure to pass it by
 /// reference and hold on to it until you no longer need the tools to still be installed (it will
 /// auto delete when it goes out of scope).
@@ -30,22 +23,31 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
     let dir = tools_dir.as_ref();
     debug!("Installing tools to '{}'", dir.display());
 
-    write_bin("bottlerocket-variant", BOTTLEROCKET_VARIANT, &dir).await?;
-    write_bin("buildsys", BUILDSYS, &dir).await?;
-    write_bin("pubsys", PUBSYS, &dir).await?;
-    write_bin("pubsys-setup", PUBSYS_SETUP, &dir).await?;
-    write_bin("testsys", TESTSYS, &dir).await?;
-    write_bin("tuftool", TUFTOOL, &dir).await?;
-
     // Write out the embedded tools and scripts.
     unpack_tarball(&dir)
         .await
         .context("Unable to install tools")?;
 
+    // Pick one of the embedded files for use as the canonical mtime.
+    let metadata = fs::metadata(dir.join("Dockerfile"))
+        .await
+        .context("Unable to get Dockerfile metadata")?;
+    let mtime = FileTime::from_last_modification_time(&metadata);
+
+    write_bin("bottlerocket-variant", BOTTLEROCKET_VARIANT, &dir, mtime).await?;
+    write_bin("buildsys", BUILDSYS, &dir, mtime).await?;
+    write_bin("pubsys", PUBSYS, &dir, mtime).await?;
+    write_bin("pubsys-setup", PUBSYS_SETUP, &dir, mtime).await?;
+    write_bin("testsys", TESTSYS, &dir, mtime).await?;
+    write_bin("tuftool", TUFTOOL, &dir, mtime).await?;
+
+    // Apply the mtime to the directory now that the writes are done.
+    set_file_mtime(dir, mtime).context(format!("Unable to set mtime for '{}'", dir.display()))?;
+
     Ok(())
 }
 
-async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>) -> Result<()> {
+async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>, mtime: FileTime) -> Result<()> {
     let path = dir.as_ref().join(name);
     let mut f = fs::OpenOptions::new()
         .create(true)
@@ -60,7 +62,12 @@ async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>) -> Result<()>
         .context(format!("Unable to write to '{}'", path.display()))?;
     f.flush()
         .await
-        .context(format!("Unable to finalize '{}'", path.display()))
+        .context(format!("Unable to finalize '{}'", path.display()))?;
+
+    let f = f.into_std().await;
+    set_file_handle_times(&f, None, Some(mtime))
+        .context(format!("Unable to set mtime for '{}'", path.display()))?;
+    Ok(())
 }
 
 async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {
@@ -77,7 +84,7 @@ async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {
 
 #[tokio::test]
 async fn test_install_tools() {
-    let tempdir = tools_tempdir().unwrap();
+    let tempdir = tempfile::TempDir::new().unwrap();
     install_tools(&tempdir).await.unwrap();
 
     // Assert that the expected files exist in the tools directory.
@@ -98,4 +105,14 @@ async fn test_install_tools() {
     assert!(tempdir.path().join("pubsys-setup").is_file());
     assert!(tempdir.path().join("testsys").is_file());
     assert!(tempdir.path().join("tuftool").is_file());
+
+    // Check that the mtimes match.
+    let dockerfile_metadata = fs::metadata(tempdir.path().join("Dockerfile"))
+        .await
+        .unwrap();
+    let buildsys_metadata = fs::metadata(tempdir.path().join("buildsys")).await.unwrap();
+    let dockerfile_mtime = FileTime::from_last_modification_time(&dockerfile_metadata);
+    let buildsys_mtime = FileTime::from_last_modification_time(&buildsys_metadata);
+
+    assert_eq!(dockerfile_mtime, buildsys_mtime);
 }

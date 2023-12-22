@@ -1,7 +1,7 @@
 use crate::cargo_make::CargoMake;
 use crate::docker::DockerContainer;
 use crate::project;
-use crate::tools::{install_tools, tools_tempdir};
+use crate::tools::install_tools;
 use anyhow::{Context, Result};
 use clap::Parser;
 use log::debug;
@@ -42,9 +42,11 @@ impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let token = project.token();
-        let tempdir = tools_tempdir()?;
-        install_tools(&tempdir).await?;
-        let makefile_path = tempdir.path().join("Makefile.toml");
+        let toolsdir = project.project_dir().join("build/tools");
+        tokio::fs::remove_dir_all(&toolsdir).await?;
+        tokio::fs::create_dir_all(&toolsdir).await?;
+        install_tools(&toolsdir).await?;
+        let makefile_path = toolsdir.join("Makefile.toml");
         // A temporary directory in the `build` directory
         let build_temp_dir = TempDir::new_in(project.project_dir())
             .context("Unable to create a tempdir for Twoliter's build")?;
@@ -103,7 +105,7 @@ impl BuildVariant {
 
         // Hold the result of the cargo make call so we can clean up the project directory first.
         let res = CargoMake::new(&project, &self.arch)?
-            .env("TWOLITER_TOOLS_DIR", tempdir.path().display().to_string())
+            .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)
             .env("BUILDSYS_SBKEYS_DIR", sbkeys_dir.display().to_string())
