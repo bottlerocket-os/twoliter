@@ -1,11 +1,13 @@
+use crate::common::fs;
 use anyhow::{Context, Result};
 use filetime::{set_file_handle_times, set_file_mtime, FileTime};
 use flate2::read::ZlibDecoder;
 use log::debug;
 use std::path::Path;
 use tar::Archive;
-use tokio::fs;
+use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+use tokio::runtime::Handle;
 
 const TAR_GZ_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tools.tar.gz"));
 const BOTTLEROCKET_VARIANT: &[u8] =
@@ -49,7 +51,7 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
 
 async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>, mtime: FileTime) -> Result<()> {
     let path = dir.as_ref().join(name);
-    let mut f = fs::OpenOptions::new()
+    let mut f = OpenOptions::new()
         .create(true)
         .read(false)
         .write(true)
@@ -65,9 +67,15 @@ async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>, mtime: FileTi
         .context(format!("Unable to finalize '{}'", path.display()))?;
 
     let f = f.into_std().await;
-    set_file_handle_times(&f, None, Some(mtime))
-        .context(format!("Unable to set mtime for '{}'", path.display()))?;
-    Ok(())
+    let rt = Handle::current();
+    rt.spawn_blocking(move || {
+        set_file_handle_times(&f, None, Some(mtime))
+            .context(format!("Unable to set mtime for '{}'", path.display()))
+    })
+    .await
+    .context(format!(
+        "Unable to run and join async task for reading handle time"
+    ))?
 }
 
 async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {

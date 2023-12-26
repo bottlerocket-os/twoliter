@@ -1,3 +1,4 @@
+use crate::common::fs;
 use crate::docker::ImageArchUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
@@ -7,7 +8,6 @@ use non_empty_string::NonEmptyString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::path::{Path, PathBuf};
-use tokio::fs;
 use toml::Table;
 
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
@@ -241,9 +241,9 @@ impl UnvalidatedProject {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::common::fs;
     use crate::test::data_dir;
     use tempfile::TempDir;
-    use tokio::fs;
 
     /// Ensure that `Twoliter.toml` can be deserialized.
     #[tokio::test]
@@ -341,18 +341,10 @@ mod test {
         let release_toml_to = p.join("Release.toml");
         fs::copy(&twoliter_toml_from, &twoliter_toml_to)
             .await
-            .expect(&format!(
-                "Unable to copy {} to {}",
-                twoliter_toml_from.display(),
-                twoliter_toml_to.display()
-            ));
+            .unwrap();
         fs::copy(&release_toml_from, &release_toml_to)
             .await
-            .expect(&format!(
-                "Unable to copy {} to {}",
-                release_toml_from.display(),
-                release_toml_to.display()
-            ));
+            .unwrap();
         let result = Project::find_and_load(&p).await;
         assert!(
             result.is_err(),
@@ -372,18 +364,10 @@ mod test {
         let release_toml_to = p.join("Release.toml");
         fs::copy(&twoliter_toml_from, &twoliter_toml_to)
             .await
-            .expect(&format!(
-                "Unable to copy {} to {}",
-                twoliter_toml_from.display(),
-                twoliter_toml_to.display()
-            ));
+            .unwrap();
         fs::copy(&release_toml_from, &release_toml_to)
             .await
-            .expect(&format!(
-                "Unable to copy {} to {}",
-                release_toml_from.display(),
-                release_toml_to.display()
-            ));
+            .unwrap();
 
         // The project should load because Release.toml and Twoliter.toml versions match.
         Project::find_and_load(&p).await.unwrap();

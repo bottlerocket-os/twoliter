@@ -1,9 +1,9 @@
+use crate::common::fs;
 use crate::tools::install_tools;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use std::env;
 use std::path::PathBuf;
-use tokio::fs;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Parser)]
@@ -49,9 +49,7 @@ impl CheckToolArgs {
             .install_dir
             .clone()
             .unwrap_or_else(|| env::temp_dir().join(unique_name()));
-        fs::create_dir_all(&dir)
-            .await
-            .context(format!("Unable to create directory '{}'", dir.display()))?;
+        fs::create_dir_all(&dir).await?;
         install_tools(&dir).await?;
         println!("{}", dir.display());
         Ok(())

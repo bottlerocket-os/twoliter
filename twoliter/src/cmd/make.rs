@@ -1,10 +1,10 @@
 use crate::cargo_make::CargoMake;
+use crate::common::fs;
 use crate::project::{self};
 use crate::tools::install_tools;
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tokio::fs;
 
 /// Run a cargo make command in Twoliter's build environment. Known Makefile.toml environment
 /// variables will be passed-through to the cargo make invocation.
