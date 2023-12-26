@@ -35,7 +35,7 @@ impl Make {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let toolsdir = project.project_dir().join("build/tools");
-        fs::remove_dir_all(&toolsdir).await?;
+        let _ = fs::remove_dir_all(&toolsdir).await;
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
         CargoMake::new(&project, &self.arch)?
