@@ -12,10 +12,12 @@ exclude = ["/design", "/target", "/dockerfiles", "/scripts"]
 [dependencies]
 anyhow = "1"
 async-recursion = "1"
+async-walkdir = "1"
 clap = { version = "4", features = ["derive", "env", "std"] }
 env_logger = "0.10"
 filetime = "0.2"
 flate2 = "1"
+futures= "0.3"
 hex = "0.4"
 log = "0.4"
 non-empty-string = { version = "0.2", features = [ "serde" ] }

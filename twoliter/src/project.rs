@@ -3,10 +3,13 @@ use crate::docker::ImageArchUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
+use async_walkdir::WalkDir;
+use futures::stream::StreamExt;
 use log::{debug, info, trace, warn};
 use non_empty_string::NonEmptyString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use toml::Table;
 
@@ -120,6 +123,52 @@ impl Project {
         d.update(self.filepath().display().to_string());
         let digest = hex::encode(d.finalize());
         (digest[..12]).to_string()
+    }
+
+    /// Returns a list of the names of Go modules by searching the `sources` directory for `go.mod`
+    /// files.
+    pub(crate) async fn find_go_modules(&self) -> Result<Vec<String>> {
+        let root = self.project_dir.join("sources");
+        let mut entries = WalkDir::new(&root);
+        let mut modules = Vec::new();
+        loop {
+            match entries.next().await {
+                Some(Ok(entry)) => {
+                    if let Some(filename) = entry.path().file_name() {
+                        if filename == OsStr::new("go.mod") {
+                            let parent_dir = entry
+                                .path()
+                                .parent()
+                                .context(format!(
+                                    "Expected the path '{}' to have a parent when searching for \
+                                 go modules",
+                                    entry.path().display()
+                                ))?
+                                .to_path_buf();
+
+                            let module_name = parent_dir
+                                .file_name()
+                                .context(format!(
+                                    "Expected to find a module name in path '{}'",
+                                    parent_dir.display()
+                                ))?
+                                .to_str()
+                                .context(format!(
+                                    "Found non-UTF-8 character in file path '{}'",
+                                    parent_dir.display(),
+                                ))?
+                                .to_string();
+                            modules.push(module_name)
+                        }
+                    }
+                }
+                Some(Err(e)) => break Err(e).context("Error while searching for go modules"),
+                None => break Ok(()),
+            }
+        }?;
+        // Provide a predictable ordering.
+        modules.sort();
+        Ok(modules)
     }
 }
 
@@ -242,7 +291,7 @@ impl UnvalidatedProject {
 mod test {
     use super::*;
     use crate::common::fs;
-    use crate::test::data_dir;
+    use crate::test::{data_dir, projects_dir};
     use tempfile::TempDir;
 
     /// Ensure that `Twoliter.toml` can be deserialized.
@@ -371,5 +420,14 @@ mod test {
 
         // The project should load because Release.toml and Twoliter.toml versions match.
         Project::find_and_load(&p).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn find_go_modules() {
+        let twoliter_toml_path = projects_dir().join("project1").join("Twoliter.toml");
+        let project = Project::load(twoliter_toml_path).await.unwrap();
+        let go_modules = project.find_go_modules().await.unwrap();
+        assert_eq!(go_modules.len(), 1, "Expected to find 1 go module");
+        assert_eq!(go_modules.first().unwrap(), "hello-go");
     }
 }
