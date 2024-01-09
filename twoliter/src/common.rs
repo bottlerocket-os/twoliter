@@ -148,7 +148,7 @@ pub(crate) mod fs {
 
     pub(crate) async fn remove_file(path: impl AsRef<Path>) -> Result<()> {
         fs::remove_file(path.as_ref()).await.context(format!(
-            "Unable to XXSOMETHINGXX '{}'",
+            "Unable to remove file '{}'",
             path.as_ref().display()
         ))
     }
