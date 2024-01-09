@@ -17,3 +17,9 @@ pub(crate) fn data_dir() -> PathBuf {
         .canonicalize()
         .unwrap()
 }
+
+pub(crate) fn projects_dir() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop();
+    path.join("tests").join("projects").canonicalize().unwrap()
+}

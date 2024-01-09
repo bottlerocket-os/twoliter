@@ -110,6 +110,7 @@ impl BuildVariant {
             .env("BUILDSYS_VARIANT", &self.variant)
             .env("BUILDSYS_SBKEYS_DIR", sbkeys_dir.display().to_string())
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
+            .env("GO_MODULES", project.find_go_modules().await?.join(" "))
             .makefile(makefile_path)
             .project_dir(project.project_dir())
             .exec("build")
