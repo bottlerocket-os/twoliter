@@ -1,14 +1,13 @@
 use crate::cargo_make::CargoMake;
+use crate::common::fs;
 use crate::docker::DockerContainer;
 use crate::project;
 use crate::tools::install_tools;
 use anyhow::{Context, Result};
 use clap::Parser;
 use log::debug;
-use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use tokio::fs::{remove_dir_all, remove_file};
 
 #[derive(Debug, Parser)]
 pub(crate) enum BuildCommand {
@@ -43,15 +42,16 @@ impl BuildVariant {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let token = project.token();
         let toolsdir = project.project_dir().join("build/tools");
-        tokio::fs::remove_dir_all(&toolsdir).await?;
-        tokio::fs::create_dir_all(&toolsdir).await?;
+        // Ignore errors because we want to proceed even if the directory does not exist.
+        let _ = fs::remove_dir_all(&toolsdir).await;
+        fs::create_dir_all(&toolsdir).await?;
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
         // A temporary directory in the `build` directory
         let build_temp_dir = TempDir::new_in(project.project_dir())
             .context("Unable to create a tempdir for Twoliter's build")?;
         let packages_dir = build_temp_dir.path().join("sdk_rpms");
-        fs::create_dir_all(&packages_dir)?;
+        fs::create_dir_all(&packages_dir).await?;
 
         let sdk_container = DockerContainer::new(
             format!("sdk-{}", token),
@@ -70,12 +70,18 @@ impl BuildVariant {
             .await?;
 
         let rpms_dir = project.project_dir().join("build").join("rpms");
-        fs::create_dir_all(&rpms_dir)?;
+        fs::create_dir_all(&rpms_dir).await?;
         debug!("Moving rpms to build dir");
-        for maybe_file in fs::read_dir(packages_dir.join("rpms"))? {
-            let file = maybe_file?;
-            debug!("Moving '{}'", file.path().display());
-            fs::rename(file.path(), rpms_dir.join(file.file_name()))?;
+        let rpms = packages_dir.join("rpms");
+        let mut read_dir = tokio::fs::read_dir(&rpms)
+            .await
+            .context(format!("Unable to read dir '{}'", rpms.display()))?;
+        while let Some(entry) = read_dir.next_entry().await.context(format!(
+            "Error while reading entries in dir '{}'",
+            rpms.display()
+        ))? {
+            debug!("Moving '{}'", entry.path().display());
+            fs::rename(entry.path(), rpms_dir.join(entry.file_name())).await?;
         }
 
         let mut created_files = Vec::new();
@@ -84,7 +90,7 @@ impl BuildVariant {
         if !sbkeys_dir.is_dir() {
             // Create a sbkeys directory in the main project
             debug!("sbkeys dir not found. Creating a temporary directory");
-            fs::create_dir_all(&sbkeys_dir)?;
+            fs::create_dir_all(&sbkeys_dir).await?;
             sdk_container
                 .cp_out(
                     Path::new("twoliter/alpha/sbkeys/generate-local-sbkeys"),
@@ -99,6 +105,7 @@ impl BuildVariant {
         if !models_dir.is_dir() {
             debug!("models source dir not found. Creating a temporary directory");
             fs::create_dir_all(&models_dir.join("src/variant"))
+                .await
                 .context("Unable to create models source directory")?;
             created_files.push(models_dir)
         }
@@ -120,9 +127,9 @@ impl BuildVariant {
         for file_name in created_files {
             let added = Path::new(&file_name);
             if added.is_file() {
-                remove_file(added).await?;
+                fs::remove_file(added).await?;
             } else if added.is_dir() {
-                remove_dir_all(added).await?;
+                fs::remove_dir_all(added).await?;
             }
         }
 
