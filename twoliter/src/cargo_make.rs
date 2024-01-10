@@ -160,7 +160,7 @@ fn build_system_env_vars() -> Result<Vec<String>> {
 
 /// A list of environment variables that don't conform to naming conventions but need to be passed
 /// through to the `cargo make` invocation.
-const ENV_VARS: [&str; 12] = [
+const ENV_VARS: [&str; 13] = [
     "ALLOW_MISSING_KEY",
     "AMI_DATA_FILE_SUFFIX",
     "CARGO_MAKE_CARGO_ARGS",
@@ -168,6 +168,7 @@ const ENV_VARS: [&str; 12] = [
     "CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH",
     "CARGO_MAKE_TESTSYS_ARGS",
     "CARGO_MAKE_TESTSYS_KUBECONFIG_ARG",
+    "GO_MODULES",
     "MARK_OVA_AS_TEMPLATE",
     "RELEASE_START_TIME",
     "SSM_DATA_FILE_SUFFIX",
@@ -214,6 +215,7 @@ fn test_is_build_system_env() {
     assert!(is_build_system_env("TESTSYS_!"));
     assert!(is_build_system_env("BOOT_CONFIG!"));
     assert!(is_build_system_env("BOOT_CONFIG_INPUT"));
+    assert!(is_build_system_env("GO_MODULES"));
     assert!(is_build_system_env("AWS_REGION"));
     assert!(!is_build_system_env("PATH"));
     assert!(!is_build_system_env("HOME"));
