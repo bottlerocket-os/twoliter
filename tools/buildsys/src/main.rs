@@ -16,7 +16,7 @@ mod project;
 mod spec;
 
 use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command};
-use builder::{PackageBuilder, VariantBuilder};
+use crate::builder::DockerBuild;
 use buildsys::manifest::{BundleModule, ManifestInfo, SupportedArch};
 use cache::LookasideCache;
 use clap::Parser;
@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::process;
 
 mod error {
+    use buildsys::manifest::SupportedArch;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -75,7 +76,7 @@ mod error {
             supported_arches.join(", ")
         ))]
         UnsupportedArch {
-            arch: String,
+            arch: SupportedArch,
             supported_arches: Vec<String>,
         },
     }
@@ -114,7 +115,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         .join(manifest_file);
     let variant_manifest =
         ManifestInfo::new(variant_manifest_path).context(error::ManifestParseSnafu)?;
-    supported_arch(&variant_manifest, &args.common.arch)?;
+    supported_arch(&variant_manifest, args.common.arch)?;
     let mut image_features = variant_manifest.image_features();
 
     let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
@@ -224,8 +225,10 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         println!("cargo:rerun-if-changed={}", f.display());
     }
 
-    PackageBuilder::build(&args, &package, image_features).context(error::BuildAttemptSnafu)?;
-
+    DockerBuild::new_package(args, &manifest)
+        .unwrap()
+        .build()
+        .context(error::BuildAttemptSnafu)?;
     Ok(())
 }
 
@@ -236,37 +239,24 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
         .context(error::ManifestParseSnafu)?;
 
-    supported_arch(&manifest, &args.common.arch)?;
+    supported_arch(&manifest, args.common.arch)?;
 
-    if let Some(packages) = manifest.included_packages() {
-        let image_format = manifest.image_format();
-        let image_layout = manifest.image_layout();
-        let kernel_parameters = manifest.kernel_parameters();
-        let image_features = manifest.image_features();
-        VariantBuilder::build(
-            &args,
-            packages,
-            image_format,
-            image_layout,
-            kernel_parameters,
-            image_features,
-        )
-        .context(error::BuildAttemptSnafu)?;
+    if manifest.included_packages().is_some() {
+        DockerBuild::new_variant(args, &manifest)
+            .unwrap()
+            .build()
+            .context(error::BuildAttemptSnafu)?;
     } else {
         println!("cargo:warning=No included packages in manifest. Skipping variant build.");
     }
-
     Ok(())
 }
 
 /// Ensure that the current arch is supported by the current variant
-fn supported_arch(manifest: &ManifestInfo, arch: &str) -> Result<()> {
+fn supported_arch(manifest: &ManifestInfo, arch: SupportedArch) -> Result<()> {
     if let Some(supported_arches) = manifest.supported_arches() {
-        let current_arch: SupportedArch =
-            serde_plain::from_str(arch).context(error::UnknownArchSnafu { arch })?;
-
         ensure!(
-            supported_arches.contains(&current_arch),
+            supported_arches.contains(&arch),
             error::UnsupportedArchSnafu {
                 arch,
                 supported_arches: supported_arches

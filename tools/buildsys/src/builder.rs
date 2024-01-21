@@ -6,6 +6,10 @@ the repository's top-level Dockerfile.
 */
 pub(crate) mod error;
 
+use crate::args::{BuildPackageArgs, BuildType, BuildVariantArgs};
+use buildsys::manifest::{
+    ImageFeature, ImageFormat, ImageLayout, ManifestInfo, PartitionPlan, SupportedArch,
+};
 use duct::cmd;
 use error::Result;
 use lazy_static::lazy_static;
@@ -21,11 +25,6 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use walkdir::{DirEntry, WalkDir};
-
-use crate::args::{BuildPackageArgs, BuildType, BuildVariantArgs};
-use buildsys::manifest::{ImageFeature, ImageFormat, ImageLayout, PartitionPlan, SupportedArch};
-
-const TOOLS_DIR: &str = "TWOLITER_TOOLS_DIR";
 
 /*
 There's a bug in BuildKit that can lead to a build failure during parallel
@@ -86,91 +85,187 @@ lazy_static! {
 
 static DOCKER_BUILD_MAX_ATTEMPTS: NonZeroU16 = nonzero!(10u16);
 
-pub(crate) struct PackageBuilder;
+struct CommonBuildArgs {
+    arch: SupportedArch,
+    sdk: String,
+    toolchain: String,
+    nocache: String,
+    token: String,
+}
 
-impl PackageBuilder {
-    /// Build RPMs for the specified package.
-    pub(crate) fn build(
-        build_packages_args: &BuildPackageArgs,
-        package: &str,
-        image_features: Option<HashSet<&ImageFeature>>,
-    ) -> Result<Self> {
-        let arch = &build_packages_args.common.arch;
-        let goarch = serde_plain::from_str::<SupportedArch>(arch)
-            .context(error::UnsupportedArchSnafu { arch })?
-            .goarch();
+impl CommonBuildArgs {
+    fn new(root: impl AsRef<Path>, sdk: String, toolchain: String, arch: SupportedArch) -> Self {
+        let mut d = Sha512::new();
+        d.update(root.as_ref().display().to_string());
+        let digest = hex::encode(d.finalize());
+        let token = digest[..12].to_string();
 
-        let mut args = Vec::new();
-        args.push("--network".into());
-        args.push("none".into());
-        args.build_arg("PACKAGE", package);
-        args.build_arg("ARCH", arch);
-        args.build_arg("GOARCH", goarch);
+        // Avoid using a cached layer from a previous build.
+        let nocache = rand::thread_rng().gen::<u32>().to_string();
 
-        // Pass certain environment variables into the build environment. These variables aren't
-        // automatically used to trigger rebuilds when they change, because most packages aren't
-        // affected. Packages that care should "echo cargo:rerun-if-env-changed=VAR" in their
-        // build.rs build script.
-        for (src_env_var, target_env_var) in [
-            ("BUILDSYS_VARIANT", "VARIANT"),
-            ("BUILDSYS_VARIANT_PLATFORM", "VARIANT_PLATFORM"),
-            ("BUILDSYS_VARIANT_RUNTIME", "VARIANT_RUNTIME"),
-            ("BUILDSYS_VARIANT_FAMILY", "VARIANT_FAMILY"),
-            ("BUILDSYS_VARIANT_FLAVOR", "VARIANT_FLAVOR"),
-            ("PUBLISH_REPO", "REPO"),
-        ] {
-            let src_env_val =
-                env::var(src_env_var).context(error::EnvironmentSnafu { var: src_env_var })?;
-            args.build_arg(target_env_var, src_env_val);
+        Self {
+            arch,
+            sdk,
+            toolchain,
+            nocache,
+            token,
         }
+    }
+}
 
-        let tag = format!(
-            "buildsys-pkg-{package}-{arch}",
-            package = package,
-            arch = arch,
-        );
+struct PackageBuildArgs {
+    image_features: Option<HashSet<ImageFeature>>,
+    package: String,
+    publish_repo: String,
+    variant: String,
+    variant_family: String,
+    variant_flavor: String,
+    variant_platform: String,
+    variant_runtime: String,
+}
 
-        if let Some(image_features) = image_features {
+impl PackageBuildArgs {
+    fn build_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        args.build_arg("PACKAGE", &self.package);
+        args.build_arg("REPO", &self.publish_repo);
+        args.build_arg("VARIANT", &self.variant);
+        args.build_arg("VARIANT_FAMILY", &self.variant_family);
+        args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
+        args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
+        args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
+        if let Some(image_features) = &self.image_features {
             for image_feature in image_features.iter() {
                 args.build_arg(format!("{}", image_feature), "1");
             }
         }
-
-        build(
-            BuildType::Package,
-            package,
-            arch,
-            args,
-            &tag,
-            &build_packages_args.packages_dir,
-            &build_packages_args.common.root_dir,
-            &build_packages_args.common.state_dir,
-            &build_packages_args.common.sdk_image,
-            &build_packages_args.common.toolchain,
-        )?;
-
-        Ok(Self)
+        args
     }
 }
 
-pub(crate) struct VariantBuilder;
+struct VariantBuildArgs {
+    data_image_publish_size_gib: i32,
+    data_image_size_gib: String,
+    image_features: HashSet<ImageFeature>,
+    image_format: String,
+    kernel_parameters: String,
+    name: String,
+    os_image_publish_size_gib: String,
+    os_image_size_gib: String,
+    packages: String,
+    partition_plan: String,
+    pretty_name: String,
+    variant: String,
+    version_build: String,
+    version_image: String,
+}
 
-impl VariantBuilder {
-    /// Build a variant with the specified packages installed.
-    pub(crate) fn build(
-        build_variant_args: &BuildVariantArgs,
-        packages: &[String],
-        image_format: Option<&ImageFormat>,
-        image_layout: Option<&ImageLayout>,
-        kernel_parameters: Option<&Vec<String>>,
-        image_features: Option<HashSet<&ImageFeature>>,
-    ) -> Result<Self> {
-        let arch = &build_variant_args.common.arch;
-        let goarch = serde_plain::from_str::<SupportedArch>(arch)
-            .context(error::UnsupportedArchSnafu { arch })?
-            .goarch();
+impl VariantBuildArgs {
+    fn build_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        args.build_arg(
+            "DATA_IMAGE_PUBLISH_SIZE_GIB",
+            self.data_image_publish_size_gib.to_string(),
+        );
+        args.build_arg("DATA_IMAGE_SIZE_GIB", &self.data_image_size_gib);
+        args.build_arg("IMAGE_FORMAT", &self.image_format);
+        args.build_arg("KERNEL_PARAMETERS", &self.kernel_parameters);
+        args.build_arg("IMAGE_NAME", &self.name);
+        args.build_arg("OS_IMAGE_PUBLISH_SIZE_GIB", &self.os_image_publish_size_gib);
+        args.build_arg("OS_IMAGE_SIZE_GIB", &self.os_image_size_gib);
+        args.build_arg("PACKAGES", &self.packages);
+        args.build_arg("PARTITION_PLAN", &self.partition_plan);
+        args.build_arg("PRETTY_NAME", &self.pretty_name);
+        args.build_arg("VARIANT", &self.variant);
+        args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("VERSION_ID", &self.version_image);
 
-        let image_layout = image_layout.cloned().unwrap_or_default();
+        for image_feature in self.image_features.iter() {
+            args.build_arg(format!("{}", image_feature), "1");
+        }
+
+        args
+    }
+}
+
+enum TargetBuildArgs {
+    Package(PackageBuildArgs),
+    Variant(VariantBuildArgs),
+}
+
+impl TargetBuildArgs {
+    pub(crate) fn build_type(&self) -> BuildType {
+        match self {
+            TargetBuildArgs::Package(_) => BuildType::Package,
+            TargetBuildArgs::Variant(_) => BuildType::Variant,
+        }
+    }
+}
+
+pub(crate) struct DockerBuild {
+    dockerfile: PathBuf,
+    context: PathBuf,
+    target: String,
+    tag: String,
+    root_dir: PathBuf,
+    artifacts_dir: PathBuf,
+    state_dir: PathBuf,
+    artifact_name: String,
+    common_build_args: CommonBuildArgs,
+    target_build_args: TargetBuildArgs,
+    secrets_args: Vec<String>,
+}
+
+impl DockerBuild {
+    /// Create a new `DockerBuild` that can build a package.
+    pub(crate) fn new_package(args: BuildPackageArgs, manifest: &ManifestInfo) -> Result<Self> {
+        let package = if let Some(name_override) = manifest.package_name() {
+            name_override.clone()
+        } else {
+            args.cargo_package_name
+        };
+
+        Ok(Self {
+            dockerfile: args.common.tools_dir.join("Dockerfile"),
+            context: args.common.root_dir.clone(),
+            target: "package".to_string(),
+            tag: append_token(
+                format!(
+                    "buildsys-pkg-{package}-{arch}",
+                    package = package,
+                    arch = args.common.arch,
+                ),
+                &args.common.root_dir,
+            ),
+            root_dir: args.common.root_dir.clone(),
+            artifacts_dir: args.packages_dir,
+            state_dir: args.common.state_dir,
+            artifact_name: package.clone(),
+            common_build_args: CommonBuildArgs::new(
+                &args.common.root_dir,
+                args.common.sdk_image,
+                args.common.toolchain,
+                args.common.arch,
+            ),
+            target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
+                image_features: manifest
+                    .image_features()
+                    .map(|set| set.iter().map(|&x| x.to_owned()).collect()),
+                package,
+                publish_repo: args.publish_repo,
+                variant: args.variant,
+                variant_family: args.variant_family,
+                variant_flavor: args.variant_flavor,
+                variant_platform: args.variant_platform,
+                variant_runtime: args.variant_runtime,
+            }),
+            secrets_args: Vec::new(),
+        })
+    }
+
+    /// Create a new `DockerBuild` that can build a variant image.
+    pub(crate) fn new_variant(args: BuildVariantArgs, manifest: &ManifestInfo) -> Result<Self> {
+        let image_layout = manifest.image_layout().cloned().unwrap_or_default();
         let ImageLayout {
             os_image_size_gib,
             data_image_size_gib,
@@ -181,185 +276,162 @@ impl VariantBuilder {
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();
 
-        let mut args = Vec::new();
-        args.push("--network".into());
-        args.push("host".into());
-        args.build_arg("PACKAGES", packages.join(" "));
-        args.build_arg("ARCH", arch);
-        args.build_arg("GOARCH", goarch);
-        args.build_arg("VARIANT", &build_variant_args.variant);
-        args.build_arg("VERSION_ID", &build_variant_args.version_image);
-        args.build_arg("BUILD_ID", &build_variant_args.version_build);
-        args.build_arg("PRETTY_NAME", &build_variant_args.pretty_name);
-        args.build_arg("IMAGE_NAME", &build_variant_args.name);
-        args.build_arg(
-            "IMAGE_FORMAT",
-            match image_format {
-                Some(ImageFormat::Raw) | None => "raw",
-                Some(ImageFormat::Qcow2) => "qcow2",
-                Some(ImageFormat::Vmdk) => "vmdk",
-            },
-        );
-        args.build_arg("OS_IMAGE_SIZE_GIB", format!("{}", os_image_size_gib));
-        args.build_arg("DATA_IMAGE_SIZE_GIB", format!("{}", data_image_size_gib));
-        args.build_arg(
-            "OS_IMAGE_PUBLISH_SIZE_GIB",
-            format!("{}", os_image_publish_size_gib),
-        );
-        args.build_arg(
-            "DATA_IMAGE_PUBLISH_SIZE_GIB",
-            format!("{}", data_image_publish_size_gib),
-        );
-        args.build_arg(
-            "PARTITION_PLAN",
-            match partition_plan {
-                PartitionPlan::Split => "split",
-                PartitionPlan::Unified => "unified",
-            },
-        );
-        args.build_arg(
-            "KERNEL_PARAMETERS",
-            kernel_parameters.map(|v| v.join(" ")).unwrap_or_default(),
-        );
+        Ok(Self {
+            dockerfile: args.common.tools_dir.join("Dockerfile"),
+            context: args.common.root_dir.clone(),
+            target: "variant".to_string(),
+            tag: append_token(
+                format!(
+                    "buildsys-var-{variant}-{arch}",
+                    variant = args.variant,
+                    arch = args.common.arch
+                ),
+                &args.common.root_dir,
+            ),
+            root_dir: args.common.root_dir.clone(),
+            artifacts_dir: args.common.image_arch_variant_dir,
+            state_dir: args.common.state_dir,
+            artifact_name: args.variant.clone(),
+            common_build_args: CommonBuildArgs::new(
+                &args.common.root_dir,
+                args.common.sdk_image,
+                args.common.toolchain,
+                args.common.arch,
+            ),
+            target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
+                data_image_publish_size_gib,
+                data_image_size_gib: data_image_size_gib.to_string(),
+                image_features: manifest
+                    .image_features()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .copied()
+                    .collect(),
+                image_format: match manifest.image_format() {
+                    Some(ImageFormat::Raw) | None => "raw",
+                    Some(ImageFormat::Qcow2) => "qcow2",
+                    Some(ImageFormat::Vmdk) => "vmdk",
+                }
+                .to_string(),
+                kernel_parameters: manifest
+                    .kernel_parameters()
+                    .cloned()
+                    .unwrap_or_default()
+                    .join(" "),
+                name: args.name,
+                os_image_publish_size_gib: os_image_publish_size_gib.to_string(),
+                os_image_size_gib: os_image_size_gib.to_string(),
+                packages: manifest
+                    .included_packages()
+                    .cloned()
+                    .unwrap_or_default()
+                    .join(" "),
+                partition_plan: match partition_plan {
+                    PartitionPlan::Split => "split",
+                    PartitionPlan::Unified => "unified",
+                }
+                .to_string(),
+                pretty_name: args.pretty_name,
+                variant: args.variant,
+                version_build: args.version_build,
+                version_image: args.version_image,
+            }),
+            secrets_args: secrets_args()?,
+        })
+    }
 
-        if let Some(image_features) = image_features {
-            for image_feature in image_features.iter() {
-                args.build_arg(format!("{}", image_feature), "1");
-            }
-        }
+    pub(crate) fn build(&self) -> Result<()> {
+        env::set_current_dir(&self.root_dir).context(error::DirectoryChangeSnafu {
+            path: &self.root_dir,
+        })?;
 
-        // Add known secrets to the build argments.
-        add_secrets(&mut args)?;
-
-        let tag = format!(
-            "buildsys-var-{variant}-{arch}",
-            variant = build_variant_args.variant,
-            arch = arch
-        );
-
-        build(
-            BuildType::Variant,
-            &build_variant_args.variant,
-            arch,
-            args,
-            &tag,
-            &build_variant_args.common.output_dir,
-            &build_variant_args.common.root_dir,
-            &build_variant_args.common.state_dir,
-            &build_variant_args.common.sdk_image,
-            &build_variant_args.common.toolchain,
+        // Create a directory for tracking outputs before we move them into position.
+        let marker_dir = create_marker_dir(
+            &self.target_build_args.build_type(),
+            &self.artifact_name,
+            &self.common_build_args.arch.to_string(),
+            &self.state_dir,
         )?;
 
-        Ok(Self)
+        // Clean up any previous outputs we have tracked.
+        clean_build_files(&marker_dir, &self.artifacts_dir)?;
+
+        let mut build = format!(
+            "build {context} \
+            --target {target} \
+            --tag {tag} \
+            --file {dockerfile}",
+            context = self.context.display(),
+            dockerfile = self.dockerfile.display(),
+            target = self.target,
+            tag = self.tag,
+        )
+        .split_string();
+
+        build.extend(self.build_args());
+        build.extend(self.secrets_args.clone());
+
+        let create = format!("create --name {} {} true", self.tag, self.tag).split_string();
+        let cp = format!("cp {}:/output/. {}", self.tag, marker_dir.display()).split_string();
+        let rm = format!("rm --force {}", self.tag).split_string();
+        let rmi = format!("rmi --force {}", self.tag).split_string();
+
+        // Clean up the stopped container if it exists.
+        let _ = docker(&rm, Retry::No);
+
+        // Clean up the previous image if it exists.
+        let _ = docker(&rmi, Retry::No);
+
+        // Build the image, which builds the artifacts we want.
+        // Work around transient, known failure cases with Docker.
+        docker(
+            &build,
+            Retry::Yes {
+                attempts: DOCKER_BUILD_MAX_ATTEMPTS,
+                messages: &[
+                    &*DOCKER_BUILD_FRONTEND_ERROR,
+                    &*DOCKER_BUILD_DEAD_RECORD_ERROR,
+                    &*UNEXPECTED_EOF_ERROR,
+                    &*CREATEREPO_C_READ_HEADER_ERROR,
+                ],
+            },
+        )?;
+
+        // Create a stopped container so we can copy artifacts out.
+        docker(&create, Retry::No)?;
+
+        // Copy artifacts into our output directory.
+        docker(&cp, Retry::No)?;
+
+        // Clean up our stopped container after copying artifacts out.
+        docker(&rm, Retry::No)?;
+
+        // Clean up our image now that we're done.
+        docker(&rmi, Retry::No)?;
+
+        // Copy artifacts to the expected directory and write markers to track them.
+        copy_build_files(&marker_dir, &self.artifacts_dir)?;
+
+        Ok(())
+    }
+
+    fn build_args(&self) -> Vec<String> {
+        let mut args = match &self.target_build_args {
+            TargetBuildArgs::Package(p) => p.build_args(),
+            TargetBuildArgs::Variant(v) => v.build_args(),
+        };
+        args.build_arg("ARCH", self.common_build_args.arch.to_string());
+        args.build_arg("GOARCH", self.common_build_args.arch.goarch());
+        args.build_arg("SDK", &self.common_build_args.sdk);
+        args.build_arg("TOOLCHAIN", &self.common_build_args.toolchain);
+        args.build_arg("NOCACHE", &self.common_build_args.nocache);
+        // Avoid using a cached layer from a concurrent build in another checkout.
+        args.build_arg("TOKEN", &self.common_build_args.token);
+        args
     }
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
-
-/// Invoke a series of `docker` commands to drive a package or variant build.
-// TODO - refactor this and the builders a bit to have fewer arguments
-#[allow(clippy::too_many_arguments)]
-fn build(
-    kind: BuildType,
-    what: &str,
-    arch: &str,
-    build_args: Vec<String>,
-    tag: &str,
-    output_dir: &PathBuf,
-    root: &PathBuf,
-    state_dir: &Path,
-    sdk: &str,
-    toolchain: &str,
-) -> Result<()> {
-    env::set_current_dir(root).context(error::DirectoryChangeSnafu { path: root })?;
-
-    // Compute a per-checkout prefix for the tag to avoid collisions.
-    let mut d = Sha512::new();
-    d.update(root.display().to_string());
-    let digest = hex::encode(d.finalize());
-    let token = &digest[..12];
-    let tag = format!("{}-{}", tag, token);
-
-    // Avoid using a cached layer from a previous build.
-    let nocache = rand::thread_rng().gen::<u32>();
-
-    // Create a directory for tracking outputs before we move them into position.
-    let build_dir = create_build_dir(&kind, what, arch, state_dir)?;
-
-    // Clean up any previous outputs we have tracked.
-    clean_build_files(&build_dir, output_dir)?;
-
-    let target = match kind {
-        BuildType::Package => "package",
-        BuildType::Variant => "variant",
-    };
-
-    // Our dockerfile is in the Twoliter tools directory.
-    let twoliter_tools_dir =
-        env::var(TOOLS_DIR).context(error::EnvironmentSnafu { var: TOOLS_DIR })?;
-    let dockerfile = PathBuf::from(twoliter_tools_dir).join("Dockerfile");
-
-    let mut build = format!(
-        "build . \
-        --target {target} \
-        --tag {tag} \
-        --file {dockerfile}",
-        dockerfile = dockerfile.display(),
-        target = target,
-        tag = tag,
-    )
-    .split_string();
-
-    build.extend(build_args);
-    build.build_arg("SDK", sdk);
-    build.build_arg("TOOLCHAIN", toolchain);
-    build.build_arg("NOCACHE", nocache.to_string());
-    // Avoid using a cached layer from a concurrent build in another checkout.
-    build.build_arg("TOKEN", token);
-
-    let create = format!("create --name {} {} true", tag, tag).split_string();
-    let cp = format!("cp {}:/output/. {}", tag, build_dir.display()).split_string();
-    let rm = format!("rm --force {}", tag).split_string();
-    let rmi = format!("rmi --force {}", tag).split_string();
-
-    // Clean up the stopped container if it exists.
-    let _ = docker(&rm, Retry::No);
-
-    // Clean up the previous image if it exists.
-    let _ = docker(&rmi, Retry::No);
-
-    // Build the image, which builds the artifacts we want.
-    // Work around transient, known failure cases with Docker.
-    docker(
-        &build,
-        Retry::Yes {
-            attempts: DOCKER_BUILD_MAX_ATTEMPTS,
-            messages: &[
-                &*DOCKER_BUILD_FRONTEND_ERROR,
-                &*DOCKER_BUILD_DEAD_RECORD_ERROR,
-                &*UNEXPECTED_EOF_ERROR,
-                &*CREATEREPO_C_READ_HEADER_ERROR,
-            ],
-        },
-    )?;
-
-    // Create a stopped container so we can copy artifacts out.
-    docker(&create, Retry::No)?;
-
-    // Copy artifacts into our output directory.
-    docker(&cp, Retry::No)?;
-
-    // Clean up our stopped container after copying artifacts out.
-    docker(&rm, Retry::No)?;
-
-    // Clean up our image now that we're done.
-    docker(&rmi, Retry::No)?;
-
-    // Copy artifacts to the expected directory and write markers to track them.
-    copy_build_files(&build_dir, output_dir)?;
-
-    Ok(())
-}
 
 /// Run `docker` with the specified arguments.
 fn docker(args: &[String], retry: Retry) -> Result<Output> {
@@ -411,7 +483,8 @@ enum Retry<'a> {
 /// Add secrets that might be needed for builds. Since most builds won't use
 /// them, they are not automatically tracked for changes. If necessary, builds
 /// can emit the relevant cargo directives for tracking in their build script.
-fn add_secrets(args: &mut Vec<String>) -> Result<()> {
+fn secrets_args() -> Result<Vec<String>> {
+    let mut args = Vec::new();
     let sbkeys_var = "BUILDSYS_SBKEYS_PROFILE_DIR";
     let sbkeys_dir = env::var(sbkeys_var).context(error::EnvironmentSnafu { var: sbkeys_var })?;
 
@@ -434,13 +507,18 @@ fn add_secrets(args: &mut Vec<String>) -> Result<()> {
         args.build_secret("env", &id, var);
     }
 
-    Ok(())
+    Ok(args)
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
 /// Create a directory for build artifacts.
-fn create_build_dir(kind: &BuildType, name: &str, arch: &str, state_dir: &Path) -> Result<PathBuf> {
+fn create_marker_dir(
+    kind: &BuildType,
+    name: &str,
+    arch: &str,
+    state_dir: &Path,
+) -> Result<PathBuf> {
     let prefix = match kind {
         BuildType::Package => "packages",
         BuildType::Variant => "variants",
@@ -603,6 +681,20 @@ where
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+
+/// Compute a per-checkout suffix for the tag to avoid collisions.
+fn token(p: impl AsRef<Path>) -> String {
+    // Compute a per-checkout prefix for the tag to avoid collisions.
+    let mut d = Sha512::new();
+    d.update(p.as_ref().display().to_string());
+    let digest = hex::encode(d.finalize());
+    digest[..12].to_string()
+}
+
+/// Append the per-checkout suffix token to a Docker tag.
+fn append_token(tag: impl AsRef<str>, p: impl AsRef<Path>) -> String {
+    format!("{}-{}", tag.as_ref(), token(p))
+}
 
 /// Helper trait for constructing buildkit --build-arg arguments.
 trait BuildArg {
