@@ -35,6 +35,14 @@ pub(crate) struct BuildVariant {
 
     /// The variant to build.
     variant: String,
+
+    /// The URL to the lookaside cache where sources are stored to avoid pulling them from upstream.
+    /// Defaults to https://cache.bottlerocket.aws
+    lookaside_cache: Option<String>,
+
+    /// If sources are not found in the lookaside cache, this flag will cause buildsys to pull them
+    /// from the upstream URL found in a package's `Cargo.toml`.
+    upstream_source_fallback: bool,
 }
 
 impl BuildVariant {
@@ -110,6 +118,12 @@ impl BuildVariant {
             created_files.push(models_dir)
         }
 
+        let mut optional_envs = Vec::new();
+
+        if let Some(lookaside_cache) = &self.lookaside_cache {
+            optional_envs.push(("BUILDSYS_LOOKASIDE_CACHE", lookaside_cache))
+        }
+
         // Hold the result of the cargo make call so we can clean up the project directory first.
         let res = CargoMake::new(&project, &self.arch)?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
@@ -118,6 +132,11 @@ impl BuildVariant {
             .env("BUILDSYS_SBKEYS_DIR", sbkeys_dir.display().to_string())
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .env("GO_MODULES", project.find_go_modules().await?.join(" "))
+            .env(
+                "BUILDSYS_UPSTREAM_SOURCE_FALLBACK",
+                self.upstream_source_fallback.to_string(),
+            )
+            .envs(optional_envs.into_iter())
             .makefile(makefile_path)
             .project_dir(project.project_dir())
             .exec("build")
