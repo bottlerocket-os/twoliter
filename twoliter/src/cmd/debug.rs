@@ -1,4 +1,3 @@
-use crate::common::fs;
 use crate::tools::install_tools;
 use anyhow::Result;
 use clap::Parser;
@@ -49,7 +48,6 @@ impl CheckToolArgs {
             .install_dir
             .clone()
             .unwrap_or_else(|| env::temp_dir().join(unique_name()));
-        fs::create_dir_all(&dir).await?;
         install_tools(&dir).await?;
         println!("{}", dir.display());
         Ok(())

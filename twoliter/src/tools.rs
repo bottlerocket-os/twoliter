@@ -24,9 +24,15 @@ const TUFTOOL: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_TUFTOOL"));
 pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
     let dir = tools_dir.as_ref();
     debug!("Installing tools to '{}'", dir.display());
+    fs::remove_dir_all(dir)
+        .await
+        .context("Unable to remove tools directory before installing")?;
+    fs::create_dir_all(dir)
+        .await
+        .context("Unable to create directory for tools")?;
 
     // Write out the embedded tools and scripts.
-    unpack_tarball(&dir)
+    unpack_tarball(dir)
         .await
         .context("Unable to install tools")?;
 
@@ -93,32 +99,31 @@ async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {
 #[tokio::test]
 async fn test_install_tools() {
     let tempdir = tempfile::TempDir::new().unwrap();
-    install_tools(&tempdir).await.unwrap();
+    let toolsdir = tempdir.path().join("tools");
+    install_tools(&toolsdir).await.unwrap();
 
     // Assert that the expected files exist in the tools directory.
 
     // Check that non-binary files were copied.
-    assert!(tempdir.path().join("Dockerfile").is_file());
-    assert!(tempdir.path().join("Makefile.toml").is_file());
-    assert!(tempdir.path().join("docker-go").is_file());
-    assert!(tempdir.path().join("partyplanner").is_file());
-    assert!(tempdir.path().join("rpm2img").is_file());
-    assert!(tempdir.path().join("rpm2kmodkit").is_file());
-    assert!(tempdir.path().join("rpm2migrations").is_file());
+    assert!(toolsdir.join("Dockerfile").is_file());
+    assert!(toolsdir.join("Makefile.toml").is_file());
+    assert!(toolsdir.join("docker-go").is_file());
+    assert!(toolsdir.join("partyplanner").is_file());
+    assert!(toolsdir.join("rpm2img").is_file());
+    assert!(toolsdir.join("rpm2kmodkit").is_file());
+    assert!(toolsdir.join("rpm2migrations").is_file());
 
     // Check that binaries were copied.
-    assert!(tempdir.path().join("bottlerocket-variant").is_file());
-    assert!(tempdir.path().join("buildsys").is_file());
-    assert!(tempdir.path().join("pubsys").is_file());
-    assert!(tempdir.path().join("pubsys-setup").is_file());
-    assert!(tempdir.path().join("testsys").is_file());
-    assert!(tempdir.path().join("tuftool").is_file());
+    assert!(toolsdir.join("bottlerocket-variant").is_file());
+    assert!(toolsdir.join("buildsys").is_file());
+    assert!(toolsdir.join("pubsys").is_file());
+    assert!(toolsdir.join("pubsys-setup").is_file());
+    assert!(toolsdir.join("testsys").is_file());
+    assert!(toolsdir.join("tuftool").is_file());
 
     // Check that the mtimes match.
-    let dockerfile_metadata = fs::metadata(tempdir.path().join("Dockerfile"))
-        .await
-        .unwrap();
-    let buildsys_metadata = fs::metadata(tempdir.path().join("buildsys")).await.unwrap();
+    let dockerfile_metadata = fs::metadata(toolsdir.join("Dockerfile")).await.unwrap();
+    let buildsys_metadata = fs::metadata(toolsdir.join("buildsys")).await.unwrap();
     let dockerfile_mtime = FileTime::from_last_modification_time(&dockerfile_metadata);
     let buildsys_mtime = FileTime::from_last_modification_time(&buildsys_metadata);
 

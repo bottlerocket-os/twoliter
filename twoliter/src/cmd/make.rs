@@ -1,5 +1,4 @@
 use crate::cargo_make::CargoMake;
-use crate::common::fs;
 use crate::project::{self};
 use crate::tools::install_tools;
 use anyhow::Result;
@@ -35,7 +34,6 @@ impl Make {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let toolsdir = project.project_dir().join("build/tools");
-        let _ = fs::remove_dir_all(&toolsdir).await;
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
         CargoMake::new(&project, &self.arch)?
