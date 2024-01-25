@@ -22,13 +22,15 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 
-static LOOKASIDE_CACHE: &str = "https://cache.bottlerocket.aws";
-
 pub(crate) struct LookasideCache;
 
 impl LookasideCache {
     /// Fetch files stored out-of-tree and ensure they match the stored hash.
     pub(crate) fn fetch(files: &[manifest::ExternalFile]) -> Result<Self> {
+        let lookaside_cache = Self::getenv("BUILDSYS_LOOKASIDE_CACHE")?;
+        let upstream_fallback =
+            std::env::var("BUILDSYS_UPSTREAM_SOURCE_FALLBACK") == Ok("true".to_string());
+
         for f in files {
             let url_file_name = Self::extract_file_name(&f.url)?;
             let path = &f.path.as_ref().unwrap_or(&url_file_name);
@@ -52,7 +54,7 @@ impl LookasideCache {
             let tmp = PathBuf::from(format!(".{}", name));
 
             // first check the lookaside cache
-            let url = format!("{}/{}/{}/{}", LOOKASIDE_CACHE, name, hash, name);
+            let url = format!("{}/{}/{}/{}", lookaside_cache, name, hash, name);
             match Self::fetch_file(&url, &tmp, hash) {
                 Ok(_) => {
                     fs::rename(&tmp, path)
@@ -65,9 +67,7 @@ impl LookasideCache {
             }
 
             // next check with upstream, if permitted
-            if f.force_upstream.unwrap_or(false)
-                || std::env::var("BUILDSYS_UPSTREAM_SOURCE_FALLBACK") == Ok("true".to_string())
-            {
+            if f.force_upstream.unwrap_or(false) || upstream_fallback {
                 println!("Fetching {:?} from upstream source", url_file_name);
                 Self::fetch_file(&f.url, &tmp, hash)?;
                 fs::rename(&tmp, path).context(error::ExternalFileRenameSnafu { path: &tmp })?;
