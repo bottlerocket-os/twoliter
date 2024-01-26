@@ -62,15 +62,19 @@ impl LookasideCache {
                     continue;
                 }
                 Err(e) => {
-                    println!("{}", e);
+                    // next check with upstream, if permitted
+                    if f.force_upstream.unwrap_or(false) || upstream_fallback {
+                        println!("Error fetching from lookaside cache: {}", e);
+                        println!("Fetching {:?} from upstream source", url_file_name);
+                        Self::fetch_file(&f.url, &tmp, hash)?;
+                        fs::rename(&tmp, path)
+                            .context(error::ExternalFileRenameSnafu { path: &tmp })?;
+                    } else {
+                        // we failed to fetch from the lookaside cache, and we cannot fall back to
+                        // upstream sources, so we should not continue, we need to return the error
+                        return Err(e);
+                    }
                 }
-            }
-
-            // next check with upstream, if permitted
-            if f.force_upstream.unwrap_or(false) || upstream_fallback {
-                println!("Fetching {:?} from upstream source", url_file_name);
-                Self::fetch_file(&f.url, &tmp, hash)?;
-                fs::rename(&tmp, path).context(error::ExternalFileRenameSnafu { path: &tmp })?;
             }
         }
 
