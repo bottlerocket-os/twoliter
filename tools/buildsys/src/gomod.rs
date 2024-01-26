@@ -191,7 +191,7 @@ fn docker_go(dg_args: &DockerGoArgs) -> Result<()> {
         var: "TWOLITER_TOOLS_DIR",
     })?;
     let program = PathBuf::from(twoliter_tools_dir).join("docker-go");
-    eprintln!("program: {}", program.to_string_lossy());
+    println!("program: {}", program.to_string_lossy());
     let output = cmd(program, args)
         .stderr_to_stdout()
         .stdout_capture()

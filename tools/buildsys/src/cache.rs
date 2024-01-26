@@ -44,7 +44,7 @@ impl LookasideCache {
                 match Self::verify_file(path, hash) {
                     Ok(_) => continue,
                     Err(e) => {
-                        eprintln!("{}", e);
+                        println!("{}", e);
                         fs::remove_file(path).context(error::ExternalFileDeleteSnafu { path })?;
                     }
                 }
@@ -62,7 +62,7 @@ impl LookasideCache {
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("{}", e);
+                    println!("{}", e);
                 }
             }
 
