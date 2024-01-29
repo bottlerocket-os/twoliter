@@ -2,7 +2,7 @@
 
 A build tool for creating [Bottlerocket] variants.
 
-[Bottlerocket]: https:github.com/bottlerocket-os/bottlerocket
+[Bottlerocket]: https://github.com/bottlerocket-os/bottlerocket
 
 ## 🚧👷 
 
