@@ -160,7 +160,7 @@ fn build_system_env_vars() -> Result<Vec<String>> {
 
 /// A list of environment variables that don't conform to naming conventions but need to be passed
 /// through to the `cargo make` invocation.
-const ENV_VARS: [&str; 13] = [
+const ENV_VARS: [&str; 23] = [
     "ALLOW_MISSING_KEY",
     "AMI_DATA_FILE_SUFFIX",
     "CARGO_MAKE_CARGO_ARGS",
@@ -168,12 +168,22 @@ const ENV_VARS: [&str; 13] = [
     "CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH",
     "CARGO_MAKE_TESTSYS_ARGS",
     "CARGO_MAKE_TESTSYS_KUBECONFIG_ARG",
+    "GONOPROXY",
+    "GOPRIVATE",
+    "GOPROXY",
+    "GOSUMDB",
     "GO_MODULES",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
     "MARK_OVA_AS_TEMPLATE",
+    "NO_PROXY",
     "RELEASE_START_TIME",
     "SSM_DATA_FILE_SUFFIX",
     "VMWARE_IMPORT_SPEC_PATH",
     "VMWARE_VM_NAME_DEFAULT",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
 ];
 
 const DISALLOWED_SDK_VARS: [&str; 4] = [
@@ -216,7 +226,11 @@ fn test_is_build_system_env() {
     assert!(is_build_system_env("BOOT_CONFIG!"));
     assert!(is_build_system_env("BOOT_CONFIG_INPUT"));
     assert!(is_build_system_env("GO_MODULES"));
+    assert!(is_build_system_env("GOPROXY"));
+    assert!(is_build_system_env("http_proxy"));
     assert!(is_build_system_env("AWS_REGION"));
+
+    // not
     assert!(!is_build_system_env("PATH"));
     assert!(!is_build_system_env("HOME"));
     assert!(!is_build_system_env("COLORTERM"));
