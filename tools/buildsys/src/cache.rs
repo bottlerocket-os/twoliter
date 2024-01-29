@@ -63,7 +63,7 @@ impl LookasideCache {
                 }
                 Err(e) => {
                     // next check with upstream, if permitted
-                    if upstream_fallback {
+                    if f.force_upstream.unwrap_or(false) || upstream_fallback {
                         println!("Error fetching from lookaside cache: {}", e);
                         println!("Fetching {:?} from upstream source", url_file_name);
                         Self::fetch_file(&f.url, &tmp, hash)?;
