@@ -94,6 +94,19 @@ impl CargoMake {
         self
     }
 
+    /// Add multiple env variables as `(key, value)` tuples.
+    pub(crate) fn envs<S1, S2>(mut self, key_value_pairs: impl Iterator<Item = (S1, S2)>) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
+        for (key, value) in key_value_pairs {
+            self.args
+                .push(format!("-e={}={}", key.into(), value.into()));
+        }
+        self
+    }
+
     /// Execute the `cargo make` task
     pub(crate) async fn exec<S>(&self, task: S) -> Result<()>
     where

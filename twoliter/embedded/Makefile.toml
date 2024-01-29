@@ -76,6 +76,10 @@ VMWARE_IMPORT_SPEC_PATH = "${BUILDSYS_ROOT_DIR}/tools/pubsys/support/vmware/impo
 # Infra.toml for VMware commands; it's a comma-separated list like
 # "datacenter1,datacenter2"
 
+
+# The URL to use for a cache of sourcecode to bypass using upstream sources.
+BUILDSYS_LOOKASIDE_CACHE = "https://cache.bottlerocket.aws"
+
 # Disallow pulling directly Upstream URLs when lookaside cache results in MISSes as a fallback.
 # To use the upstream source as fallback, override this on the command line and set it to 'true'
 BUILDSYS_UPSTREAM_SOURCE_FALLBACK = "false"
