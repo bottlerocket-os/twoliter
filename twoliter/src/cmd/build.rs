@@ -50,9 +50,6 @@ impl BuildVariant {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let token = project.token();
         let toolsdir = project.project_dir().join("build/tools");
-        // Ignore errors because we want to proceed even if the directory does not exist.
-        let _ = fs::remove_dir_all(&toolsdir).await;
-        fs::create_dir_all(&toolsdir).await?;
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
         // A temporary directory in the `build` directory

@@ -64,6 +64,7 @@ pub(crate) async fn exec(cmd: &mut Command, quiet: bool) -> Result<Option<String
 pub(crate) mod fs {
     use anyhow::{Context, Result};
     use std::fs::Metadata;
+    use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
     use tokio::fs;
 
@@ -130,10 +131,19 @@ pub(crate) mod fs {
     }
 
     pub(crate) async fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
-        fs::remove_dir_all(path.as_ref()).await.context(format!(
-            "Unable to remove directory (remove_dir_all) '{}'",
-            path.as_ref().display()
-        ))
+        match fs::remove_dir_all(path.as_ref()).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e.kind() {
+                ErrorKind::NotFound => {
+                    // not a problem, the directory isn't there
+                    Ok(())
+                }
+                _ => Err(e).context(format!(
+                    "Unable to remove directory (remove_dir_all) '{}'",
+                    path.as_ref().display()
+                )),
+            },
+        }
     }
 
     pub(crate) async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
@@ -162,4 +172,39 @@ pub(crate) mod fs {
             .await
             .context(format!("Unable to write to '{}'", path.as_ref().display()))
     }
+}
+
+#[tokio::test]
+async fn test_remove_dir_all_no_dir() {
+    use crate::common::fs;
+    use tempfile::TempDir;
+
+    let tempdir = TempDir::new().unwrap();
+    let does_not_exist = tempdir.path().join("nope");
+
+    // This should not error even though the directory is not present.
+    fs::remove_dir_all(does_not_exist).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_create_and_remove_dir() {
+    use crate::common::fs;
+    use tempfile::TempDir;
+
+    let tempdir = TempDir::new().unwrap();
+    let path = tempdir.path().join("yep").join("ok");
+
+    fs::create_dir_all(&path).await.unwrap();
+    assert!(
+        path.is_dir(),
+        "Expected a directory to be created at '{}'",
+        path.display()
+    );
+
+    fs::remove_dir_all(&path).await.unwrap();
+    assert!(
+        !path.exists(),
+        "Expected directories to be removed from this path '{}'",
+        path.display()
+    )
 }
