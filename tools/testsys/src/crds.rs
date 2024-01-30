@@ -486,8 +486,14 @@ pub(crate) trait CrdCreator: Sync {
                         &mut self
                             .additional_fields(&test_type.to_string())
                             .into_iter()
-                            // Add the image id in case it is needed for cluster creation
+                            // Add the image id, original test type, and resolved test type in case
+                            // it is needed for cluster creation
                             .chain(Some(("image-id".to_string(), image_id.clone())))
+                            .chain(Some((
+                                "test-flavor".to_string(),
+                                crd_input.test_flavor.clone(),
+                            )))
+                            .chain(Some(("test-type".to_string(), test_type.to_string())))
                             .collect::<BTreeMap<String, String>>(),
                     )?,
                     hardware_csv: &crd_input
