@@ -43,9 +43,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.6.4"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ab91ebe16eb252986481c5b62f6098f3b698a45e34b5b98200cf20dd2484a44"
+checksum = "6e2e1ebcb11de5c03c67de28a7df593d32191b44939c482e97702baaaa6ab6a5"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -1042,8 +1042,8 @@ dependencies = [
 
 [[package]]
 name = "bottlerocket-types"
-version = "0.0.10"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.10#9d672c05fb9521ad241ae8ccdd06931116435e05"
+version = "0.0.11"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.11#fc9e01c9524104c24c97551e5eb93916a7a879ee"
 dependencies = [
  "builder-derive",
  "configuration-derive",
@@ -1074,8 +1074,8 @@ dependencies = [
 
 [[package]]
 name = "builder-derive"
-version = "0.0.10"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.10#9d672c05fb9521ad241ae8ccdd06931116435e05"
+version = "0.0.11"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.11#fc9e01c9524104c24c97551e5eb93916a7a879ee"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1249,8 +1249,8 @@ dependencies = [
 
 [[package]]
 name = "configuration-derive"
-version = "0.0.10"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.10#9d672c05fb9521ad241ae8ccdd06931116435e05"
+version = "0.0.11"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.11#fc9e01c9524104c24c97551e5eb93916a7a879ee"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -3521,8 +3521,8 @@ dependencies = [
 
 [[package]]
 name = "testsys-model"
-version = "0.0.10"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.10#9d672c05fb9521ad241ae8ccdd06931116435e05"
+version = "0.0.11"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.11#fc9e01c9524104c24c97551e5eb93916a7a879ee"
 dependencies = [
  "async-recursion",
  "async-trait",

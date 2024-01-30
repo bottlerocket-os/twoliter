@@ -53,7 +53,7 @@ impl Install {
             },
             None => ImageConfig::Image(controller_uri),
         };
-        client.install(controller_image).await?;
+        client.install(controller_image, true).await?;
 
         info!("testsys components were successfully installed.");
 
