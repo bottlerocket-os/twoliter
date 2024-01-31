@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2024-01-30
+
+### Added
+
+- Add Go and Proxy environment variables to those that `twoliter make` passes through ([#127])
+- Add test type for cluster templating in Testsys ([#137])
+- Enable a custom lookaside cache when building packages ([#141])
+
+### Changed
+
+- Fix an issue where Twoliter could fail if the tools directory does not pre-exist ([#138])
+- Fix a documentation issue in the README. Thank you, @krispage ([#143])
+- Update testsys to v0.11.0 ([#149])
+
+[#127]: https://github.com/bottlerocket-os/twoliter/pull/127
+[#137]: https://github.com/bottlerocket-os/twoliter/pull/137
+[#138]: https://github.com/bottlerocket-os/twoliter/pull/138
+[#141]: https://github.com/bottlerocket-os/twoliter/pull/141
+[#143]: https://github.com/bottlerocket-os/twoliter/pull/143
+[#149]: https://github.com/bottlerocket-os/twoliter/pull/149
+
 ## [0.0.5] - 2024-01-10
 
 ### Added
@@ -87,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bottlerocket's `cargo make` build system.
 - `Makefile.toml` taken from the Bottlerocket project.
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.5...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.2...v0.0.3
