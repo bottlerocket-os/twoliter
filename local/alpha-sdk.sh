@@ -179,6 +179,7 @@ do
   multiarch="${alpha_registry}/${alpha_name}-${target_arch}:${alpha_version}"
 
   echo "creating multiarch manifest ${multiarch}"
+  docker manifest rm "${multiarch}" || true
   docker manifest create "${multiarch}" "${arm_host}" "${amd_host}"
   echo "pushing multiarch manifest ${multiarch}"
   docker manifest push "${multiarch}"
