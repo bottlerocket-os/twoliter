@@ -5,10 +5,9 @@ the repository's top-level Dockerfile.
 
 */
 pub(crate) mod error;
-use error::Result;
 
-use crate::constants::{SDK_VAR, TOOLCHAIN_VAR};
 use duct::cmd;
+use error::Result;
 use lazy_static::lazy_static;
 use nonzero_ext::nonzero;
 use rand::Rng;
@@ -23,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use walkdir::{DirEntry, WalkDir};
 
+use crate::args::{BuildPackageArgs, BuildType, BuildVariantArgs};
 use buildsys::manifest::{ImageFeature, ImageFormat, ImageLayout, PartitionPlan, SupportedArch};
 
 const TOOLS_DIR: &str = "TWOLITER_TOOLS_DIR";
@@ -91,20 +91,20 @@ pub(crate) struct PackageBuilder;
 impl PackageBuilder {
     /// Build RPMs for the specified package.
     pub(crate) fn build(
+        build_packages_args: &BuildPackageArgs,
         package: &str,
         image_features: Option<HashSet<&ImageFeature>>,
     ) -> Result<Self> {
-        let output_dir: PathBuf = getenv("BUILDSYS_PACKAGES_DIR")?.into();
-        let arch = getenv("BUILDSYS_ARCH")?;
-        let goarch = serde_plain::from_str::<SupportedArch>(&arch)
-            .context(error::UnsupportedArchSnafu { arch: &arch })?
+        let arch = &build_packages_args.common.arch;
+        let goarch = serde_plain::from_str::<SupportedArch>(arch)
+            .context(error::UnsupportedArchSnafu { arch })?
             .goarch();
 
         let mut args = Vec::new();
         args.push("--network".into());
         args.push("none".into());
         args.build_arg("PACKAGE", package);
-        args.build_arg("ARCH", &arch);
+        args.build_arg("ARCH", arch);
         args.build_arg("GOARCH", goarch);
 
         // Pass certain environment variables into the build environment. These variables aren't
@@ -136,7 +136,18 @@ impl PackageBuilder {
             }
         }
 
-        build(BuildType::Package, package, &arch, args, &tag, &output_dir)?;
+        build(
+            BuildType::Package,
+            package,
+            arch,
+            args,
+            &tag,
+            &build_packages_args.packages_dir,
+            &build_packages_args.common.root_dir,
+            &build_packages_args.common.state_dir,
+            &build_packages_args.common.sdk_image,
+            &build_packages_args.common.toolchain,
+        )?;
 
         Ok(Self)
     }
@@ -147,18 +158,16 @@ pub(crate) struct VariantBuilder;
 impl VariantBuilder {
     /// Build a variant with the specified packages installed.
     pub(crate) fn build(
+        build_variant_args: &BuildVariantArgs,
         packages: &[String],
         image_format: Option<&ImageFormat>,
         image_layout: Option<&ImageLayout>,
         kernel_parameters: Option<&Vec<String>>,
         image_features: Option<HashSet<&ImageFeature>>,
     ) -> Result<Self> {
-        let output_dir: PathBuf = getenv("BUILDSYS_OUTPUT_DIR")?.into();
-
-        let variant = getenv("BUILDSYS_VARIANT")?;
-        let arch = getenv("BUILDSYS_ARCH")?;
-        let goarch = serde_plain::from_str::<SupportedArch>(&arch)
-            .context(error::UnsupportedArchSnafu { arch: &arch })?
+        let arch = &build_variant_args.common.arch;
+        let goarch = serde_plain::from_str::<SupportedArch>(arch)
+            .context(error::UnsupportedArchSnafu { arch })?
             .goarch();
 
         let image_layout = image_layout.cloned().unwrap_or_default();
@@ -176,13 +185,13 @@ impl VariantBuilder {
         args.push("--network".into());
         args.push("host".into());
         args.build_arg("PACKAGES", packages.join(" "));
-        args.build_arg("ARCH", &arch);
+        args.build_arg("ARCH", arch);
         args.build_arg("GOARCH", goarch);
-        args.build_arg("VARIANT", &variant);
-        args.build_arg("VERSION_ID", getenv("BUILDSYS_VERSION_IMAGE")?);
-        args.build_arg("BUILD_ID", getenv("BUILDSYS_VERSION_BUILD")?);
-        args.build_arg("PRETTY_NAME", getenv("BUILDSYS_PRETTY_NAME")?);
-        args.build_arg("IMAGE_NAME", getenv("BUILDSYS_NAME")?);
+        args.build_arg("VARIANT", &build_variant_args.variant);
+        args.build_arg("VERSION_ID", &build_variant_args.version_image);
+        args.build_arg("BUILD_ID", &build_variant_args.version_build);
+        args.build_arg("PRETTY_NAME", &build_variant_args.pretty_name);
+        args.build_arg("IMAGE_NAME", &build_variant_args.name);
         args.build_arg(
             "IMAGE_FORMAT",
             match image_format {
@@ -222,17 +231,24 @@ impl VariantBuilder {
         // Add known secrets to the build argments.
         add_secrets(&mut args)?;
 
-        // Always rebuild variants since they are located in a different workspace,
-        // and don't directly track changes in the underlying packages.
-        getenv("BUILDSYS_TIMESTAMP")?;
-
         let tag = format!(
             "buildsys-var-{variant}-{arch}",
-            variant = variant,
+            variant = build_variant_args.variant,
             arch = arch
         );
 
-        build(BuildType::Variant, &variant, &arch, args, &tag, &output_dir)?;
+        build(
+            BuildType::Variant,
+            &build_variant_args.variant,
+            arch,
+            args,
+            &tag,
+            &build_variant_args.common.output_dir,
+            &build_variant_args.common.root_dir,
+            &build_variant_args.common.state_dir,
+            &build_variant_args.common.sdk_image,
+            &build_variant_args.common.toolchain,
+        )?;
 
         Ok(Self)
     }
@@ -240,12 +256,9 @@ impl VariantBuilder {
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
-enum BuildType {
-    Package,
-    Variant,
-}
-
 /// Invoke a series of `docker` commands to drive a package or variant build.
+// TODO - refactor this and the builders a bit to have fewer arguments
+#[allow(clippy::too_many_arguments)]
 fn build(
     kind: BuildType,
     what: &str,
@@ -253,26 +266,25 @@ fn build(
     build_args: Vec<String>,
     tag: &str,
     output_dir: &PathBuf,
+    root: &PathBuf,
+    state_dir: &Path,
+    sdk: &str,
+    toolchain: &str,
 ) -> Result<()> {
-    let root = getenv("BUILDSYS_ROOT_DIR")?;
-    env::set_current_dir(&root).context(error::DirectoryChangeSnafu { path: &root })?;
+    env::set_current_dir(root).context(error::DirectoryChangeSnafu { path: root })?;
 
     // Compute a per-checkout prefix for the tag to avoid collisions.
     let mut d = Sha512::new();
-    d.update(&root);
+    d.update(root.display().to_string());
     let digest = hex::encode(d.finalize());
     let token = &digest[..12];
     let tag = format!("{}-{}", tag, token);
-
-    // Our SDK and toolchain are picked by the external `cargo make` invocation.
-    let sdk = getenv(SDK_VAR)?;
-    let toolchain = getenv(TOOLCHAIN_VAR)?;
 
     // Avoid using a cached layer from a previous build.
     let nocache = rand::thread_rng().gen::<u32>();
 
     // Create a directory for tracking outputs before we move them into position.
-    let build_dir = create_build_dir(&kind, what, arch)?;
+    let build_dir = create_build_dir(&kind, what, arch, state_dir)?;
 
     // Clean up any previous outputs we have tracked.
     clean_build_files(&build_dir, output_dir)?;
@@ -428,13 +440,13 @@ fn add_secrets(args: &mut Vec<String>) -> Result<()> {
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
 /// Create a directory for build artifacts.
-fn create_build_dir(kind: &BuildType, name: &str, arch: &str) -> Result<PathBuf> {
+fn create_build_dir(kind: &BuildType, name: &str, arch: &str, state_dir: &Path) -> Result<PathBuf> {
     let prefix = match kind {
         BuildType::Package => "packages",
         BuildType::Variant => "variants",
     };
 
-    let path = [&getenv("BUILDSYS_STATE_DIR")?, arch, prefix, name]
+    let path = [&state_dir.display().to_string(), arch, prefix, name]
         .iter()
         .collect();
 
@@ -588,14 +600,6 @@ where
         .flat_map(|e| e.context(error::DirectoryWalkSnafu))
         .map(|e| e.into_path())
         .filter(|e| e.is_file() || e.is_symlink())
-}
-
-/// Retrieve a BUILDSYS_* variable that we expect to be set in the environment,
-/// and ensure that we track it for changes, since it will directly affect the
-/// output.
-fn getenv(var: &str) -> Result<String> {
-    println!("cargo:rerun-if-env-changed={}", var);
-    env::var(var).context(error::EnvironmentSnafu { var })
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=

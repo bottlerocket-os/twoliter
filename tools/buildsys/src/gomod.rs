@@ -16,11 +16,10 @@ when the docker-go script is invoked.
  */
 
 pub(crate) mod error;
-use error::Result;
 
-use crate::constants::SDK_VAR;
 use buildsys::manifest;
 use duct::cmd;
+use error::Result;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -76,6 +75,7 @@ impl GoMod {
         root_dir: &Path,
         package_dir: &Path,
         external_file: &manifest::ExternalFile,
+        sdk: &str,
     ) -> Result<()> {
         let url_file_name = extract_file_name(&external_file.url)?;
         let local_file_name = &external_file.path.as_ref().unwrap_or(&url_file_name);
@@ -111,12 +111,9 @@ impl GoMod {
             output_path_arg.to_string_lossy()
         );
 
-        // Our SDK and toolchain are picked by the external `cargo make` invocation.
-        let sdk = env::var(SDK_VAR).context(error::EnvironmentSnafu { var: SDK_VAR })?;
-
         let args = DockerGoArgs {
             module_path: package_dir,
-            sdk_image: sdk,
+            sdk_image: sdk.to_string(),
             go_mod_cache: &root_dir.join(".gomodcache"),
             command: format!("./{}", GO_MOD_DOCKER_SCRIPT_NAME),
         };

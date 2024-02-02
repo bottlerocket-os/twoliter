@@ -10,6 +10,7 @@ exclude = ["README.md"]
 
 [dependencies]
 bottlerocket-variant = { version = "0.1", path = "../bottlerocket-variant" }
+clap = { version = "4", features = ["derive", "env"] }
 duct = "0.13"
 hex = "0.4"
 lazy_static = "1"
