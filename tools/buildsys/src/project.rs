@@ -19,7 +19,11 @@ pub(crate) struct ProjectInfo {
 
 impl ProjectInfo {
     /// Traverse the list of directories and produce a list of files to track.
-    pub(crate) fn crawl<P: AsRef<Path>>(dirs: &[P]) -> Result<Self> {
+    pub(crate) fn crawl<P>(dirs: P) -> Result<Self>
+    where
+        P: IntoIterator,
+        P::Item: AsRef<Path>,
+    {
         let mut files = Vec::new();
 
         for dir in dirs {

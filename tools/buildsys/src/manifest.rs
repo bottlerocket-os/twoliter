@@ -250,12 +250,26 @@ use std::path::{Path, PathBuf};
 pub struct Error(error::Error);
 type Result<T> = std::result::Result<T, Error>;
 
+/// The possible dependency representations in a package manifest.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum DependencyInfo {
+    Version(String),
+    Dependency { path: Option<PathBuf> },
+}
+
 /// The nested structures here are somewhat complex, but they make it trivial
 /// to deserialize the structure we expect to find in the manifest.
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub struct ManifestInfo {
     package: Package,
+    #[serde(default)]
+    build_dependencies: HashMap<PathBuf, DependencyInfo>,
+    #[serde(default)]
+    dependencies: HashMap<PathBuf, DependencyInfo>,
+    #[serde(default)]
+    dev_dependencies: HashMap<PathBuf, DependencyInfo>,
 }
 
 impl ManifestInfo {
@@ -346,6 +360,36 @@ impl ManifestInfo {
             .metadata
             .as_ref()
             .and_then(|m| m.build_variant.as_ref())
+    }
+
+    #[allow(clippy::collapsible_match)]
+    fn collect_paths(
+        &self,
+        root_path: &PathBuf,
+        dependencies: &HashMap<PathBuf, DependencyInfo>,
+        paths: &mut HashSet<PathBuf>,
+    ) {
+        for info in dependencies.values() {
+            if let DependencyInfo::Dependency { path } = info {
+                if let Some(p) = path {
+                    // Need to make sure the path refers to a relative local path
+                    if let Ok(path) = Path::new(root_path).join(p).canonicalize() {
+                        paths.insert(path);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn local_dependency_paths(&self, root_path: &PathBuf) -> HashSet<PathBuf> {
+        let mut result: HashSet<PathBuf> = HashSet::new();
+
+        // Get all paths from our dependencies
+        self.collect_paths(root_path, &self.build_dependencies, &mut result);
+        self.collect_paths(root_path, &self.dependencies, &mut result);
+        self.collect_paths(root_path, &self.dev_dependencies, &mut result);
+
+        result
     }
 }
 
