@@ -8,26 +8,27 @@ specified as a command line argument.
 The implementation is closely tied to the top-level Dockerfile.
 
 */
+mod args;
 mod builder;
 mod cache;
-mod constants;
 mod gomod;
 mod project;
 mod spec;
 
-use builder::{PackageBuilder, VariantBuilder};
+use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command};
+use crate::builder::DockerBuild;
 use buildsys::manifest::{BundleModule, ManifestInfo, SupportedArch};
 use cache::LookasideCache;
+use clap::Parser;
 use gomod::GoMod;
 use project::ProjectInfo;
-use serde::Deserialize;
 use snafu::{ensure, ResultExt};
 use spec::SpecInfo;
-use std::env;
 use std::path::PathBuf;
 use std::process;
 
 mod error {
+    use buildsys::manifest::SupportedArch;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -75,7 +76,7 @@ mod error {
             supported_arches.join(", ")
         ))]
         UnsupportedArch {
-            arch: String,
+            arch: SupportedArch,
             supported_arches: Vec<String>,
         },
     }
@@ -83,63 +84,42 @@ mod error {
 
 type Result<T> = std::result::Result<T, error::Error>;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum Command {
-    BuildPackage,
-    BuildVariant,
-}
-
-fn usage() -> ! {
-    eprintln!(
-        "\
-USAGE:
-    buildsys <SUBCOMMAND>
-
-SUBCOMMANDS:
-    build-package           Build RPMs from a spec file and sources.
-    build-variant           Build filesystem and disk images from RPMs."
-    );
-    process::exit(1)
-}
-
 // Returning a Result from main makes it print a Debug representation of the error, but with Snafu
 // we have nice Display representations of the error, so we wrap "main" (run) and print any error.
 // https://github.com/shepmaster/snafu/issues/110
 fn main() {
-    if let Err(e) = run() {
+    let args = Buildsys::parse();
+    if let Err(e) = run(args) {
         eprintln!("{}", e);
         process::exit(1);
     }
 }
 
-fn run() -> Result<()> {
-    // Not actually redundant for a diverging function.
-    #[allow(clippy::redundant_closure)]
-    let command_str = std::env::args().nth(1).unwrap_or_else(|| usage());
-    let command = serde_plain::from_str::<Command>(&command_str).unwrap_or_else(|_| usage());
-    match command {
-        Command::BuildPackage => build_package()?,
-        Command::BuildVariant => build_variant()?,
+fn run(args: Buildsys) -> Result<()> {
+    args::rerun_for_envs(args.command.build_type());
+    match args.command {
+        Command::BuildPackage(args) => build_package(*args),
+        Command::BuildVariant(args) => build_variant(*args),
     }
-    Ok(())
 }
 
-fn build_package() -> Result<()> {
+fn build_package(args: BuildPackageArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     println!("cargo:rerun-if-changed={}", manifest_file);
 
-    let root_dir: PathBuf = getenv("BUILDSYS_ROOT_DIR")?.into();
-    let variant = getenv("BUILDSYS_VARIANT")?;
-    let variant_manifest_path = root_dir.join("variants").join(variant).join(manifest_file);
+    let variant_manifest_path = args
+        .common
+        .root_dir
+        .join("variants")
+        .join(&args.variant)
+        .join(manifest_file);
     let variant_manifest =
         ManifestInfo::new(variant_manifest_path).context(error::ManifestParseSnafu)?;
-    supported_arch(&variant_manifest)?;
+    supported_arch(&variant_manifest, args.common.arch)?;
     let mut image_features = variant_manifest.image_features();
 
-    let manifest_dir: PathBuf = getenv("CARGO_MANIFEST_DIR")?.into();
-    let manifest =
-        ManifestInfo::new(manifest_dir.join(manifest_file)).context(error::ManifestParseSnafu)?;
+    let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
+        .context(error::ManifestParseSnafu)?;
     let package_features = manifest.package_features();
 
     // For any package feature specified in the package manifest, track the corresponding
@@ -187,7 +167,14 @@ fn build_package() -> Result<()> {
     }
 
     if let Some(files) = manifest.external_files() {
-        LookasideCache::fetch(files).context(error::ExternalFileFetchSnafu)?;
+        let lookaside_cache = LookasideCache::new(
+            &args.common.version_full,
+            args.lookaside_cache.clone(),
+            args.upstream_source_fallback == "true",
+        );
+        lookaside_cache
+            .fetch(files)
+            .context(error::ExternalFileFetchSnafu)?;
         for f in files {
             if f.bundle_modules.is_none() {
                 continue;
@@ -195,20 +182,23 @@ fn build_package() -> Result<()> {
 
             for b in f.bundle_modules.as_ref().unwrap() {
                 match b {
-                    BundleModule::Go => {
-                        GoMod::vendor(&root_dir, &manifest_dir, f).context(error::GoModSnafu)?
-                    }
+                    BundleModule::Go => GoMod::vendor(
+                        &args.common.root_dir,
+                        &args.common.cargo_manifest_dir,
+                        f,
+                        &args.common.sdk_image,
+                    )
+                    .context(error::GoModSnafu)?,
                 }
             }
         }
     }
 
     if let Some(groups) = manifest.source_groups() {
-        let var = "BUILDSYS_SOURCES_DIR";
-        let root: PathBuf = getenv(var)?.into();
-        println!("cargo:rerun-if-env-changed={}", var);
-
-        let dirs = groups.iter().map(|d| root.join(d)).collect::<Vec<_>>();
+        let dirs = groups
+            .iter()
+            .map(|d| args.sources_dir.join(d))
+            .collect::<Vec<_>>();
         let info = ProjectInfo::crawl(&dirs).context(error::ProjectCrawlSnafu)?;
         for f in info.files {
             println!("cargo:rerun-if-changed={}", f.display());
@@ -220,7 +210,7 @@ fn build_package() -> Result<()> {
     let package = if let Some(name_override) = manifest.package_name() {
         name_override.clone()
     } else {
-        getenv("CARGO_PKG_NAME")?
+        args.cargo_package_name.clone()
     };
     let spec = format!("{}.spec", package);
     println!("cargo:rerun-if-changed={}", spec);
@@ -235,52 +225,40 @@ fn build_package() -> Result<()> {
         println!("cargo:rerun-if-changed={}", f.display());
     }
 
-    PackageBuilder::build(&package, image_features).context(error::BuildAttemptSnafu)?;
-
+    DockerBuild::new_package(args, &manifest)
+        .unwrap()
+        .build()
+        .context(error::BuildAttemptSnafu)?;
     Ok(())
 }
 
-fn build_variant() -> Result<()> {
-    let manifest_dir: PathBuf = getenv("CARGO_MANIFEST_DIR")?.into();
+fn build_variant(args: BuildVariantArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     println!("cargo:rerun-if-changed={}", manifest_file);
 
-    let manifest =
-        ManifestInfo::new(manifest_dir.join(manifest_file)).context(error::ManifestParseSnafu)?;
+    let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
+        .context(error::ManifestParseSnafu)?;
 
-    supported_arch(&manifest)?;
+    supported_arch(&manifest, args.common.arch)?;
 
-    if let Some(packages) = manifest.included_packages() {
-        let image_format = manifest.image_format();
-        let image_layout = manifest.image_layout();
-        let kernel_parameters = manifest.kernel_parameters();
-        let image_features = manifest.image_features();
-        VariantBuilder::build(
-            packages,
-            image_format,
-            image_layout,
-            kernel_parameters,
-            image_features,
-        )
-        .context(error::BuildAttemptSnafu)?;
+    if manifest.included_packages().is_some() {
+        DockerBuild::new_variant(args, &manifest)
+            .unwrap()
+            .build()
+            .context(error::BuildAttemptSnafu)?;
     } else {
         println!("cargo:warning=No included packages in manifest. Skipping variant build.");
     }
-
     Ok(())
 }
 
 /// Ensure that the current arch is supported by the current variant
-fn supported_arch(manifest: &ManifestInfo) -> Result<()> {
+fn supported_arch(manifest: &ManifestInfo, arch: SupportedArch) -> Result<()> {
     if let Some(supported_arches) = manifest.supported_arches() {
-        let arch = getenv("BUILDSYS_ARCH")?;
-        let current_arch: SupportedArch =
-            serde_plain::from_str(&arch).context(error::UnknownArchSnafu { arch: &arch })?;
-
         ensure!(
-            supported_arches.contains(&current_arch),
+            supported_arches.contains(&arch),
             error::UnsupportedArchSnafu {
-                arch: &arch,
+                arch,
                 supported_arches: supported_arches
                     .iter()
                     .map(|a| a.to_string())
@@ -289,9 +267,4 @@ fn supported_arch(manifest: &ManifestInfo) -> Result<()> {
         )
     }
     Ok(())
-}
-
-/// Retrieve a variable that we expect to be set in the environment.
-fn getenv(var: &str) -> Result<String> {
-    env::var(var).context(error::EnvironmentSnafu { var })
 }

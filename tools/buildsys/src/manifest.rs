@@ -237,7 +237,7 @@ uefi-secure-boot = true
 
 mod error;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, Snafu};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -501,12 +501,15 @@ pub enum PartitionPlan {
     Unified,
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq, Hash)]
+#[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum SupportedArch {
     X86_64,
     Aarch64,
 }
+
+serde_plain::derive_fromstr_from_deserialize!(SupportedArch);
+serde_plain::derive_display_from_serialize!(SupportedArch);
 
 /// Map a Linux architecture into the corresponding Docker architecture.
 impl SupportedArch {
@@ -518,7 +521,7 @@ impl SupportedArch {
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq, Hash)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(try_from = "String")]
 pub enum ImageFeature {
     GrubSetPrivateVar,
@@ -570,13 +573,4 @@ pub struct ExternalFile {
     pub bundle_modules: Option<Vec<BundleModule>>,
     pub bundle_root_path: Option<PathBuf>,
     pub bundle_output_path: Option<PathBuf>,
-}
-
-impl fmt::Display for SupportedArch {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            SupportedArch::X86_64 => write!(f, "x86_64"),
-            SupportedArch::Aarch64 => write!(f, "aarch64"),
-        }
-    }
 }

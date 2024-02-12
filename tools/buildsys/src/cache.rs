@@ -17,20 +17,38 @@ use buildsys::manifest;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use sha2::{Digest, Sha512};
 use snafu::{ensure, OptionExt, ResultExt};
-use std::env;
 use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
+use url::Url;
 
-pub(crate) struct LookasideCache;
+pub(crate) struct LookasideCache {
+    /// The version string to include in HTTP headers.
+    version: String,
+
+    /// The lookaside cache base URL for source tarballs.
+    lookaside_cache: Url,
+
+    /// Whether we are allowed to pull sources from upstream URLs. When this is false, it can be
+    /// overridden by `upstream-fallback` in the manifest.
+    upstream_fallback: bool,
+}
 
 impl LookasideCache {
-    /// Fetch files stored out-of-tree and ensure they match the stored hash.
-    pub(crate) fn fetch(files: &[manifest::ExternalFile]) -> Result<Self> {
-        let lookaside_cache = Self::getenv("BUILDSYS_LOOKASIDE_CACHE")?;
-        let upstream_fallback =
-            std::env::var("BUILDSYS_UPSTREAM_SOURCE_FALLBACK") == Ok("true".to_string());
+    pub(crate) fn new(
+        version: impl AsRef<str>,
+        lookaside_cache: Url,
+        upstream_fallback: bool,
+    ) -> Self {
+        Self {
+            version: version.as_ref().to_string(),
+            lookaside_cache,
+            upstream_fallback,
+        }
+    }
 
+    /// Fetch files stored out-of-tree and ensure they match the stored hash.
+    pub(crate) fn fetch(&self, files: &[manifest::ExternalFile]) -> Result<()> {
         for f in files {
             let url_file_name = Self::extract_file_name(&f.url)?;
             let path = &f.path.as_ref().unwrap_or(&url_file_name);
@@ -54,8 +72,8 @@ impl LookasideCache {
             let tmp = PathBuf::from(format!(".{}", name));
 
             // first check the lookaside cache
-            let url = format!("{}/{}/{}/{}", lookaside_cache, name, hash, name);
-            match Self::fetch_file(&url, &tmp, hash) {
+            let url = format!("{}/{}/{}/{}", self.lookaside_cache, name, hash, name);
+            match self.fetch_file(&url, &tmp, hash) {
                 Ok(_) => {
                     fs::rename(&tmp, path)
                         .context(error::ExternalFileRenameSnafu { path: &tmp })?;
@@ -63,10 +81,10 @@ impl LookasideCache {
                 }
                 Err(e) => {
                     // next check with upstream, if permitted
-                    if f.force_upstream.unwrap_or(false) || upstream_fallback {
+                    if f.force_upstream.unwrap_or(false) || self.upstream_fallback {
                         println!("Error fetching from lookaside cache: {}", e);
                         println!("Fetching {:?} from upstream source", url_file_name);
-                        Self::fetch_file(&f.url, &tmp, hash)?;
+                        self.fetch_file(&f.url, &tmp, hash)?;
                         fs::rename(&tmp, path)
                             .context(error::ExternalFileRenameSnafu { path: &tmp })?;
                     } else {
@@ -78,21 +96,20 @@ impl LookasideCache {
             }
         }
 
-        Ok(Self)
+        Ok(())
     }
 
     /// Retrieves a file from the specified URL and write it to the given path,
     /// then verifies the contents against the SHA-512 hash provided.
-    fn fetch_file<P: AsRef<Path>>(url: &str, path: P, hash: &str) -> Result<()> {
+    fn fetch_file<P: AsRef<Path>>(&self, url: &str, path: P, hash: &str) -> Result<()> {
         let path = path.as_ref();
-
-        let version = Self::getenv("BUILDSYS_VERSION_FULL")?;
 
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
             HeaderValue::from_str(&format!(
-                "Bottlerocket buildsys {version} (https://github.com/bottlerocket-os/bottlerocket)"
+                "Bottlerocket buildsys {} (https://github.com/bottlerocket-os/bottlerocket)",
+                self.version
             ))
             .unwrap_or(HeaderValue::from_static(
                 "Bottlerocket buildsys (https://github.com/bottlerocket-os/bottlerocket)",
@@ -124,10 +141,6 @@ impl LookasideCache {
                 Err(e)
             }
         }
-    }
-
-    fn getenv(var: &str) -> Result<String> {
-        env::var(var).context(error::EnvironmentSnafu { var: (var) })
     }
 
     fn extract_file_name(url: &str) -> Result<PathBuf> {
