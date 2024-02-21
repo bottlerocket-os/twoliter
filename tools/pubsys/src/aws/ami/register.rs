@@ -129,7 +129,7 @@ async fn _register_image(
         .image_features()
         .iter()
         .flatten()
-        .any(|f| **f == ImageFeature::UefiSecureBoot);
+        .any(|f| *f == ImageFeature::UefiSecureBoot);
 
     let (boot_mode, uefi_data) = if uefi_secure_boot_enabled {
         (Some("uefi-preferred".into()), Some(uefi_data))
