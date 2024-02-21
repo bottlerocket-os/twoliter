@@ -127,6 +127,8 @@ struct PackageBuildArgs {
 impl PackageBuildArgs {
     fn build_args(&self) -> Vec<String> {
         let mut args = Vec::new();
+        args.push("--network".into());
+        args.push("none".into());
         args.build_arg("PACKAGE", &self.package);
         args.build_arg("REPO", &self.publish_repo);
         args.build_arg("VARIANT", &self.variant);
@@ -163,6 +165,8 @@ struct VariantBuildArgs {
 impl VariantBuildArgs {
     fn build_args(&self) -> Vec<String> {
         let mut args = Vec::new();
+        args.push("--network".into());
+        args.push("host".into());
         args.build_arg(
             "DATA_IMAGE_PUBLISH_SIZE_GIB",
             self.data_image_publish_size_gib.to_string(),
