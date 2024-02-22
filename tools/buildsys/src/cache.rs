@@ -68,11 +68,20 @@ impl LookasideCache {
                 }
             }
 
-            let name = path.display();
+            let name = &path.display().to_string();
             let tmp = PathBuf::from(format!(".{}", name));
 
             // first check the lookaside cache
-            let url = format!("{}/{}/{}/{}", self.lookaside_cache, name, hash, name);
+            let mut url = self.lookaside_cache.clone();
+            url.path_segments_mut()
+                .map_err(|_| {
+                    error::UrlPathSegmentsSnafu {
+                        url: self.lookaside_cache.clone(),
+                    }
+                    .build()
+                })?
+                .extend([name, hash, name]);
+            let url = url.to_string();
             match self.fetch_file(&url, &tmp, hash) {
                 Ok(_) => {
                     fs::rename(&tmp, path)
