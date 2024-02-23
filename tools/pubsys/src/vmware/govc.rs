@@ -99,8 +99,8 @@ impl Govc {
 /// to run in the container.
 // The arguments are `&[&str]` in an attempt to be as flexible as possible for the caller
 fn docker_run(docker_env: &[&str], mount: Option<&[&str]>, command: &[&str]) -> Result<Output> {
-    let sdk = env::var("BUILDSYS_SDK_IMAGE").context(error::EnvironmentSnafu {
-        var: "BUILDSYS_SDK_IMAGE",
+    let sdk = env::var("TLPRIVATE_SDK_IMAGE").context(error::EnvironmentSnafu {
+        var: "TLPRIVATE_SDK_IMAGE",
     })?;
     trace!("SDK image: {}", sdk);
 
