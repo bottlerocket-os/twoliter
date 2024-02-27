@@ -53,22 +53,50 @@ COPY --chown=1000:1000 --from=sdk /tmp /variantcache
 COPY --chown=1000:1000 Twoliter.toml /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
+# Generate the expected RPM macros and bconds.
+FROM sdk as rpm-macros-and-bconds
+ARG VARIANT
+ARG VARIANT_PLATFORM
+ARG VARIANT_RUNTIME
+ARG VARIANT_FAMILY
+ARG VARIANT_FLAVOR
+ARG GRUB_SET_PRIVATE_VAR
+ARG UEFI_SECURE_BOOT
+ARG SYSTEMD_NETWORKD
+ARG UNIFIED_CGROUP_HIERARCHY
+ARG XFS_DATA_PARTITION
+
+USER builder
+WORKDIR /home/builder
+RUN \
+   export RPM_MACROS="generated.rpmmacros" \
+   && export RPM_BCONDS="generated.bconds" \
+   && echo "%_cross_variant ${VARIANT}" > "${RPM_MACROS}" \
+   && echo "%_cross_variant_platform ${VARIANT_PLATFORM}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_flavor ${VARIANT_FAMILY:-none}" >> "${RPM_MACROS}" \
+   && echo "%_cross_repo_root_json %{_builddir}/root.json" >> "${RPM_MACROS}" \
+   && echo "%_topdir /home/builder/rpmbuild" >> "${RPM_MACROS}" \
+   && echo "%bcond_without $(V=${VARIANT_PLATFORM,,}; echo ${V//-/_})_platform" > "${RPM_BCONDS}" \
+   && echo "%bcond_without $(V=${VARIANT_RUNTIME,,}; echo ${V//-/_})_runtime" >> "${RPM_BCONDS}" \
+   && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> "${RPM_BCONDS}" \
+   && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
+   && echo -e -n "${GRUB_SET_PRIVATE_VAR:+%bcond_without grub_set_private_var\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}"
+
+# =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Builds an RPM package from a spec file.
 FROM sdk AS rpmbuild
 ARG PACKAGE
 ARG ARCH
 ARG NOCACHE
 ARG VARIANT
-ARG VARIANT_PLATFORM
-ARG VARIANT_RUNTIME
-ARG VARIANT_FAMILY
-ARG VARIANT_FLAVOR
 ARG REPO
-ARG GRUB_SET_PRIVATE_VAR
-ARG UEFI_SECURE_BOOT
 ARG SYSTEMD_NETWORKD
-ARG UNIFIED_CGROUP_HIERARCHY
-ARG XFS_DATA_PARTITION
 ENV SYSTEMD_NETWORKD=${SYSTEMD_NETWORKD}
 ENV VARIANT=${VARIANT}
 WORKDIR /home/builder
@@ -87,25 +115,13 @@ RUN --mount=target=/host \
   && cp -r /host/licenses ./rpmbuild/BUILD/ \
   || mkdir ./rpmbuild/BUILD/licenses )
 COPY ./packages/${PACKAGE}/ .
+
+COPY --chown=builder --from=rpm-macros-and-bconds /home/builder/generated.* .
+
+# Merge generated bconds with the package spec, and put sources in the right place.
 RUN \
-   cp "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" .rpmmacros \
-   && echo "%_cross_variant ${VARIANT}" >> .rpmmacros \
-   && echo "%_cross_variant_platform ${VARIANT_PLATFORM}" >> .rpmmacros \
-   && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> .rpmmacros \
-   && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> .rpmmacros \
-   && echo "%_cross_variant_flavor ${VARIANT_FAMILY:-none}" >> .rpmmacros \
-   && echo "%_cross_repo_root_json %{_builddir}/root.json" >> .rpmmacros \
-   && echo "%_topdir /home/builder/rpmbuild" >> .rpmmacros \
-   && echo "%bcond_without $(V=${VARIANT_PLATFORM,,}; echo ${V//-/_})_platform" > .bconds \
-   && echo "%bcond_without $(V=${VARIANT_RUNTIME,,}; echo ${V//-/_})_runtime" >> .bconds \
-   && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> .bconds \
-   && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> .bconds \
-   && echo -e -n "${GRUB_SET_PRIVATE_VAR:+%bcond_without grub_set_private_var\n}" >> .bconds \
-   && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> .bconds \
-   && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> .bconds \
-   && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> .bconds \
-   && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> .bconds \
-   && cat .bconds ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
+   cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
+   && cat generated.bconds ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
    && find . -maxdepth 1 -not -path '*/\.*' -type f -exec mv {} rpmbuild/SOURCES/ \; \
    && echo ${NOCACHE}
 
