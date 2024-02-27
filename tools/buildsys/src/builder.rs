@@ -114,7 +114,12 @@ impl CommonBuildArgs {
 }
 
 struct PackageBuildArgs {
-    image_features: Option<HashSet<ImageFeature>>,
+    /// The package might need to know what the `image_features` are going to be for the variant
+    /// it is going to be used in downstream. This is because certain packages will be built
+    /// differently based on certain image features such as cgroupsv1 vs cgroupsv2. During a
+    /// package build, these are determined by looking at the variant's Cargo.toml file based on
+    /// what was found in `BUILDSYS_VARIANT`.
+    image_features: HashSet<ImageFeature>,
     package: String,
     publish_repo: String,
     variant: String,
@@ -136,11 +141,10 @@ impl PackageBuildArgs {
         args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
-        if let Some(image_features) = &self.image_features {
-            for image_feature in image_features.iter() {
-                args.build_arg(format!("{}", image_feature), "1");
-            }
+        for image_feature in &self.image_features {
+            args.build_arg(format!("{}", image_feature), "1");
         }
+
         args
     }
 }
@@ -222,7 +226,11 @@ pub(crate) struct DockerBuild {
 
 impl DockerBuild {
     /// Create a new `DockerBuild` that can build a package.
-    pub(crate) fn new_package(args: BuildPackageArgs, manifest: &ManifestInfo) -> Result<Self> {
+    pub(crate) fn new_package(
+        args: BuildPackageArgs,
+        manifest: &ManifestInfo,
+        image_features: HashSet<ImageFeature>,
+    ) -> Result<Self> {
         let package = if let Some(name_override) = manifest.package_name() {
             name_override.clone()
         } else {
@@ -252,9 +260,7 @@ impl DockerBuild {
                 args.common.arch,
             ),
             target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
-                image_features: manifest
-                    .image_features()
-                    .map(|set| set.iter().map(|&x| x.to_owned()).collect()),
+                image_features,
                 package,
                 publish_repo: args.publish_repo,
                 variant: args.variant,
@@ -305,12 +311,7 @@ impl DockerBuild {
             target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
                 data_image_publish_size_gib,
                 data_image_size_gib: data_image_size_gib.to_string(),
-                image_features: manifest
-                    .image_features()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .copied()
-                    .collect(),
+                image_features: manifest.image_features().unwrap_or_default(),
                 image_format: match manifest.image_format() {
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",

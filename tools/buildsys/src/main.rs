@@ -58,6 +58,11 @@ mod error {
             source: super::builder::error::Error,
         },
 
+        #[snafu(display("Unable to instantiate the builder: {source}"))]
+        BuilderInstantiation {
+            source: crate::builder::error::Error,
+        },
+
         #[snafu(display("Missing environment variable '{}'", var))]
         Environment {
             var: String,
@@ -225,8 +230,8 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         println!("cargo:rerun-if-changed={}", f.display());
     }
 
-    DockerBuild::new_package(args, &manifest)
-        .unwrap()
+    DockerBuild::new_package(args, &manifest, image_features.unwrap_or_default())
+        .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)?;
     Ok(())
@@ -243,7 +248,7 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
 
     if manifest.included_packages().is_some() {
         DockerBuild::new_variant(args, &manifest)
-            .unwrap()
+            .context(error::BuilderInstantiationSnafu)?
             .build()
             .context(error::BuildAttemptSnafu)?;
     } else {

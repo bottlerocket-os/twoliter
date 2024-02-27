@@ -325,11 +325,11 @@ impl ManifestInfo {
     }
 
     /// Convenience method to return the enabled image features for this variant.
-    pub fn image_features(&self) -> Option<HashSet<&ImageFeature>> {
+    pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         self.build_variant().and_then(|b| {
             b.image_features
                 .as_ref()
-                .map(|m| m.iter().filter(|(_k, v)| **v).map(|(k, _v)| k).collect())
+                .map(|m| m.iter().filter(|(_k, v)| **v).map(|(k, _v)| *k).collect())
         })
     }
 
