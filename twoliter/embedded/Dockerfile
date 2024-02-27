@@ -75,7 +75,7 @@ RUN \
    && echo "%_cross_variant_platform ${VARIANT_PLATFORM}" >> "${RPM_MACROS}" \
    && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> "${RPM_MACROS}" \
    && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> "${RPM_MACROS}" \
-   && echo "%_cross_variant_flavor ${VARIANT_FAMILY:-none}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_flavor ${VARIANT_FLAVOR:-none}" >> "${RPM_MACROS}" \
    && echo "%_cross_repo_root_json %{_builddir}/root.json" >> "${RPM_MACROS}" \
    && echo "%_topdir /home/builder/rpmbuild" >> "${RPM_MACROS}" \
    && echo "%bcond_without $(V=${VARIANT_PLATFORM,,}; echo ${V//-/_})_platform" > "${RPM_BCONDS}" \
