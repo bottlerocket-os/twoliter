@@ -111,6 +111,7 @@ async fn test_install_tools() {
     assert!(toolsdir.join("rpm2img").is_file());
     assert!(toolsdir.join("rpm2kmodkit").is_file());
     assert!(toolsdir.join("rpm2migrations").is_file());
+    assert!(toolsdir.join("metadata.spec").is_file());
 
     // Check that binaries were copied.
     assert!(toolsdir.join("bottlerocket-variant").is_file());

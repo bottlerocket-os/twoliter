@@ -174,18 +174,35 @@ FROM sdk AS repobuild
 ARG PACKAGES
 ARG ARCH
 ARG NOCACHE
-WORKDIR /root
 
+WORKDIR /home/builder
+USER builder
+
+COPY --chown=builder --from=rpm-macros-and-bconds /home/builder/generated.* .
+
+# Build the metadata RPM for the variant.
+RUN --mount=target=/host \
+   cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
+   && cat generated.bconds /host/build/tools/metadata.spec >> rpmbuild/SPECS/metadata.spec \
+   && rpmbuild -ba --clean \
+      --undefine _auto_set_build_flags \
+      --define "_target_cpu ${ARCH}" \
+      rpmbuild/SPECS/metadata.spec \
+   && rpm -qp --provides rpmbuild/RPMS/${ARCH}/bottlerocket-metadata-*.${ARCH}.rpm \
+   && echo ${NOCACHE}
+
+WORKDIR /root
 USER root
 RUN --mount=target=/host \
     mkdir -p /local/rpms ./rpmbuild/RPMS \
     && ln -s /host/build/rpms/*.rpm ./rpmbuild/RPMS \
+    && ln -s /home/builder/rpmbuild/RPMS/*/*.rpm ./rpmbuild/RPMS \
     && createrepo_c \
         -o ./rpmbuild/RPMS \
         -x '*-debuginfo-*.rpm' \
         -x '*-debugsource-*.rpm' \
         --no-database \
-        /host/build/rpms \
+        ./rpmbuild/RPMS \
     && echo '%_dbpath %{_sharedstatedir}/rpm' >> /etc/rpm/macros \
     && dnf -y \
         --disablerepo '*' \
@@ -195,7 +212,7 @@ RUN --mount=target=/host \
         --downloadonly \
         --downloaddir . \
         --forcearch "${ARCH}" \
-        install $(printf "bottlerocket-%s\n" ${PACKAGES}) \
+        install $(printf "bottlerocket-%s\n" metadata ${PACKAGES}) \
     && mv *.rpm /local/rpms \
     && createrepo_c /local/rpms \
     && echo ${NOCACHE}
