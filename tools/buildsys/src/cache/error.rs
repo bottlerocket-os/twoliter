@@ -50,6 +50,9 @@ pub(crate) enum Error {
 
     #[snafu(display("Failed to delete file '{}': {}", path.display(), source))]
     ExternalFileDelete { path: PathBuf, source: io::Error },
+
+    #[snafu(display("Failed to get path segments from URL '{}'", url))]
+    UrlPathSegments { url: String },
 }
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
