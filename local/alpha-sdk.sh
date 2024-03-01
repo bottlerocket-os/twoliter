@@ -153,6 +153,13 @@ do
   cp "${bottlerocket_dir}/sbkeys/generate-aws-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
   cp "${bottlerocket_dir}/sbkeys/generate-local-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
 
+  # First we build aws-dev to make all of (or at least more of) the upstream packages available in
+  # the event ${variant} does not include them.
+  cargo make \
+    -e "BUILDSYS_VARIANT=aws-dev" \
+    -e "BUILDSYS_ARCH=${target_arch}" \
+    build-variant
+
   cargo make \
     -e "BUILDSYS_VARIANT=${variant}" \
     -e "BUILDSYS_ARCH=${target_arch}" \
