@@ -1,12 +1,11 @@
 use crate::common::fs;
-use crate::docker::ImageArchUri;
+use crate::docker::ImageUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
 use async_walkdir::WalkDir;
 use futures::stream::StreamExt;
 use log::{debug, info, trace, warn};
-use non_empty_string::NonEmptyString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::ffi::OsStr;
@@ -44,10 +43,7 @@ pub(crate) struct Project {
     release_version: String,
 
     /// The Bottlerocket SDK container image.
-    sdk: Option<ImageName>,
-
-    /// The Bottlerocket Toolchain container image.
-    toolchain: Option<ImageName>,
+    sdk: Option<ImageUri>,
 }
 
 impl Project {
@@ -102,20 +98,8 @@ impl Project {
         self.release_version.as_str()
     }
 
-    pub(crate) fn sdk_name(&self) -> Option<&ImageName> {
-        self.sdk.as_ref()
-    }
-
-    pub(crate) fn toolchain_name(&self) -> Option<&ImageName> {
-        self.toolchain.as_ref()
-    }
-
-    pub(crate) fn sdk(&self, arch: &str) -> Option<ImageArchUri> {
-        self.sdk_name().map(|s| s.uri(arch))
-    }
-
-    pub(crate) fn toolchain(&self, arch: &str) -> Option<ImageArchUri> {
-        self.toolchain_name().map(|s| s.uri(arch))
+    pub(crate) fn sdk(&self) -> Option<ImageUri> {
+        self.sdk.clone()
     }
 
     pub(crate) fn token(&self) -> String {
@@ -172,38 +156,6 @@ impl Project {
     }
 }
 
-/// A base name for an image that can be suffixed using a naming convention. For example,
-/// `registry=public.ecr.aws/bottlerocket`, `name=bottlerocket`, `version=v0.50.0` can be suffixed
-/// via naming convention to produce:
-/// - `registry=public.ecr.aws/bottlerocket/bottlerocket-sdk-x86_64:v0.50.0`
-/// - `registry=public.ecr.aws/bottlerocket/bottlerocket-toolchain-aarch64:v0.50.0`
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) struct ImageName {
-    /// The registry, e.g. `public.ecr.aws/bottlerocket`. Optional because locally cached images may
-    /// not specify a registry.
-    pub(crate) registry: Option<NonEmptyString>,
-    /// The base name of the image that can be suffixed. For example `bottlerocket` can become
-    /// `bottlerocket-sdk` or `bottlerocket-toolchain`.
-    pub(crate) name: NonEmptyString,
-    /// The version tag, for example `v0.50.0`
-    pub(crate) version: NonEmptyString,
-}
-
-impl ImageName {
-    pub(crate) fn uri<S>(&self, arch: S) -> ImageArchUri
-    where
-        S: AsRef<str>,
-    {
-        ImageArchUri::new(
-            self.registry.as_ref().map(|s| s.to_string()),
-            self.name.clone(),
-            arch.as_ref(),
-            &self.version,
-        )
-    }
-}
-
 /// This is used to `Deserialize` a project, then run validation code before returning a valid
 /// [`Project`]. This is necessary both because there is no post-deserialization serde hook for
 /// validation and, even if there was, we need to know the project directory path in order to check
@@ -213,8 +165,7 @@ impl ImageName {
 struct UnvalidatedProject {
     schema_version: SchemaVersion<1>,
     release_version: String,
-    sdk: Option<ImageName>,
-    toolchain: Option<ImageName>,
+    sdk: Option<ImageUri>,
 }
 
 impl UnvalidatedProject {
@@ -237,7 +188,6 @@ impl UnvalidatedProject {
             schema_version: self.schema_version,
             release_version: self.release_version,
             sdk: self.sdk,
-            toolchain: self.toolchain,
         })
     }
 
@@ -302,23 +252,13 @@ mod test {
 
         // Add checks here as desired to validate deserialization.
         assert_eq!(SchemaVersion::<1>, deserialized.schema_version);
-        let sdk_name = deserialized.sdk_name().unwrap();
-        let toolchain_name = deserialized.toolchain_name().unwrap();
-        assert_eq!("a.com/b", sdk_name.registry.as_ref().unwrap().as_str());
+        let sdk = deserialized.sdk().unwrap();
+        assert_eq!("a.com/b", sdk.registry.as_ref().unwrap().as_str());
         assert_eq!(
             "my-bottlerocket-sdk",
-            deserialized.sdk_name().unwrap().name.as_str()
+            deserialized.sdk().unwrap().repo.as_str()
         );
-        assert_eq!("v1.2.3", deserialized.sdk_name().unwrap().version.as_str());
-        assert_eq!("c.co/d", toolchain_name.registry.as_ref().unwrap().as_str());
-        assert_eq!(
-            "toolchainz",
-            deserialized.toolchain_name().unwrap().name.as_str()
-        );
-        assert_eq!(
-            "v3.4.5",
-            deserialized.toolchain_name().unwrap().version.as_str()
-        );
+        assert_eq!("v1.2.3", deserialized.sdk().unwrap().tag.as_str());
     }
 
     /// Ensure that a `Twoliter.toml` cannot be serialized if the `schema_version` is incorrect.
@@ -351,31 +291,22 @@ mod test {
     }
 
     #[test]
-    fn test_sdk_toolchain_uri() {
+    fn test_sdk_uri() {
         let project = Project {
             filepath: Default::default(),
             project_dir: Default::default(),
             schema_version: Default::default(),
             release_version: String::from("1.0.0"),
-            sdk: Some(ImageName {
+            sdk: Some(ImageUri {
                 registry: Some("example.com".try_into().unwrap()),
-                name: "foo-abc".try_into().unwrap(),
-                version: "version1".try_into().unwrap(),
-            }),
-            toolchain: Some(ImageName {
-                registry: Some("example.com".try_into().unwrap()),
-                name: "foo-def".try_into().unwrap(),
-                version: "version2".try_into().unwrap(),
+                repo: "foo-abc".try_into().unwrap(),
+                tag: "version1".try_into().unwrap(),
             }),
         };
 
         assert_eq!(
-            "example.com/foo-abc-x86_64:version1",
-            project.sdk("x86_64").unwrap().to_string()
-        );
-        assert_eq!(
-            "example.com/foo-def-aarch64:version2",
-            project.toolchain("aarch64").unwrap().to_string()
+            "example.com/foo-abc:version1",
+            project.sdk().unwrap().to_string()
         );
     }
 

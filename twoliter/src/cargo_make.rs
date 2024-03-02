@@ -1,5 +1,5 @@
 use crate::common::exec_log;
-use crate::docker::ImageArchUri;
+use crate::docker::ImageUri;
 use crate::project::Project;
 use anyhow::{bail, Result};
 use log::trace;
@@ -17,12 +17,8 @@ use tokio::process::Command;
 ///
 /// // First create a twoliter project.
 /// let project = Project::load(project_path).await.unwrap();
-/// // Add the architecture that cargo make will be invoked for.
-/// // This is required so that the correct sdk and toolchain are selected.
-/// let arch = "x86_64";
-///
 /// // Create the `cargo make` command.
-/// let cargo_make_command = CargoMake::new(&project, arch)
+/// let cargo_make_command = CargoMake::new(&project)
 ///     .unwrap()
 ///     // Specify path to the `Makefile.toml` (Default: `Makefile.toml`)
 ///     .makefile(makefile_path)
@@ -53,16 +49,11 @@ pub struct CargoMake {
 }
 
 impl CargoMake {
-    /// Create a new `cargo make` command. The sdk and toolchain environment variables will be set
-    /// based on the definitions in `Twoliter.toml` and `arch`.
-    pub(crate) fn new<S>(project: &Project, arch: S) -> Result<Self>
-    where
-        S: Into<String>,
-    {
-        let (sdk, toolchain) = require_sdk(project, &arch.into())?;
-        Ok(Self::default()
-            .env("TLPRIVATE_SDK_IMAGE", sdk)
-            .env("TLPRIVATE_TOOLCHAIN", toolchain))
+    /// Create a new `cargo make` command. The sdk environment variable will be set based on the
+    /// definition in `Twoliter.toml`.
+    pub(crate) fn new(project: &Project) -> Result<Self> {
+        let sdk = require_sdk(project)?;
+        Ok(Self::default().env("TLPRIVATE_SDK_IMAGE", sdk))
     }
 
     /// Specify the path to the `Makefile.toml` for the `cargo make` command
@@ -145,12 +136,11 @@ impl CargoMake {
     }
 }
 
-fn require_sdk(project: &Project, arch: &str) -> Result<(ImageArchUri, ImageArchUri)> {
-    match (project.sdk(arch), project.toolchain(arch)) {
-        (Some(s), Some(t)) => Ok((s, t)),
+fn require_sdk(project: &Project) -> Result<ImageUri> {
+    match project.sdk() {
+        Some(s) => Ok(s),
         _ => bail!(
-            "When using twoliter make, it is required that the SDK and toolchain be specified in \
-            Twoliter.toml"
+            "When using twoliter make, it is required that the SDK be specified in Twoliter.toml"
         ),
     }
 }
@@ -199,11 +189,10 @@ const ENV_VARS: [&str; 23] = [
     "no_proxy",
 ];
 
-const DISALLOWED_SDK_VARS: [&str; 4] = [
+const DISALLOWED_SDK_VARS: [&str; 3] = [
     "BUILDSYS_SDK_NAME",
     "BUILDSYS_SDK_VERSION",
     "BUILDSYS_REGISTRY",
-    "BUILDSYS_TOOLCHAIN",
 ];
 
 /// Returns `true` if `key` is an environment variable that needs to be passed to `cargo make`.

@@ -3,10 +3,5 @@ release-version = "1.0.0"
 
 [sdk]
 registry = "a.com/b"
-name = "my-bottlerocket-sdk"
-version = "v1.2.3"
-
-[toolchain]
-registry = "c.co/d"
-name = "toolchainz"
-version = "v3.4.5"
+repo = "my-bottlerocket-sdk"
+tag = "v1.2.3"
