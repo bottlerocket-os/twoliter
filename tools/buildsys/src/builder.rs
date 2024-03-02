@@ -88,13 +88,12 @@ static DOCKER_BUILD_MAX_ATTEMPTS: NonZeroU16 = nonzero!(10u16);
 struct CommonBuildArgs {
     arch: SupportedArch,
     sdk: String,
-    toolchain: String,
     nocache: String,
     token: String,
 }
 
 impl CommonBuildArgs {
-    fn new(root: impl AsRef<Path>, sdk: String, toolchain: String, arch: SupportedArch) -> Self {
+    fn new(root: impl AsRef<Path>, sdk: String, arch: SupportedArch) -> Self {
         let mut d = Sha512::new();
         d.update(root.as_ref().display().to_string());
         let digest = hex::encode(d.finalize());
@@ -106,7 +105,6 @@ impl CommonBuildArgs {
         Self {
             arch,
             sdk,
-            toolchain,
             nocache,
             token,
         }
@@ -256,7 +254,6 @@ impl DockerBuild {
             common_build_args: CommonBuildArgs::new(
                 &args.common.root_dir,
                 args.common.sdk_image,
-                args.common.toolchain,
                 args.common.arch,
             ),
             target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
@@ -305,7 +302,6 @@ impl DockerBuild {
             common_build_args: CommonBuildArgs::new(
                 &args.common.root_dir,
                 args.common.sdk_image,
-                args.common.toolchain,
                 args.common.arch,
             ),
             target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
@@ -428,7 +424,6 @@ impl DockerBuild {
         args.build_arg("ARCH", self.common_build_args.arch.to_string());
         args.build_arg("GOARCH", self.common_build_args.arch.goarch());
         args.build_arg("SDK", &self.common_build_args.sdk);
-        args.build_arg("TOOLCHAIN", &self.common_build_args.toolchain);
         args.build_arg("NOCACHE", &self.common_build_args.nocache);
         // Avoid using a cached layer from a concurrent build in another checkout.
         args.build_arg("TOKEN", &self.common_build_args.token);

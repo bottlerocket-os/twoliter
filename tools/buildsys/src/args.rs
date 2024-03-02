@@ -14,7 +14,7 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 13] = [
+const REBUILD_VARS: [(&str, u8); 12] = [
     ("BUILDSYS_ARCH", PACKAGE | VARIANT),
     ("BUILDSYS_NAME", VARIANT),
     ("BUILDSYS_OUTPUT_DIR", VARIANT),
@@ -27,7 +27,6 @@ const REBUILD_VARS: [(&str, u8); 13] = [
     ("BUILDSYS_VERSION_BUILD", VARIANT),
     ("BUILDSYS_VERSION_IMAGE", VARIANT),
     ("TLPRIVATE_SDK_IMAGE", PACKAGE | VARIANT),
-    ("TLPRIVATE_TOOLCHAIN", PACKAGE | VARIANT),
 ];
 
 /// A tool for building Bottlerocket images and artifacts.
@@ -78,9 +77,6 @@ pub(crate) struct Common {
 
     #[arg(long, env = "TLPRIVATE_SDK_IMAGE")]
     pub(crate) sdk_image: String,
-
-    #[arg(long, env = "TLPRIVATE_TOOLCHAIN")]
-    pub(crate) toolchain: String,
 
     #[arg(long, env = "TWOLITER_TOOLS_DIR")]
     pub(crate) tools_dir: PathBuf,
