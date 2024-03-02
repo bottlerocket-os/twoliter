@@ -69,12 +69,13 @@ Packages are defined and built using RPM.
 
 These package builds take place in a docker environment using `docker build` commands with the `BuildKit` backend.
 The toolchains used to compile Rust, C, C++ and Go software are distributed in a container image called the [bottlerocket-sdk].
+The SDK contains cross-compiling toolchains for all supported architectures.
+Currently, x86_64 and aarch64 are supported.
 It is in the SDK environment that the package builds take place.
 
 Once all the software for a Bottlerocket image has been built into RPM images, a final image creation step occurs.
 A `docker build` command installs everything into an image file.
 
-The toolchains necessary for each arch (x86_64 and aarch64) are available as separate SDK containers to allow for cross-compilation.
 The build host has the following requirements: sufficient versions of Docker, buildx, Cargo, Cargo Make and a few tools like lz4.
 The root of the Bottlerocket git repo is mounted and artifacts are created in `.cargo` and `build` directories.
 
