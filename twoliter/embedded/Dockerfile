@@ -8,12 +8,10 @@
 # filesystem at /host.
 
 ARG SDK
-ARG TOOLCHAIN
 ARG ARCH
 ARG GOARCH
 
 FROM ${SDK} as sdk
-FROM --platform=linux/${GOARCH} ${TOOLCHAIN}-${ARCH} as toolchain
 
 ############################################################################################
 # Section 1: The following build stages are used to build rpm.spec packages
@@ -89,8 +87,9 @@ RUN --mount=target=/host \
   && cp -r /host/licenses ./rpmbuild/BUILD/ \
   || mkdir ./rpmbuild/BUILD/licenses )
 COPY ./packages/${PACKAGE}/ .
-RUN rpmdev-setuptree \
-   && echo "%_cross_variant ${VARIANT}" > .rpmmacros \
+RUN \
+   cp "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" .rpmmacros \
+   && echo "%_cross_variant ${VARIANT}" >> .rpmmacros \
    && echo "%_cross_variant_platform ${VARIANT_PLATFORM}" >> .rpmmacros \
    && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> .rpmmacros \
    && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> .rpmmacros \
@@ -127,6 +126,9 @@ RUN --mount=target=/host \
         --nogpgcheck \
         --forcearch "${ARCH}" \
         builddep rpmbuild/SPECS/${PACKAGE}.spec
+
+# Ensure that the target binutils that `find-debuginfo.sh` uses are present in $PATH.
+ENV PATH="/usr/${ARCH}-bottlerocket-linux-gnu/debuginfo/bin:${PATH}"
 
 # We use the "nocache" writable space to generate code where necessary, like the variant-
 # specific models.
@@ -272,7 +274,6 @@ ARG VARIANT
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 
 USER root
-COPY --from=toolchain /toolchain /local/toolchain
 
 WORKDIR /tmp
 RUN --mount=target=/host \
@@ -283,7 +284,7 @@ RUN --mount=target=/host \
         -exec cp '{}' '/local/archives/' ';' \
     && /host/build/tools/rpm2kmodkit \
         --archive-dir=/local/archives \
-        --toolchain-dir=/local/toolchain \
+        --toolchain-dir=/toolchain \
         --output-dir=/local/output \
     && echo ${NOCACHE}
 
