@@ -125,7 +125,7 @@ fn run() -> Result<()> {
 
             let key_url = if let Some(key_url) = maybe_key_url {
                 // If the user has a key, add it to each role.
-                tuftool!("root add-key '{}' '{}' --role root --role snapshot --role targets --role timestamp",
+                tuftool!("root add-key '{}' --key '{}' --role root --role snapshot --role targets --role timestamp",
                          temp_root_role_path, key_url);
                 key_url
             } else {
