@@ -44,6 +44,12 @@ Provides: %{_cross_os}image-feature(xfs-data-partition)
 Provides: %{_cross_os}image-feature(no-xfs-data-partition)
 %endif
 
+%if %{with fips}
+Provides: %{_cross_os}image-feature(fips)
+%else
+Provides: %{_cross_os}image-feature(no-fips)
+%endif
+
 %description
 %{summary}.
 

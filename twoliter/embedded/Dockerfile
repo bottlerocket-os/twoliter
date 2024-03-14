@@ -65,6 +65,7 @@ ARG UEFI_SECURE_BOOT
 ARG SYSTEMD_NETWORKD
 ARG UNIFIED_CGROUP_HIERARCHY
 ARG XFS_DATA_PARTITION
+ARG FIPS
 
 USER builder
 WORKDIR /home/builder
@@ -83,6 +84,7 @@ RUN \
    && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> "${RPM_BCONDS}" \
    && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
    && echo -e -n "${GRUB_SET_PRIVATE_VAR:+%bcond_without grub_set_private_var\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> "${RPM_BCONDS}" \
