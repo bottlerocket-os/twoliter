@@ -185,7 +185,6 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
                 region: region.to_string(),
             })?
             .parameters()
-            .unwrap_or_default()
             .to_owned();
         for parameter in retrieved_parameters {
             // Insert a new key-value pair into the map, with the key containing region and parameter name

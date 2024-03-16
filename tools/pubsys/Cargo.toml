@@ -7,15 +7,15 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aws-config = "0.55"
-aws-credential-types = "0.55"
-aws-sdk-ebs = "0.28"
-aws-sdk-ec2 = "0.28"
-aws-sdk-kms = "0.28"
-aws-sdk-ssm = "0.28"
-aws-sdk-sts = "0.28"
-aws-smithy-types = "0.55"
-aws-types = "0.55"
+aws-config = "1"
+aws-credential-types = "1"
+aws-sdk-ebs = "1"
+aws-sdk-ec2 = "1"
+aws-sdk-kms = "1"
+aws-sdk-ssm = "1"
+aws-sdk-sts = "1"
+aws-smithy-types = "1"
+aws-types = "1"
 buildsys = { path = "../buildsys", version = "0.1" }
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
@@ -38,15 +38,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_plain = "1"
 simplelog = "0.12"
-snafu = "0.7"
+snafu = "0.8"
 tabled = "0.10"
 tempfile = "3"
 tinytemplate = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["time"] }
 toml = "0.8"
-tough = { version = "0.15", features = ["http"] }
-tough-kms = "0.7"
-tough-ssm = "0.10"
+tough = { version = "0.17", features = ["http"] }
+tough-kms = "0.9"
+tough-ssm = "0.12"
 update-metadata = { path = "../update-metadata/", version = "0.1" }
 url = { version = "2", features = ["serde"] }

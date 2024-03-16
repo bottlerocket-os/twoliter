@@ -9,12 +9,12 @@ publish = false
 [dependencies]
 bottlerocket-types = { git = "https://github.com/bottlerocket-os/bottlerocket-test-system", version = "0.0.12", tag = "v0.0.12" }
 bottlerocket-variant = { version = "0.1", path = "../bottlerocket-variant" }
-handlebars = "4"
+handlebars = "5"
 log = "0.4"
 maplit = "1"
 testsys-model = { git = "https://github.com/bottlerocket-os/bottlerocket-test-system", version = "0.0.12", tag = "v0.0.12" }
 serde = { version = "1", features = ["derive"] }
 serde_plain = "1"
 serde_yaml = "0.9"
-snafu = "0.7"
+snafu = "0.8"
 toml = "0.8"

@@ -50,7 +50,8 @@ async fn build_provider(
             AssumeRoleProvider::builder(assume_role)
                 .region(sts_region.clone())
                 .session_name("pubsys")
-                .build(provider.clone()),
+                .build_from_provider(provider.clone())
+                .await,
         )
     }
     provider

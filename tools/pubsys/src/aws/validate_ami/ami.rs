@@ -136,7 +136,6 @@ pub(crate) async fn describe_images_in_region(
                 region: region.to_string(),
             })?
             .images()
-            .unwrap_or_default()
             .to_owned();
         for image in retrieved_images {
             // Insert a new key-value pair into the map, with the key containing image ID

@@ -10,5 +10,5 @@ exclude = ["README.md"]
 
 [dependencies]
 serde = "1"
-snafu = "0.7"
+snafu = "0.8"
 

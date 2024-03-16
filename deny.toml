@@ -1,10 +1,4 @@
 [licenses]
-unlicensed = "deny"
-
-# Deny licenses unless they are specifically listed here
-copyleft = "deny"
-allow-osi-fsf-free = "neither"
-default = "deny"
 
 # We want really high confidence when inferring licenses from text
 confidence-threshold = 0.93
@@ -12,7 +6,7 @@ confidence-threshold = 0.93
 # Commented license types are allowed but not currently used
 allow = [
     "Apache-2.0",
-    "BSD-2-Clause",
+    # "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
     # "CC0-1.0",
@@ -69,27 +63,30 @@ skip = [
     { name = "base64" },
     # several dependencies are using an old version of bitflags
     { name = "bitflags", version = "=1.3" },
-    # several dependencies are using an old version of serde_yaml
-    { name = "serde_yaml", version = "=0.8" },
-    # aws-sdk-rust is using an old version of fastrand
-    { name = "fastrand", version = "=1.9" },
+    # dependencies are using different versions of event-listener
+    { name = "event-listener", version = "=4" },
+    # dependencies are using different versions of event-listener-strategy
+    { name = "event-listener-strategy", version = "=0.4" },
     # multiple deps are using an older version of hashbrown
     { name = "hashbrown", version = "=0.12" },
     # multiple deps are using an older version of indexmap
     { name = "indexmap", version = "1" },
-    # kube-client uses an old version of redox_syscall
-    { name = "redox_syscall", version = "=0.2" },
+    # dependencies are using different versions of heck
+    { name = "heck", version = "=0.4" },
+    # dependencies are using different versions of http
+    { name = "http", version = "=0.2" },
     # kube-client uses an older version of pem
     { name = "pem", version = "=1" },
-    # hyper and tokio are using different versions of socket2
-    { name = "socket2", version = "0.4" },
+    # several dependencies are using an old version of serde_yaml
+    { name = "serde_yaml", version = "=0.8" },
+    # dependencies are using different versions of snafu
+    { name = "snafu", version = "=0.7" },
+    # dependencies are using different versions of snafu-derive
+    { name = "snafu-derive", version = "=0.7" },
+    # dependencies are using different versions of strsim
+    { name = "strsim", version = "=0.10" },
     # multiple deps are using an older version of syn
     { name = "syn", version = "1" },
-
-    # aws-sdk-rust is using an old version of rustls, hyper-rustls, and tokio-rustls
-    { name = "rustls", version = "=0.20" },
-    { name = "hyper-rustls", version = "=0.23" },
-    { name = "tokio-rustls", version = "=0.23" },
 ]
 
 skip-tree = [
@@ -98,19 +95,6 @@ skip-tree = [
     # dependency tree because windows-sys has many sub-crates
     # that differ in major version.
     { name = "windows-sys" },
-
-    # We needed a fix in tuftool 0.10.2, but it also included AWS Rust SDK updates. We cannot update
-    # tough, tough-kms and tough-ssm at the same time, though, because of these issues:
-    # - https://github.com/awslabs/tough/issues/733
-    # - https://github.com/awslabs/coldsnap/issues/301
-    # - https://github.com/awslabs/coldsnap/issues/302
-    #
-    # For the time being, this means that we are building multiple versions of the AWS Rust SDK
-    # which increases build times and needs to be addressed as soon as possible.
-    # - https://github.com/bottlerocket-os/twoliter/issues/124
-    { name = "tough", version = "0.15" },
-    { name = "tough-kms", version = "0.7" },
-    { name = "tough-ssm", version = "0.10" },
 ]
 
 [sources]
