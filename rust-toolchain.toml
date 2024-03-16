@@ -1,6 +1,6 @@
 # This file locks the build to a specific nightly compiler. There is nothing special about the
-# particular date of the nightly compiler, but we want builds to be reproducable so we lock to a
+# particular date of the nightly compiler, but we want builds to be reproducable, so we lock to a
 # specific, recent instance of nightly.
 [toolchain]
-channel = "nightly-2023-09-12"
+channel = "nightly-2024-02-16"
 profile = "default"
