@@ -143,6 +143,7 @@ pub(crate) fn workload_crd(test_input: TestInput) -> Result<Test> {
         .keep_running(true)
         .kubeconfig_base64_template(cluster_resource_name, "encodedKubeconfig")
         .tests(plugins)
+        .assume_role(test_input.crd_input.config.agent_role.to_owned())
         .set_secrets(Some(test_input.crd_input.config.secrets.to_owned()))
         .set_labels(Some(labels))
         .build(format!(
