@@ -15,6 +15,6 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 sha2 = "0.10"
 shell-words = "1"
 simplelog = "0.12"
-snafu = "0.7"
+snafu = "0.8"
 tempfile = "3"
 url = { version = "2", features = ["serde"] }

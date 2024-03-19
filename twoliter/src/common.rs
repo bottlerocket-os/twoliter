@@ -23,7 +23,7 @@ pub(crate) async fn exec(cmd: &mut Command, quiet: bool) -> Result<Option<String
         let output = cmd
             .output()
             .await
-            .context(format!("Unable to start command"))?;
+            .context("Unable to start command".to_string())?;
         ensure!(
             output.status.success(),
             "Command was unsuccessful, exit code {}:\n{}\n{}",
@@ -41,7 +41,7 @@ pub(crate) async fn exec(cmd: &mut Command, quiet: bool) -> Result<Option<String
         let status = cmd
             .status()
             .await
-            .context(format!("Unable to start command"))?;
+            .context("Unable to start command".to_string())?;
 
         ensure!(
             status.success(),

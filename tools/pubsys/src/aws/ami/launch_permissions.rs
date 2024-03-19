@@ -24,8 +24,7 @@ pub(crate) async fn get_launch_permissions(
 
     let mut launch_permissions = vec![];
 
-    let responses: Vec<LaunchPermission> =
-        ec2_response.launch_permissions().unwrap_or(&[]).to_vec();
+    let responses: Vec<LaunchPermission> = ec2_response.launch_permissions().to_vec();
     for permission in responses {
         launch_permissions.push(LaunchPermissionDef::try_from(permission)?)
     }

@@ -52,7 +52,7 @@ impl Make {
 
 #[test]
 fn test_trailing_args_1() {
-    let args = Make::try_parse_from(&[
+    let args = Make::try_parse_from([
         "make",
         "--cargo-home",
         "/tmp/foo",
@@ -82,7 +82,7 @@ fn test_trailing_args_1() {
 
 #[test]
 fn test_trailing_args_2() {
-    let args = Make::try_parse_from(&[
+    let args = Make::try_parse_from([
         "make",
         "--cargo-home",
         "/tmp/foo",
@@ -111,7 +111,7 @@ fn test_trailing_args_2() {
 
 #[test]
 fn test_trailing_args_3() {
-    let args = Make::try_parse_from(&[
+    let args = Make::try_parse_from([
         "make",
         "--cargo-home",
         "/tmp/foo",

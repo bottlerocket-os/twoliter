@@ -66,7 +66,7 @@ pub(crate) async fn validate(
     // Create a `HashMap` of `AmiClient`s, one for each region where validation should happen
     let base_region = &Region::new(
         aws.regions
-            .get(0)
+            .front()
             .ok_or(error::Error::EmptyInfraRegions {
                 path: args.infra_config_path.clone(),
             })?

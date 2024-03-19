@@ -21,7 +21,7 @@ Examples:
 */
 
 use chrono::{DateTime, Duration, FixedOffset, Utc};
-use snafu::{ensure, ResultExt};
+use snafu::{ensure, OptionExt, ResultExt};
 
 mod error {
     use snafu::Snafu;
@@ -41,6 +41,9 @@ mod error {
             input: String,
             source: std::num::ParseIntError,
         },
+
+        #[snafu(display("Integer '{}' is not convertable to a number of {}", integer, unit))]
+        DateInt { integer: u64, unit: &'static str },
     }
 }
 pub use error::Error;
@@ -94,9 +97,18 @@ pub fn parse_offset(input: &str) -> Result<Duration> {
         .context(error::DateArgCountSnafu { input })?;
 
     let duration = match unit_str {
-        "hour" | "hours" => Duration::hours(i64::from(count)),
-        "day" | "days" => Duration::days(i64::from(count)),
-        "week" | "weeks" => Duration::weeks(i64::from(count)),
+        "hour" | "hours" => Duration::try_hours(i64::from(count)).context(error::DateIntSnafu {
+            integer: count,
+            unit: "hours",
+        })?,
+        "day" | "days" => Duration::try_days(i64::from(count)).context(error::DateIntSnafu {
+            integer: count,
+            unit: "days",
+        })?,
+        "week" | "weeks" => Duration::try_weeks(i64::from(count)).context(error::DateIntSnafu {
+            integer: count,
+            unit: "weeks",
+        })?,
         _ => {
             return error::DateArgInvalidSnafu {
                 input,

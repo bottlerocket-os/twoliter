@@ -17,7 +17,7 @@ pub(crate) async fn ami_is_public(
             region: region.to_string(),
         })?;
 
-    let returned_images = ec2_response.images().unwrap_or_default();
+    let returned_images = ec2_response.images();
 
     ensure!(
         returned_images.len() <= 1,
