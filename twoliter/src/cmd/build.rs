@@ -42,6 +42,7 @@ pub(crate) struct BuildVariant {
 
     /// If sources are not found in the lookaside cache, this flag will cause buildsys to pull them
     /// from the upstream URL found in a package's `Cargo.toml`.
+    #[clap(long = "upstream-source-fallback")]
     upstream_source_fallback: bool,
 }
 
