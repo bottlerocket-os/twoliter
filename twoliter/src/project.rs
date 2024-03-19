@@ -394,7 +394,7 @@ mod test {
         fs::copy(&release_toml_from, &release_toml_to)
             .await
             .unwrap();
-        let result = Project::find_and_load(&p).await;
+        let result = Project::find_and_load(p).await;
         assert!(
             result.is_err(),
             "Expected the loading of the project to fail because of a mismatched version in \
@@ -419,7 +419,7 @@ mod test {
             .unwrap();
 
         // The project should load because Release.toml and Twoliter.toml versions match.
-        Project::find_and_load(&p).await.unwrap();
+        Project::find_and_load(p).await.unwrap();
     }
 
     #[tokio::test]

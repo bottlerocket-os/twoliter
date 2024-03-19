@@ -59,6 +59,7 @@ async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>, mtime: FileTi
     let path = dir.as_ref().join(name);
     let mut f = OpenOptions::new()
         .create(true)
+        .truncate(true)
         .read(false)
         .write(true)
         .mode(0o755)
@@ -79,9 +80,7 @@ async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>, mtime: FileTi
             .context(format!("Unable to set mtime for '{}'", path.display()))
     })
     .await
-    .context(format!(
-        "Unable to run and join async task for reading handle time"
-    ))?
+    .context("Unable to run and join async task for reading handle time".to_string())?
 }
 
 async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {
