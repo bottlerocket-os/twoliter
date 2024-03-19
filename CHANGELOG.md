@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2024-03-19
+
+### Added
+
+- Testsys can now assume a role for workload tests ([#169])
+
+### Changed
+
+- Fix `--upstream-source-fallback` argument in `twoliter build variant` ([#168], thanks @tzneal)
+- Fix a bug in pubsys resulting in a key generation error ([#165])
+- Fix an issue with pubsys using the wrong environment variable for the SDK ([#157])
+- Fix an issue in pubsys with trailing a lookaside cache URL having a trailing slash ([#159])
+- Fix in the alpha SDK script and add dev packages ([#147], [#164])
+- Update buildsys to use clap for environment variables ([#134])
+- Refactor buildsys builder.rs logic ([#134], [#156])
+- Update dependencies ([#171])
+
+[#134]: https://github.com/bottlerocket-os/twoliter/pull/134
+[#147]: https://github.com/bottlerocket-os/twoliter/pull/147
+[#156]: https://github.com/bottlerocket-os/twoliter/pull/156
+[#157]: https://github.com/bottlerocket-os/twoliter/pull/157
+[#159]: https://github.com/bottlerocket-os/twoliter/pull/159
+[#164]: https://github.com/bottlerocket-os/twoliter/pull/164
+[#165]: https://github.com/bottlerocket-os/twoliter/pull/165
+[#168]: https://github.com/bottlerocket-os/twoliter/pull/168
+[#169]: https://github.com/bottlerocket-os/twoliter/pull/169
+[#171]: https://github.com/bottlerocket-os/twoliter/pull/171
+
 ## [0.0.6] - 2024-01-30
 
 ### Added
@@ -108,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bottlerocket's `cargo make` build system.
 - `Makefile.toml` taken from the Bottlerocket project.
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.6...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.3...v0.0.4
