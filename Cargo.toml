@@ -12,6 +12,7 @@ members = [
     "tools/pubsys-setup",
     "tools/testsys",
     "tools/testsys-config",
+    "tools/unplug",
     "tools/update-metadata",
     "twoliter",
 ]
