@@ -39,7 +39,7 @@ impl Make {
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
-        CargoMake::new(&project, &self.arch)?
+        CargoMake::new(&project)?
             .env("CARGO_HOME", self.cargo_home.display().to_string())
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())

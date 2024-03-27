@@ -4,7 +4,7 @@ use crate::{cargo_make::CargoMake, project::Project, test::data_dir};
 async fn test_cargo_make() {
     let path = data_dir().join("Twoliter-1.toml");
     let project = Project::load(path).await.unwrap();
-    let cargo_make = CargoMake::new(&project, "arch")
+    let cargo_make = CargoMake::new(&project)
         .unwrap()
         .makefile(data_dir().join("Makefile.toml"));
     cargo_make.exec("verify-twoliter-env").await.unwrap();

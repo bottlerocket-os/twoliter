@@ -164,31 +164,29 @@ do
     -e "BUILDSYS_VARIANT=${variant}" \
     -e "BUILDSYS_ARCH=${target_arch}" \
     build-variant
-
-  for host_arch in amd64 arm64
-  do
-    sdk="${sdk_repo}-${target_arch}:${sdk_version}"
-    tag="${alpha_registry}/${alpha_name}-${target_arch}:${alpha_version}-${host_arch}"
-    echo "creating image ${tag}"
-
-    docker build \
-      --tag "${tag}" \
-      --build-arg "SDK=${sdk}" \
-      --build-arg "HOST_GOARCH=${host_arch}" \
-      --build-arg "TARGET_ARCH=${target_arch}" \
-      --file "${script_dir}/alpha-sdk.dockerfile" \
-      "${bottlerocket_dir}"
-    docker push "${tag}"
-  done
-
-  arm_host="${alpha_registry}/${alpha_name}-${target_arch}:${alpha_version}-arm64"
-  amd_host="${alpha_registry}/${alpha_name}-${target_arch}:${alpha_version}-amd64"
-  multiarch="${alpha_registry}/${alpha_name}-${target_arch}:${alpha_version}"
-
-  echo "creating multiarch manifest ${multiarch}"
-  docker manifest rm "${multiarch}" || true
-  docker manifest create "${multiarch}" "${arm_host}" "${amd_host}"
-  echo "pushing multiarch manifest ${multiarch}"
-  docker manifest push "${multiarch}"
-
 done
+
+for host_arch in amd64 arm64
+do
+  sdk="${sdk_repo}:${sdk_version}"
+  tag="${alpha_registry}/${alpha_name}:${alpha_version}-${host_arch}"
+  echo "creating image ${tag}"
+
+  docker build \
+    --tag "${tag}" \
+    --build-arg "SDK=${sdk}" \
+    --build-arg "HOST_GOARCH=${host_arch}" \
+    --file "${script_dir}/alpha-sdk.dockerfile" \
+    "${bottlerocket_dir}"
+  docker push "${tag}"
+done
+
+arm_host="${alpha_registry}/${alpha_name}:${alpha_version}-arm64"
+amd_host="${alpha_registry}/${alpha_name}:${alpha_version}-amd64"
+multiarch="${alpha_registry}/${alpha_name}:${alpha_version}"
+
+echo "creating multiarch manifest ${multiarch}"
+docker manifest rm "${multiarch}" || true
+docker manifest create "${multiarch}" "${arm_host}" "${amd_host}"
+echo "pushing multiarch manifest ${multiarch}"
+docker manifest push "${multiarch}"

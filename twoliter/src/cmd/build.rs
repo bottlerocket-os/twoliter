@@ -62,11 +62,10 @@ impl BuildVariant {
         let sdk_container = DockerContainer::new(
             format!("sdk-{}", token),
             project
-                .sdk(&self.arch)
+                .sdk()
                 .context(format!(
-                    "No SDK defined in {} for {}",
+                    "No SDK defined in {}",
                     project.filepath().display(),
-                    &self.arch
                 ))?
                 .uri(),
         )
@@ -123,7 +122,7 @@ impl BuildVariant {
         }
 
         // Hold the result of the cargo make call so we can clean up the project directory first.
-        let res = CargoMake::new(&project, &self.arch)?
+        let res = CargoMake::new(&project)?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)

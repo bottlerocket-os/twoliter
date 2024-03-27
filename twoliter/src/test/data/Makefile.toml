@@ -8,10 +8,6 @@ script = ['''
         echo "TLPRIVATE_SDK_IMAGE is not set"
         exit 1
     fi
-    if ! [[ -v TLPRIVATE_TOOLCHAIN ]]; then
-        echo "TLPRIVATE_TOOLCHAIN is not set"
-        exit 1
-    fi
 ''']
 
 [tasks.verify-env-set-with-arg]
