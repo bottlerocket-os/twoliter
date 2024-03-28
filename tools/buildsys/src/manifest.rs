@@ -233,6 +233,15 @@ when the platform supports it.
 uefi-secure-boot = true
 ```
 
+`fips` means that FIPS-certified modules will be used for cryptographic operations. This affects
+the kernel at runtime. It also causes alternate versions of Go and Rust programs that use
+FIPS-compliant ciphers to be included in the image.
+
+```ignore
+[package.metadata.build-variant.image-features]
+fips = true
+```
+
 */
 
 mod error;
@@ -529,6 +538,7 @@ pub enum ImageFeature {
     UnifiedCgroupHierarchy,
     XfsDataPartition,
     UefiSecureBoot,
+    Fips,
 }
 
 impl TryFrom<String> for ImageFeature {
@@ -540,6 +550,7 @@ impl TryFrom<String> for ImageFeature {
             "unified-cgroup-hierarchy" => Ok(ImageFeature::UnifiedCgroupHierarchy),
             "xfs-data-partition" => Ok(ImageFeature::XfsDataPartition),
             "uefi-secure-boot" => Ok(ImageFeature::UefiSecureBoot),
+            "fips" => Ok(ImageFeature::Fips),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
@@ -553,6 +564,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::UnifiedCgroupHierarchy => write!(f, "UNIFIED_CGROUP_HIERARCHY"),
             ImageFeature::XfsDataPartition => write!(f, "XFS_DATA_PARTITION"),
             ImageFeature::UefiSecureBoot => write!(f, "UEFI_SECURE_BOOT"),
+            ImageFeature::Fips => write!(f, "FIPS"),
         }
     }
 }

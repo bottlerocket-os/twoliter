@@ -160,6 +160,10 @@ struct VariantBuildArgs {
     partition_plan: String,
     pretty_name: String,
     variant: String,
+    variant_family: String,
+    variant_flavor: String,
+    variant_platform: String,
+    variant_runtime: String,
     version_build: String,
     version_image: String,
 }
@@ -183,6 +187,10 @@ impl VariantBuildArgs {
         args.build_arg("PARTITION_PLAN", &self.partition_plan);
         args.build_arg("PRETTY_NAME", &self.pretty_name);
         args.build_arg("VARIANT", &self.variant);
+        args.build_arg("VARIANT_FAMILY", &self.variant_family);
+        args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
+        args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
+        args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
 
@@ -194,6 +202,7 @@ impl VariantBuildArgs {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum TargetBuildArgs {
     Package(PackageBuildArgs),
     Variant(VariantBuildArgs),
@@ -334,6 +343,10 @@ impl DockerBuild {
                 .to_string(),
                 pretty_name: args.pretty_name,
                 variant: args.variant,
+                variant_family: args.variant_family,
+                variant_flavor: args.variant_flavor,
+                variant_platform: args.variant_platform,
+                variant_runtime: args.variant_runtime,
                 version_build: args.version_build,
                 version_image: args.version_image,
             }),
