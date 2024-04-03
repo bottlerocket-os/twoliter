@@ -1,3 +1,4 @@
+use super::build_clean::BuildClean;
 use crate::cargo_make::CargoMake;
 use crate::common::fs;
 use crate::docker::DockerContainer;
@@ -11,13 +12,15 @@ use tempfile::TempDir;
 
 #[derive(Debug, Parser)]
 pub(crate) enum BuildCommand {
+    Clean(BuildClean),
     Variant(BuildVariant),
 }
 
 impl BuildCommand {
     pub(crate) async fn run(self) -> Result<()> {
         match self {
-            BuildCommand::Variant(build_variant) => build_variant.run().await,
+            BuildCommand::Clean(command) => command.run().await,
+            BuildCommand::Variant(command) => command.run().await,
         }
     }
 }
