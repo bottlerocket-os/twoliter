@@ -134,6 +134,18 @@ pub(crate) struct BuildVariantArgs {
     #[arg(long, env = "BUILDSYS_VARIANT")]
     pub(crate) variant: String,
 
+    #[arg(long, env = "BUILDSYS_VARIANT_PLATFORM")]
+    pub(crate) variant_platform: String,
+
+    #[arg(long, env = "BUILDSYS_VARIANT_RUNTIME")]
+    pub(crate) variant_runtime: String,
+
+    #[arg(long, env = "BUILDSYS_VARIANT_FAMILY")]
+    pub(crate) variant_family: String,
+
+    #[arg(long, env = "BUILDSYS_VARIANT_FLAVOR")]
+    pub(crate) variant_flavor: String,
+
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
 

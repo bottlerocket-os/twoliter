@@ -139,6 +139,9 @@ VERITY_HASH_ALGORITHM=sha256
 VERITY_DATA_BLOCK_SIZE=4096
 VERITY_HASH_BLOCK_SIZE=4096
 
+BOOTCONFIG_DIR="$(mktemp -d)"
+BOOTCONFIG_INPUT="${BOOTCONFIG_DIR}/bootconfig.in"
+
 # Bottlerocket has been experimentally shown to boot faster on EBS volumes when striping the root filesystem into 4MiB stripes.
 # We use 4kb ext4 blocks. The stride and stripe should both be $STRIPE_SIZE / $EXT4_BLOCK_SIZE
 ROOT_STRIDE=1024
@@ -589,6 +592,31 @@ if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   gpg --verify "${BOOT_MOUNT}/grub/grub.cfg.sig"
 fi
 
+# Combine any bootconfig snippets in /boot for later use, then clean up.
+if [ -d "${BOOT_MOUNT}/boot-config.d" ] ; then
+  find "${BOOT_MOUNT}/boot-config.d" -type f -mindepth 1 -maxdepth 1 -print0 \
+    | sort -Vz | xargs -0 cat > "${BOOTCONFIG_INPUT}"
+  rm -rf "${BOOT_MOUNT}/boot-config.d"
+fi
+
+# This should never happen, but if the image isn't using "grub-set-private-var"
+# and we have some bootconfig input to render, then bail out because otherwise
+# the kernel command line may not be configured as expected.
+if [ -s "${BOOTCONFIG_INPUT}" ] && [ "${GRUB_SET_PRIVATE_VAR}" == "no" ] ; then
+cat <<EOF >&2
+Found bootconfig snippets but 'grub-set-private-var' isn't enabled for the variant.
+To fix this, add the following to the variant's Cargo.toml:"
+  [package.metadata.build-variant.image-features]
+  grub-set-private-var = true
+EOF
+exit 1
+fi
+
+# Generate a no-op bootconfig if there weren't any snippets.
+if [ ! -s  "${BOOTCONFIG_INPUT}" ] ; then
+  echo -e "kernel {}\ninit {}" > "${BOOTCONFIG_INPUT}"
+fi
+
 # BOTTLEROCKET-BOOT-A
 mkdir -p "${BOOT_MOUNT}/lost+found"
 chmod -R go-rwx "${BOOT_MOUNT}"
@@ -602,15 +630,9 @@ dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[BOOT-A
 
 # BOTTLEROCKET-PRIVATE
 
-# Generate an empty bootconfig file for the image, so grub doesn't pause and
-# print an error that the file doesn't exist.
-cat <<EOF > "${PRIVATE_MOUNT}/bootconfig.in"
-kernel {}
-init {}
-EOF
+# Generate bootconfig file for the image.
 touch "${PRIVATE_MOUNT}/bootconfig.data"
-bootconfig -a "${PRIVATE_MOUNT}/bootconfig.in" "${PRIVATE_MOUNT}/bootconfig.data"
-rm "${PRIVATE_MOUNT}/bootconfig.in"
+bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
 
 # Targeted toward the current API server implementation.
 # Relative to the ext4 defaults, we:
