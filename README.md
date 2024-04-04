@@ -36,6 +36,24 @@ To perform a release:
   - `cargo make ami`
   - `cargo make test --help`
   - More extensive testing if needed.
+  - Note: If you want to use your local version of Twoliter to build Bottlerocket.
+    - Delete the existing install of Twoliter if it exists.
+    - Commit and push your code to your fork of Twoliter. For example: https://github.com/YOUR_GIT_ALIAS/twoliter
+    - Set the following Environment variables
+      - TWOLITER_REPO = Your Twoliter Repository link.
+      - TWOLITER_VERSION = Hash of the commit pushed to your Twoliter repository.
+      - TWOLITER_ALLOW_SOURCE_INSTALL = True, as we want to do a source install.
+      - TWOLITER_ALLOW_BINARY_INSTALL = False, as we do want to use a Twoliter binary.
+      - TWOLITER_SKIP_VERSION_CHECK = True, as we do not want to use a certain Twoliter binary version.
+  - For example,
+```
+  rm -rf tools/twoliter
+  cargo make -e=TWOLITER_REPO=https://github.com/YOUR_GIT_ALIAS/twoliter \
+    -e=TWOLITER_VERSION=HASH_OF_COMMIT \
+    -e=TWOLITER_ALLOW_SOURCE_INSTALL=true \
+    -e=TWOLITER_ALLOW_BINARY_INSTALL=false \
+    -e=TWOLITER_SKIP_VERSION_CHECK=true
+```
 - When it's working merge the Twoliter PR and push a finalized tag, e.g. `v0.0.4`.
 - Once the GitHub Actions workflow finishes, update the Bottlerocket PR to your finalized tag.
 - Merge the Bottlerocket PR
