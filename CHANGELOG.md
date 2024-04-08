@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2024-04-08
+
+### Added
+
+- add FIPS-related functionality ([#181])
+- twoilter: add build clean command ([#183])
+
+[#181]: https://github.com/bottlerocket-os/twoliter/pull/181
+[#183]: https://github.com/bottlerocket-os/twoliter/pull/183
+
+### Changed
+
+- Fixed Gomod.rs bug ([#178])
+- twoliter: use Twoliter.toml for cache layers ([#179])
+- Added Instruction to README to use locally modified Twoliter to build Bottlerocket. ([#182])
+- update readme ([#184])
+- generate HMAC for kernel on build ([#187])
+
+[#178]: https://github.com/bottlerocket-os/twoliter/pull/178
+[#179]: https://github.com/bottlerocket-os/twoliter/pull/179
+[#182]: https://github.com/bottlerocket-os/twoliter/pull/182
+[#184]: https://github.com/bottlerocket-os/twoliter/pull/184
+[#187]: https://github.com/bottlerocket-os/twoliter/pull/187
+
 ## [0.0.7] - 2024-03-19
 
 ### Added
@@ -136,7 +160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bottlerocket's `cargo make` build system.
 - `Makefile.toml` taken from the Bottlerocket project.
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.7...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.7...v0.1.0
 [0.0.7]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.4...v0.0.5
