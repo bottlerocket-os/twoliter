@@ -1,5 +1,5 @@
 [package]
-name = "hello-kit"
+name = "extra-2-kit"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,14 +9,12 @@ exclude = ["README.md"]
 
 [package.metadata.build-kit]
 included-packages = [
-    # in-tree packages
-    "hello-agent",
-    "hello-go",
+    "pkg-c"
 ]
 
 [lib]
-path = "../kits.rs"
+path = "../kit.rs"
 
 [build-dependencies]
-hello-agent = { path = "../../packages/hello-agent" }
-hello-go = { path = "../../packages/hello-go" }
+core-kit = { path = "../../kits/core-kit" }
+pkg-c = { path = "../../packages/pkg-c" }

@@ -1,19 +1,19 @@
 [package]
-name = "hello-go"
+name = "pkg-c"
 version = "0.1.0"
 edition = "2021"
 publish = false
 build = "../build.rs"
 
 [package.metadata.build-package]
-source-groups = ["hello-go"]
+source-groups = []
 
 [lib]
 path = "../packages.rs"
 
 # RPM BuildRequires
 [build-dependencies]
-# None
+core-kit = { path = "../../kits/core-kit" }
 
 # RPM Requires
 [dependencies]

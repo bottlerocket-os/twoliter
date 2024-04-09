@@ -1,0 +1,21 @@
+[package]
+name = "pkg-e"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+
+[package.metadata.build-package]
+source-groups = []
+
+[lib]
+path = "../packages.rs"
+
+# RPM BuildRequires
+[build-dependencies]
+extra-1-kit = { path = "../../kits/extra-1-kit" }
+extra-2-kit = { path = "../../kits/extra-2-kit" }
+
+# RPM Requires
+[dependencies]
+
