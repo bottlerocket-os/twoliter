@@ -8,7 +8,7 @@ pub(crate) mod error;
 
 use crate::args::{BuildPackageArgs, BuildVariantArgs};
 use buildsys::manifest::{
-    ImageFeature, ImageFormat, ImageLayout, ManifestInfo, PartitionPlan, SupportedArch,
+    ImageFeature, ImageFormat, ImageLayout, Manifest, PartitionPlan, SupportedArch,
 };
 use buildsys::BuildType;
 use duct::cmd;
@@ -120,6 +120,8 @@ struct PackageBuildArgs {
     /// what was found in `BUILDSYS_VARIANT`.
     image_features: HashSet<ImageFeature>,
     package: String,
+    package_dependencies: Vec<String>,
+    kit_dependencies: Vec<String>,
     publish_repo: String,
     variant: String,
     variant_family: String,
@@ -133,7 +135,9 @@ impl PackageBuildArgs {
         let mut args = Vec::new();
         args.push("--network".into());
         args.push("none".into());
+        args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
         args.build_arg("PACKAGE", &self.package);
+        args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
         args.build_arg("REPO", &self.publish_repo);
         args.build_arg("VARIANT", &self.variant);
         args.build_arg("VARIANT_FAMILY", &self.variant_family);
@@ -149,6 +153,8 @@ impl PackageBuildArgs {
 }
 
 struct VariantBuildArgs {
+    package_dependencies: Vec<String>,
+    kit_dependencies: Vec<String>,
     data_image_publish_size_gib: i32,
     data_image_size_gib: String,
     image_features: HashSet<ImageFeature>,
@@ -178,13 +184,16 @@ impl VariantBuildArgs {
             "DATA_IMAGE_PUBLISH_SIZE_GIB",
             self.data_image_publish_size_gib.to_string(),
         );
+        args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("DATA_IMAGE_SIZE_GIB", &self.data_image_size_gib);
         args.build_arg("IMAGE_FORMAT", &self.image_format);
-        args.build_arg("KERNEL_PARAMETERS", &self.kernel_parameters);
         args.build_arg("IMAGE_NAME", &self.name);
+        args.build_arg("KERNEL_PARAMETERS", &self.kernel_parameters);
+        args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
         args.build_arg("OS_IMAGE_PUBLISH_SIZE_GIB", &self.os_image_publish_size_gib);
         args.build_arg("OS_IMAGE_SIZE_GIB", &self.os_image_size_gib);
         args.build_arg("PACKAGES", &self.packages);
+        args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
         args.build_arg("PARTITION_PLAN", &self.partition_plan);
         args.build_arg("PRETTY_NAME", &self.pretty_name);
         args.build_arg("VARIANT", &self.variant);
@@ -192,7 +201,6 @@ impl VariantBuildArgs {
         args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
-        args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
 
         for image_feature in self.image_features.iter() {
@@ -236,10 +244,10 @@ impl DockerBuild {
     /// Create a new `DockerBuild` that can build a package.
     pub(crate) fn new_package(
         args: BuildPackageArgs,
-        manifest: &ManifestInfo,
+        manifest: &Manifest,
         image_features: HashSet<ImageFeature>,
     ) -> Result<Self> {
-        let package = if let Some(name_override) = manifest.package_name() {
+        let package = if let Some(name_override) = manifest.info().package_name() {
             name_override.clone()
         } else {
             args.cargo_package_name
@@ -269,6 +277,8 @@ impl DockerBuild {
             target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
                 image_features,
                 package,
+                package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
+                kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
                 publish_repo: args.publish_repo,
                 variant: args.variant,
                 variant_family: args.variant_family,
@@ -281,8 +291,8 @@ impl DockerBuild {
     }
 
     /// Create a new `DockerBuild` that can build a variant image.
-    pub(crate) fn new_variant(args: BuildVariantArgs, manifest: &ManifestInfo) -> Result<Self> {
-        let image_layout = manifest.image_layout().cloned().unwrap_or_default();
+    pub(crate) fn new_variant(args: BuildVariantArgs, manifest: &Manifest) -> Result<Self> {
+        let image_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let ImageLayout {
             os_image_size_gib,
             data_image_size_gib,
@@ -315,16 +325,19 @@ impl DockerBuild {
                 args.common.arch,
             ),
             target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
+                package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
+                kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
                 data_image_publish_size_gib,
                 data_image_size_gib: data_image_size_gib.to_string(),
-                image_features: manifest.image_features().unwrap_or_default(),
-                image_format: match manifest.image_format() {
+                image_features: manifest.info().image_features().unwrap_or_default(),
+                image_format: match manifest.info().image_format() {
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",
                     Some(ImageFormat::Vmdk) => "vmdk",
                 }
                 .to_string(),
                 kernel_parameters: manifest
+                    .info()
                     .kernel_parameters()
                     .cloned()
                     .unwrap_or_default()
@@ -333,6 +346,7 @@ impl DockerBuild {
                 os_image_publish_size_gib: os_image_publish_size_gib.to_string(),
                 os_image_size_gib: os_image_size_gib.to_string(),
                 packages: manifest
+                    .info()
                     .included_packages()
                     .cloned()
                     .unwrap_or_default()

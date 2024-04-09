@@ -58,6 +58,9 @@ pub(crate) struct Common {
     #[arg(long, env = "BUILDSYS_ARCH")]
     pub(crate) arch: SupportedArch,
 
+    #[arg(long, env = "BUILDSYS_CARGO_METADATA_PATH")]
+    pub(crate) cargo_metadata_path: PathBuf,
+
     #[arg(long, env = "BUILDSYS_OUTPUT_DIR")]
     pub(crate) image_arch_variant_dir: PathBuf,
 

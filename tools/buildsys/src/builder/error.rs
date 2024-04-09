@@ -59,6 +59,9 @@ pub(crate) enum Error {
         source: std::io::Error,
     },
 
+    #[snafu(display("Failed to create build arguments due to a dependency error: {source}"))]
+    Graph { source: buildsys::manifest::Error },
+
     #[snafu(display("Missing environment variable '{}'", var))]
     Environment {
         var: String,
