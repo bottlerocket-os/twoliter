@@ -49,8 +49,8 @@ Usage:
     --bottlerocket-dir            REQUIRED: The directory of the Bottlerocket checkout that we will
                                   build.
 
-    --variant                     OPTIONAL: The Bottlerocket variant that we will build. Defaults
-                                  to 'aws-dev'.
+    --variants                    OPTIONAL: The space-delimited of Bottlerocket variant that we will
+                                  build. Defaults to 'aws-dev'.
 
     --sdk-version                 OPTIONAL: The version of the Bottlerocket SDK to use when building
                                   packages and to use as the base for the Twoliter alpha-sdk. For
@@ -95,8 +95,8 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --bottlerocket-dir)
             shift; bottlerocket_dir=$1 ;;
-        --variant)
-            shift; variant=$1 ;;
+        --variants)
+            shift; variants=$1 ;;
         --sdk-version)
             shift; sdk_version=$1 ;;
         --sdk-name)
@@ -125,7 +125,7 @@ set -e
 [[ -n ${alpha_registry} ]] || usage_error 'required: --alpha-registry'
 [[ -n ${alpha_version} ]] || usage_error 'required: --alpha-version'
 
-variant="${variant:=aws-dev}"
+variants="${variants:=aws-dev}"
 sdk_name="${sdk_name:=bottlerocket-sdk}"
 sdk_registry="${sdk_registry:=public.ecr.aws/bottlerocket}"
 sdk_repo="${sdk_registry}/${sdk_name}"
@@ -139,31 +139,25 @@ if [ -z "${sdk_version}" ]; then
   echo "SDK Version '${sdk_version}' parsed from Twoliter.toml"
 fi
 
+if [ "${skip_clean}" = "false" ]; then
+  cargo make clean
+fi
+
+# We need the sbkeys scripts in a location that is not .dockerignored but is .gitignored
+rm -rf "${bottlerocket_dir}/build/sbkeys"
+mkdir -p "${bottlerocket_dir}/build/sbkeys"
+mkdir -p "${bottlerocket_dir}/.cargo/sbkeys"
+cp "${bottlerocket_dir}/sbkeys/generate-aws-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
+cp "${bottlerocket_dir}/sbkeys/generate-local-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
+
 for target_arch in x86_64 aarch64
 do
-
-  if [ "${skip_clean}" = "false" ]; then
-    cargo make clean
-  fi
-
-  # We need the sbkeys scripts in a location that is not .dockerignored but is .gitignored
-  rm -rf "${bottlerocket_dir}/build/sbkeys"
-  mkdir -p "${bottlerocket_dir}/build/sbkeys"
-  mkdir -p "${bottlerocket_dir}/.cargo/sbkeys"
-  cp "${bottlerocket_dir}/sbkeys/generate-aws-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
-  cp "${bottlerocket_dir}/sbkeys/generate-local-sbkeys" "${bottlerocket_dir}/.cargo/sbkeys"
-
-  # First we build aws-dev to make all of (or at least more of) the upstream packages available in
-  # the event ${variant} does not include them.
-  cargo make \
-    -e "BUILDSYS_VARIANT=aws-dev" \
-    -e "BUILDSYS_ARCH=${target_arch}" \
-    build-variant
-
-  cargo make \
-    -e "BUILDSYS_VARIANT=${variant}" \
-    -e "BUILDSYS_ARCH=${target_arch}" \
-    build-variant
+  for variant in $variants; do
+    cargo make \
+      -e "BUILDSYS_VARIANT=${variant}" \
+      -e "BUILDSYS_ARCH=${target_arch}" \
+      build-variant
+  done
 done
 
 for host_arch in amd64 arm64
