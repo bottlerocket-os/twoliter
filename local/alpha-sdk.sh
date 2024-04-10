@@ -49,8 +49,9 @@ Usage:
     --bottlerocket-dir            REQUIRED: The directory of the Bottlerocket checkout that we will
                                   build.
 
-    --variants                    OPTIONAL: The space-delimited of Bottlerocket variant that we will
-                                  build. Defaults to 'aws-dev'.
+    --variants                    OPTIONAL: The space-delimited list of Bottlerocket variants that
+                                  we will build. Defaults to 'aws-dev'. For example:
+                                  "aws-dev aws-ecs-1 aws-ecs-2"
 
     --sdk-version                 OPTIONAL: The version of the Bottlerocket SDK to use when building
                                   packages and to use as the base for the Twoliter alpha-sdk. For

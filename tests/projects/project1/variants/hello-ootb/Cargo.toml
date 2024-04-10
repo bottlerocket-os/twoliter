@@ -23,7 +23,6 @@ included-packages = [
     "docker-cli",
     "docker-engine",
     "docker-init",
-    "docker-proxy",
     # tools
     "login",
     "iputils",
