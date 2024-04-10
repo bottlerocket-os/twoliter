@@ -461,7 +461,9 @@ if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
 fi
 
 # Generate an HMAC for the kernel after signing.
-sha512hmac "${vmlinuz}" > ".${vmlinuz}.hmac"
+openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" \
+  | awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
+  > ".${vmlinuz}.hmac"
 
 popd >/dev/null
 
