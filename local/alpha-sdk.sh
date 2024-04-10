@@ -161,6 +161,11 @@ do
     build-variant
 
   cargo make \
+    -e "BUILDSYS_VARIANT=aws-ecs-1" \
+    -e "BUILDSYS_ARCH=${target_arch}" \
+    build-variant
+
+  cargo make \
     -e "BUILDSYS_VARIANT=${variant}" \
     -e "BUILDSYS_ARCH=${target_arch}" \
     build-variant
