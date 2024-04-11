@@ -240,6 +240,68 @@ INVENTORY_DATA="$(jq --arg PKG_PREFIX "bottlerocket-" \
 INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<< "${INVENTORY_DATA}" | jq '{"Content": .}')"
 printf "%s\n" "${INVENTORY_DATA}" > "${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
+elf_note() {
+  local input output name
+  local input_len input_pad input_fmt
+  local name_len name_pad name_fmt
+  local var val len pad fmt n sz
+  input="${1:?}"
+  output="${2:?}"
+  name="Bottlerocket"
+
+  # Handle null-termination, padding, and formatting.
+  for var in name input ; do
+    val="${!var}"
+    len="${var}_len"
+    pad="${var}_pad"
+    fmt="${var}_fmt"
+    # Add one byte for null terminator.
+    printf -v "${len}" "$(( "${#val}" + 1 ))"
+    # Pad to the nearest 4 byte boundary.
+    printf -v "${pad}" "$(( (4 - ("${!len}" % 4)) % 4 ))"
+    # Generate a format string for the variable.
+    str="%%s\\\x00"
+    for p in $(seq 1 "${!pad}") ; do
+      str+="\\\x00"
+    done
+    printf -v "${fmt}" "${str}"
+  done
+
+  # Clean up the output file.
+  rm -f "${output}"
+
+  # Write the sizes for the ELF note name and description.
+  for n in "${name_len}" "${input_len}" 0 ; do
+    printf -v sz '\\x%02x\\x%02x\\x%02x\\x%02x' \
+      $((n & 255)) $((n >> 8 & 255)) $((n >> 16 & 255)) $((n >> 24 & 255))
+    printf "${sz}" >> "${output}"
+  done
+
+  # Write the ELF note name and description.
+  printf "${name_fmt}" "${name}" >> "${output}"
+  printf "${input_fmt}" "${input}" >> "${output}"
+}
+
+is_elf() {
+  local some_file elf_magic
+  some_file="${1:?}"
+  elf_magic="\x7fELF"
+  [ "$(head -c 4 ${some_file})" == "$(echo -e ${elf_magic})" ]
+}
+
+# add elf note to relevant binaries
+elf_note "${VARIANT}" "note.elf"
+
+for some_file in "${ROOT_MOUNT}"/usr/bin/*; do
+  # ensure that the file is not a link to avoid adding duplicate notes
+  if ! readlink "${some_file}" >/dev/null; then
+    # check that the file is an ELF binary
+    if is_elf ${some_file}; then
+      objcopy --add-section .note.bottlerocket.variant="note.elf" "${some_file}"
+    fi
+  fi
+done
+
 # install licenses
 mksquashfs \
   "${ROOT_MOUNT}"/usr/share/licenses \
