@@ -16,6 +16,7 @@ BUILDSYS_TOOLS_DIR = "${BUILDSYS_ROOT_DIR}/tools"
 BUILDSYS_SOURCES_DIR = "${BUILDSYS_ROOT_DIR}/sources"
 BUILDSYS_SBKEYS_DIR = "${BUILDSYS_ROOT_DIR}/sbkeys"
 BUILDSYS_SBKEYS_PROFILE = { script = ['echo "${BUILDSYS_SBKEYS_PROFILE:-local}"'] }
+BUILDSYS_CACERTS_BUNDLE_OVERRIDE = ""
 BUILDSYS_TIMESTAMP = { script = ["date +%s"] }
 BUILDSYS_VERSION_BUILD = { script = ["git describe --always --dirty --exclude '*' || echo 00000000"] }
 # For now, release config path can't be overridden with -e, because it's used
@@ -1643,7 +1644,7 @@ script = [
 
 # This task will call watch on the `status` testsys command to show the results of all tests and
 # resources.
-# To see all incomplete crds use `cargo make watch-test-all --running` 
+# To see all incomplete crds use `cargo make watch-test-all --running`
 [tasks.watch-test-all]
 script = [
    '''

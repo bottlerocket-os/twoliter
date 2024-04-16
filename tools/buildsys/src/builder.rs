@@ -511,6 +511,19 @@ fn secrets_args() -> Result<Vec<String>> {
         );
     }
 
+    let ca_bundle_var = "BUILDSYS_CACERTS_BUNDLE_OVERRIDE";
+    let ca_bundle_value =
+        env::var(ca_bundle_var).context(error::EnvironmentSnafu { var: ca_bundle_var })?;
+
+    if !ca_bundle_value.is_empty() {
+        let ca_bundle_path = PathBuf::from(&ca_bundle_value);
+        if ca_bundle_path.exists() {
+            args.build_secret("file", "ca-bundle.crt", &ca_bundle_path.to_string_lossy());
+        } else {
+            return error::BadCaBundleSnafu { ca_bundle_path }.fail();
+        }
+    }
+
     for var in &[
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",

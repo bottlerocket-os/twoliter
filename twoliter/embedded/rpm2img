@@ -128,6 +128,15 @@ DATA_MOUNT="$(mktemp -d)"
 EFI_MOUNT="$(mktemp -d)"
 PRIVATE_MOUNT="$(mktemp -d)"
 
+CROSS_FACTORYDIR="/usr/share/factory"
+CROSS_SYSCONFIGDIR="/etc"
+CROSS_TMPFILESDIR="/usr/lib/tmpfiles.d"
+
+CA_CERTS_BUNDLE="${HOME}/certs/ca-bundle.crt"
+CA_CERTS_DEFAULT_BUNDLE="/usr/share/bottlerocket/ca-certificates/ca-bundle.crt"
+CA_CERTS_DEFAULT_LICENSES="/usr/share/licenses/ca-certificates"
+CA_CERTS_INSTALLDIR="${CROSS_FACTORYDIR}${CROSS_SYSCONFIGDIR}/pki/tls/certs"
+
 SBKEYS="${HOME}/sbkeys"
 
 SELINUX_ROOT="/etc/selinux"
@@ -239,6 +248,28 @@ INVENTORY_DATA="$(jq --arg PKG_PREFIX "bottlerocket-" \
 # sort by package name and add 'Content' as top-level
 INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<< "${INVENTORY_DATA}" | jq '{"Content": .}')"
 printf "%s\n" "${INVENTORY_DATA}" > "${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
+
+# install CA certificates
+install -d "${ROOT_MOUNT}${CA_CERTS_INSTALLDIR}"
+if [ -s "${CA_CERTS_BUNDLE}" ]; then
+  install -p -m 0644 \
+    "${CA_CERTS_BUNDLE}"\
+    "${ROOT_MOUNT}${CA_CERTS_INSTALLDIR}"
+elif [ -s "${CA_CERTS_DEFAULT_BUNDLE}" ]; then
+  install -p -m 0644 \
+    "${CA_CERTS_DEFAULT_BUNDLE}" \
+    "${ROOT_MOUNT}${CA_CERTS_INSTALLDIR}"
+  install -p -m 0644 \
+    -D "${CA_CERTS_DEFAULT_LICENSES}"/* \
+    -t "${ROOT_MOUNT}/usr/share/licenses/ca-certificates"
+else
+  echo "no CA certificates found" >&2
+  exit 1
+fi
+cat <<EOF >> "${ROOT_MOUNT}${CROSS_TMPFILESDIR}/ca-certificates.conf"
+C /etc/pki/tls/certs/ca-bundle.crt - - - -
+L /etc/ssl/certs - - - - ../pki/tls/certs
+EOF
 
 # install licenses
 mksquashfs \

@@ -16,6 +16,9 @@ pub(crate) enum Error {
         source: std::io::Error,
     },
 
+    #[snafu(display("Failed to read CA Bundle '{}'", ca_bundle_path.display()))]
+    BadCaBundle { ca_bundle_path: PathBuf },
+
     #[snafu(display("Failed to get parent directory for '{}'", path.display()))]
     BadDirectory { path: PathBuf },
 

@@ -255,6 +255,7 @@ RUN --mount=target=/host \
     --mount=type=secret,id=code-sign.key,target=/root/sbkeys/code-sign.key \
     --mount=type=secret,id=code-sign.crt,target=/root/sbkeys/code-sign.crt \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
+    --mount=type=secret,id=ca-bundle.crt,target=/root/certs/ca-bundle.crt \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
