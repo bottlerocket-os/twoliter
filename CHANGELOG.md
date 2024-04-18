@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2024-04-17
+
+### Added
+
+### Changed
+
+- Use Openssl to generate HMAC in rpm2img ([#196])
+
+[#196]: https://github.com/bottlerocket-os/twoliter/pull/196
+
 ## [0.1.0] - 2024-04-08
 
 ### Added
@@ -161,7 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bottlerocket's `cargo make` build system.
 - `Makefile.toml` taken from the Bottlerocket project.
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.7...v0.1.0
 [0.0.7]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.5...v0.0.6
