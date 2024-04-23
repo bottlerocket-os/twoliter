@@ -240,6 +240,20 @@ INVENTORY_DATA="$(jq --arg PKG_PREFIX "bottlerocket-" \
 INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<< "${INVENTORY_DATA}" | jq '{"Content": .}')"
 printf "%s\n" "${INVENTORY_DATA}" > "${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
+# Regenerate module dependencies, if possible.
+KMOD_DIR="${ROOT_MOUNT}/lib/modules"
+for kver in "$(find "${KMOD_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%P\n')" ; do
+  system_map="${KMOD_DIR}/${kver}/System.map"
+  [ -s "${system_map}" ] || continue
+  depmod_out="$(mktemp)"
+  depmod -a -e -b "${ROOT_MOUNT}" -F "${system_map}" "${kver}" >"${depmod_out}" 2>&1
+  if grep -E '(WARNING|ERROR|FATAL)' "${depmod_out}" ; then
+    echo "Failed to run depmod" >&2
+    exit 1
+  fi
+  rm -f "${system_map}"
+done
+
 # install licenses
 mksquashfs \
   "${ROOT_MOUNT}"/usr/share/licenses \
