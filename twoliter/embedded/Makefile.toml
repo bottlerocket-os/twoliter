@@ -186,6 +186,15 @@ BUILDSYS_OVF_TEMPLATE = "${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/templ
 # The default name of uploaded OVAs; override by setting VMWARE_VM_NAME
 VMWARE_VM_NAME_DEFAULT = "${BUILDSYS_NAME}-${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}-v${BUILDSYS_VERSION_IMAGE}-${BUILDSYS_VERSION_BUILD}"
 
+# Depends on ${BUILDSYS_ARCH} and ${BUILDSYS_VARIANT}.
+FETCH_VARIANT_LOCAL_ROOT_JSON = { script = ['echo "${FETCH_VARIANT_LOCAL_ROOT_JSON:-""}"'] }
+FETCH_VARIANT_ROOT_JSON = { script = ['echo "${FETCH_VARIANT_ROOT_JSON:-https://cache.bottlerocket.aws/root.json}"'] }
+FETCH_VARIANT_ROOT_JSON_SHA512 = { script = ['echo "${FETCH_VARIANT_ROOT_JSON_SHA512:-a3c58bc73999264f6f28f3ed9bfcb325a5be943a782852c7d53e803881968e0a4698bd54c2f125493f4669610a9da83a1787eb58a8303b2ee488fa2a3f7d802f}"'] }
+
+FETCH_VARIANT_UNIFIED = { script = ['echo "${FETCH_VARIANT_UNIFIED:-false}"'] }
+FETCH_VARIANT_METADATA_URL = { script = ['echo "${FETCH_VARIANT_METADATA_URL:-https://updates.bottlerocket.aws/2020-07-07/"${BUILDSYS_VARIANT}"/"${BUILDSYS_ARCH}"/}"'] }
+FETCH_VARIANT_TARGETS_URL = { script = ['echo "${FETCH_VARIANT_TARGETS_URL:-https://updates.bottlerocket.aws/targets}"'] }
+
 # Config file for Boot Configuration initrd generation
 BOOT_CONFIG_INPUT = "${BUILDSYS_ROOT_DIR}/bootconfig-input"
 # Boot Configuration initrd
@@ -1412,6 +1421,42 @@ pubsys \
 '''
 ]
 
+[tasks.fetch-variant]
+script_runner = "bash"
+script = [
+'''
+set -e
+
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+if [ -z "${FETCH_VARIANT_LOCAL_ROOT_JSON}" ]; then
+   fetch_variant_root="./fetch-variant-root.json"
+   echo "Fetching root.json..."
+   curl -s -L -C - "${FETCH_VARIANT_ROOT_JSON}" -o "${fetch_variant_root#./}"
+   sha512sum -c <<<"${FETCH_VARIANT_ROOT_JSON_SHA512}  ${fetch_variant_root#./}"
+else
+   fetch_variant_root="${FETCH_VARIANT_LOCAL_ROOT_JSON}"
+fi
+
+if [ "${FETCH_VARIANT_UNIFIED}" == "true" ]; then
+   tuftool download \
+      "${BUILDSYS_VARIANT_DIR}" \
+      --target-name "${BUILDSYS_NAME_FRIENDLY}.img.lz4" \
+      --root "${fetch_variant_root:?}" \
+      --metadata-url "${FETCH_VARIANT_METADATA_URL}" \
+      --targets-url "${FETCH_VARIANT_TARGETS_URL}"
+else
+   tuftool download \
+      "${BUILDSYS_VARIANT_DIR}" \
+      --target-name "${BUILDSYS_NAME_FRIENDLY}.img.lz4" \
+      --target-name "${BUILDSYS_NAME_FRIENDLY}-data.img.lz4" \
+      --root "${fetch_variant_root:?}" \
+      --metadata-url "${FETCH_VARIANT_METADATA_URL}" \
+      --targets-url "${FETCH_VARIANT_TARGETS_URL}"
+fi
+'''
+]
+
 [tasks._upload-ova-base]
 # Rather than depend on "build", which currently rebuilds images each run, we
 # depend on publish-tools and check for the image files below to save time.
@@ -1643,7 +1688,7 @@ script = [
 
 # This task will call watch on the `status` testsys command to show the results of all tests and
 # resources.
-# To see all incomplete crds use `cargo make watch-test-all --running` 
+# To see all incomplete crds use `cargo make watch-test-all --running`
 [tasks.watch-test-all]
 script = [
    '''
