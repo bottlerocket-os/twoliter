@@ -142,27 +142,27 @@ This will be a Cargo workspace with one Cargo package for each kit.
 
 ```
 kits
-├── aws
+├── aws-kit
 │   ├── build.rs
 │   ├── Cargo.toml
 │   └── lib.rs
-├── core
+├── core-kit
 │   ├── build.rs
 │   ├── Cargo.toml
 │   └── lib.rs
-├── ecs
+├── ecs-kit
 │   ├── build.rs
 │   ├── Cargo.toml
 │   └── lib.rs
-├── k8s
+├── k8s-kit
 │   ├── build.rs
 │   ├── Cargo.toml
 │   └── lib.rs
-├── metal
+├── metal-kit
 │   ├── build.rs
 │   ├── Cargo.toml
 │   └── lib.rs
-└── vmware
+└── vmware-kit
     ├── build.rs
     ├── Cargo.toml
     └── lib.rs
@@ -441,7 +441,7 @@ The Cargo package versions will be locked using Cargo's `=` operator for depende
 bottlerocket-sdk = "0.50.0"
 ```
 
-At this point Twoliter will build a package that represents the maintainers top level dependencies.
+At this point, Twoliter will build a package that represents the maintainer's top level dependencies.
 
 ```toml
 [dependencies]
@@ -471,7 +471,7 @@ This means we will have the following items and dependencies:
 The user kicks things off with:
 
 ```sh
-twoliter build --variant example-dev --arch aarch64
+twoliter build variant example-dev --arch aarch64
 ```
 
 ![build sequence diagram](diagrams/build-sequence.svg "Build Sequence")
@@ -533,6 +533,149 @@ The list of desired packages, taken from the variant's `Cargo.toml` metadata (as
 After installing packages, the result of `dnf list installed` will be output to a file in the build directory.
 This will allow maintainers to audit which kit each package was taken from.
 The rest of the variant image creation steps proceed the same way that they do now.
+
+### Build Algorithm Changes
+
+Currently, the build system relies on a flat directory of RPMs.
+It relies on Cargo to build packages so that dependent RPMs are in the directory when needed.
+When creating a variant image, all RPMs are available, but the yum install command can follow package dependencies to install the right things.
+
+When creating a kit, we won't have the yum install command to help us figure out all the right packages.
+We need to change the build system so that the dependency graph can be used to put the right packages into a kit.
+
+For starters, we will no longer rely on a flat structure in `build/rpms`.
+We will put the output of each `package` build into a subdirectory using the Cargo package's name.
+
+For example, when building `glibc/Cargo.toml` we will put the output in `build/rpms/glibc`.
+Note that more than one RPM file can result from a package build.
+The subdirectory maps the resultant RPM files to the Cargo package that produced them.
+
+At each `build-package` invocation, a distinct, flat RPM directory will be created containing the packages needed for the current `build-package` invocation.
+This will be done by traversing the Cargo dependency graph and making a list of packages and kits that are needed.
+The kits will be unpacked and the direct package dependencies will be copied from their `build/rpms` subdirectories.
+This will require us to pass a list of the packages needed for the build to the dockerfile, for example:
+
+```
+PACKAGES=pkg-a pkg-b pkg-c
+```
+
+This list needs to be complete and include only "pure" package dependencies.
+That is, it should not include any package names that are "brought in" by a kit dependency.
+The packages found in each of those subdirectories, e.g. `build/rpms/pkg-a`, will be copied to a flat RPM directory for the build.
+
+Additionally, the `build-package` command needs to know the list of kits required:
+
+```
+KITS=core-kit aws-kit
+```
+
+Each of these needs to be unpacked and have its RPMs copied out to the flat RPM directory.
+For example, these would be unpacked: `build/kits/core-kit.tar`, `build/kits/aws-kit.tar`.
+
+The `build-kit` requirements are slightly simplified.
+Only the list of "pure" package dependencies is required.
+When constructing a kit, buildsys does not need to know what other kits the current kit depends on.
+
+#### Dependency Traversal
+
+The simplest way to get a list of "pure" package dependencies and a list of kits is to traverse the dependency graph twice.
+
+In the first traversal, kit dependencies are ignored and not followed, resulting in only the "pure" package dependencies.
+In the second traversal, all nodes are followed and package dependencies are filtered out from the final list, resulting in a list of all required kits.
+
+#### Pseudo Code
+
+**Package Build Time**
+
+buildsys:
+
+```
+// load the package's manifest
+let (packages, kits) = manifest.walk_dependency_graph();
+
+// when calling build_package:
+  build-arg PACKAGES="{packages}"
+  build-arg KITS="{kits}"
+```
+
+Dockerfile:
+
+```
+ARG PACKAGES
+ARG KITS
+
+mkdir big-rpm-dir
+
+# PACKAGES could be empty for packages like glibc with no deps
+for pkg in ${PACKAGES} ; do
+  cp /host/build/rpms/${pkg}/* big-rpm-dir
+done
+
+# KITS could be empty for core packages with no kits dependency
+for kit in ${KITS} ; do
+  tar xf /host/build/kits/${kit}.tar -C big-rpm-dir
+done
+
+createrepo_c big-rpm-dir
+
+# now run rpmbuild stage using big-rpm-dir as input
+```
+
+**Kit Build Time**
+
+manifest for core kit:
+
+```
+# core kit in kits/core/Cargo.toml
+
+[dependencies]
+glibc = "../../packages/glibc"
+systemd = "../../packages/systemd"
+```
+
+manifest for k8s kit:
+
+```
+# k8s kit in kits/k8s/Cargo.toml
+
+[dependencies]
+kubelet = "../../packages/kubelet"
+
+# FIXME naming convention for these crates?
+core-kit = "../core"
+```
+
+buildsys:
+
+```
+// load the kit's manifest
+let (packages, _) = manifest.walk_dependency_graph();
+
+// no need for kits, they're some other crate's problem
+// when calling build_kit:
+  build-arg PACKAGES="{packages}"
+```
+
+**Dockerfile**
+
+```
+ARG PACKAGES
+# name of kit
+ARG KIT
+
+mkdir kit-rpm-dir
+
+# PACKAGES shouldn't be empty? empty kits allowed?
+for pkg in ${PACKAGES} ; do
+  cp /host/build/rpms/${pkg}/* kit-rpm-dir
+done
+
+# if we want to include repodata in kits
+createrepo_c kit-rpm-dir
+
+# change to kit-rpm-dir when grabbing rpms for tar
+tar cfz ${KIT}.tar -C kit-rpm-dir *.rpm
+```
 
 ## Publishing
 
