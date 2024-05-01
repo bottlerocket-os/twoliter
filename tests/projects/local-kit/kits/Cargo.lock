@@ -25,15 +25,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hello-ootb"
-version = "0.1.0"
-dependencies = [
- "core-kit",
- "extra-1-kit",
- "extra-2-kit",
-]
-
-[[package]]
 name = "pkg-a"
 version = "0.1.0"
 

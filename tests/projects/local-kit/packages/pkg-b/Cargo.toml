@@ -1,0 +1,20 @@
+[package]
+name = "pkg-b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+
+[package.metadata.build-package]
+source-groups = []
+
+[lib]
+path = "../packages.rs"
+
+# RPM BuildRequires
+[build-dependencies]
+core-kit = { path = "../../kits/core-kit" }
+
+# RPM Requires
+[dependencies]
+# None

@@ -1,21 +1,20 @@
 [package]
-name = "hello-agent"
+name = "pkg-d"
 version = "0.1.0"
 edition = "2021"
 publish = false
 build = "../build.rs"
 
 [package.metadata.build-package]
-variant-sensitive = false
-source-groups = ["hello-agent"]
+source-groups = []
 
 [lib]
 path = "../packages.rs"
 
 # RPM BuildRequires
 [build-dependencies]
-# None
+core-kit = { path = "../../kits/core-kit" }
 
 # RPM Requires
 [dependencies]
-# None
+

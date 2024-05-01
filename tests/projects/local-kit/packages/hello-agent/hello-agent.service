@@ -1,9 +1,0 @@
-[Unit]
-Description=Send a hello-agent Ping
-
-[Service]
-Type=oneshot
-RemainAfterExit=false
-StandardError=journal+console
-ExecStart=/usr/bin/hello-agent
-TimeoutStartSec=30s

@@ -1,0 +1,22 @@
+[package]
+name = "extra-1-kit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+# Don't rebuild crate just because of changes to README.
+exclude = ["README.md"]
+
+[package.metadata.build-kit]
+included-packages = [
+    "pkg-b",
+    "pkg-d",
+]
+
+[lib]
+path = "../kit.rs"
+
+[build-dependencies]
+core-kit = { path = "../../kits/core-kit" }
+pkg-b = { path = "../../packages/pkg-b" }
+pkg-d = { path = "../../packages/pkg-d" }
