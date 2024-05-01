@@ -17,5 +17,7 @@ path = "../kit.rs"
 
 [build-dependencies]
 pkg-e = { path = "../../packages/pkg-e" }
+# pkg-f will also be included in the kit because pkg-g requires pkg-f
+pkg-g = { path = "../../packages/pkg-g" }
 extra-1-kit = { path = "../../kits/extra-1-kit" }
 extra-2-kit = { path = "../../kits/extra-2-kit" }
