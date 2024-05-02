@@ -6,6 +6,7 @@ of its input arguments from environment variables.
 !*/
 
 use buildsys::manifest::SupportedArch;
+use buildsys::BuildType;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use url::Url;
@@ -157,30 +158,42 @@ pub(crate) struct BuildVariantArgs {
 }
 
 /// Returns the environment variables that need to be watched for a given `[BuildType]`.
-fn sensitive_env_vars(build_type: BuildType) -> impl Iterator<Item = &'static str> {
+fn sensitive_env_vars(build_type: BuildFlags) -> impl Iterator<Item = &'static str> {
     REBUILD_VARS
         .into_iter()
         .filter(move |(_, flags)| build_type.includes(*flags))
         .map(|(var, _)| var)
 }
 
-/// Emits the cargo directives for a the list of sensitive environment variables for a given
+/// Emits the cargo directives for the list of sensitive environment variables for a given
 /// `[BuildType]`.
 pub(crate) fn rerun_for_envs(build_type: BuildType) {
-    for var in sensitive_env_vars(build_type) {
+    let build_flags: BuildFlags = build_type.into();
+    for var in sensitive_env_vars(build_flags) {
         println!("cargo:rerun-if-env-changed={}", var)
     }
 }
 
-/// The thing that buildsys is building.
+/// The thing that buildsys is building. This is an internal representation that includes `u8` flags
+/// to help us manage lists of environment variables and what types of build that need to be rebuilt
+/// when they change.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum BuildType {
+enum BuildFlags {
     Package = 0b00000001,
     Variant = 0b00000010,
 }
 
-impl BuildType {
+impl From<BuildType> for BuildFlags {
+    fn from(value: BuildType) -> Self {
+        match value {
+            BuildType::Package => BuildFlags::Package,
+            BuildType::Variant => BuildFlags::Variant,
+        }
+    }
+}
+
+impl BuildFlags {
     fn includes(&self, flags: u8) -> bool {
         let this = *self as u8;
         let and = flags & this;
@@ -188,26 +201,26 @@ impl BuildType {
     }
 }
 
-const PACKAGE: u8 = BuildType::Package as u8;
-const VARIANT: u8 = BuildType::Variant as u8;
+const PACKAGE: u8 = BuildFlags::Package as u8;
+const VARIANT: u8 = BuildFlags::Variant as u8;
 
 #[test]
 fn build_type_includes_test() {
     // true
-    assert!(BuildType::Package.includes(PACKAGE | VARIANT));
-    assert!(BuildType::Variant.includes(VARIANT));
-    assert!(BuildType::Variant.includes(VARIANT | PACKAGE));
+    assert!(BuildFlags::Package.includes(PACKAGE | VARIANT));
+    assert!(BuildFlags::Variant.includes(VARIANT));
+    assert!(BuildFlags::Variant.includes(VARIANT | PACKAGE));
 
     // false
-    assert!(!BuildType::Package.includes(VARIANT));
-    assert!(!BuildType::Variant.includes(PACKAGE));
-    assert!(!BuildType::Variant.includes(32));
-    assert!(!BuildType::Variant.includes(0));
+    assert!(!BuildFlags::Package.includes(VARIANT));
+    assert!(!BuildFlags::Variant.includes(PACKAGE));
+    assert!(!BuildFlags::Variant.includes(32));
+    assert!(!BuildFlags::Variant.includes(0));
 }
 
 #[test]
 fn test_sensitive_env_vars_variant() {
-    let list: Vec<&str> = sensitive_env_vars(BuildType::Variant).collect();
+    let list: Vec<&str> = sensitive_env_vars(BuildFlags::Variant).collect();
     assert!(list.contains(&"BUILDSYS_ARCH"));
     assert!(list.contains(&"BUILDSYS_VARIANT"));
     assert!(!list.contains(&"BUILDSYS_PACKAGES_DIR"));
@@ -215,7 +228,7 @@ fn test_sensitive_env_vars_variant() {
 
 #[test]
 fn test_sensitive_env_vars_package() {
-    let list: Vec<&str> = sensitive_env_vars(BuildType::Package).collect();
+    let list: Vec<&str> = sensitive_env_vars(BuildFlags::Package).collect();
     assert!(list.contains(&"BUILDSYS_ARCH"));
     assert!(list.contains(&"BUILDSYS_PACKAGES_DIR"));
     assert!(!list.contains(&"BUILDSYS_VARIANT"));

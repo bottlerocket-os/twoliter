@@ -6,10 +6,11 @@ the repository's top-level Dockerfile.
 */
 pub(crate) mod error;
 
-use crate::args::{BuildPackageArgs, BuildType, BuildVariantArgs};
+use crate::args::{BuildPackageArgs, BuildVariantArgs};
 use buildsys::manifest::{
     ImageFeature, ImageFormat, ImageLayout, ManifestInfo, PartitionPlan, SupportedArch,
 };
+use buildsys::BuildType;
 use duct::cmd;
 use error::Result;
 use lazy_static::lazy_static;
