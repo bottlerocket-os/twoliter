@@ -1,5 +1,6 @@
 [config]
 skip_core_tasks = true
+default_to_workspace = false
 
 [env]
 # The directory into which Twoliter has installed tools (e.g. buildsys,
@@ -15,6 +16,8 @@ BUILDSYS_IMAGES_DIR = "${BUILDSYS_BUILD_DIR}/images"
 BUILDSYS_TOOLS_DIR = "${BUILDSYS_ROOT_DIR}/tools"
 BUILDSYS_SOURCES_DIR = "${BUILDSYS_ROOT_DIR}/sources"
 BUILDSYS_SBKEYS_DIR = "${BUILDSYS_ROOT_DIR}/sbkeys"
+BUILDSYS_METADATA_DIR = "${BUILDSYS_BUILD_DIR}/metadata"
+BUILDSYS_CARGO_METADATA_PATH = "${BUILDSYS_METADATA_DIR}/cargo_metadata.json"
 BUILDSYS_SBKEYS_PROFILE = { script = ['echo "${BUILDSYS_SBKEYS_PROFILE:-local}"'] }
 BUILDSYS_TIMESTAMP = { script = ["date +%s"] }
 BUILDSYS_VERSION_BUILD = { script = ["git describe --always --dirty --exclude '*' || echo 00000000"] }
@@ -278,6 +281,7 @@ mkdir -p ${BUILDSYS_BUILD_DIR}
 mkdir -p ${BUILDSYS_OUTPUT_DIR}
 mkdir -p ${BUILDSYS_PACKAGES_DIR}
 mkdir -p ${BUILDSYS_STATE_DIR}
+mkdir -p ${BUILDSYS_METADATA_DIR}
 mkdir -p ${GO_MOD_CACHE}
 '''
 ]
@@ -321,10 +325,12 @@ dependencies = ["setup"]
 script_runner = "bash"
 script = [
 '''
-for ws in sources variants; do
-  [ -d "${ws}" ] || continue
-  cargo fetch --locked --manifest-path ${ws}/Cargo.toml
-done
+if [ -f "${BUILDSYS_SOURCES_DIR}/Cargo.toml" ]; then
+  cargo fetch --locked --manifest-path "${BUILDSYS_SOURCES_DIR}/Cargo.toml"
+fi
+
+cargo fetch --locked --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml"
+
 chmod -R o+r ${CARGO_HOME}
 '''
 ]
@@ -727,9 +733,26 @@ docker run --rm \
 '''
 ]
 
+# Reads the project's workspace Cargo dependency graph to a json file. Needed by buildsys when
+# building packages, kits and variants.
+[tasks.cargo-metadata]
+dependencies = ["setup"]
+script_runner = "bash"
+script = [
+'''
+rm -f "${BUILDSYS_CARGO_METADATA_PATH}"
+cargo metadata \
+  --format-version 1 \
+  --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml" \
+  --offline \
+  --all-features \
+  > "${BUILDSYS_CARGO_METADATA_PATH}"
+'''
+]
+
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
-dependencies = ["check-cargo-version", "fetch-sdk", "publish-setup", "fetch-licenses"]
+dependencies = ["check-cargo-version", "fetch-sdk", "publish-setup", "fetch-licenses", "cargo-metadata"]
 script_runner = "bash"
 script = [
 '''
@@ -757,13 +780,12 @@ cargo build \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \
   ${CARGO_MAKE_CARGO_LIMIT_JOBS} \
-  --manifest-path "variants/Cargo.toml" \
-  --package "${PACKAGE}"
+  --manifest-path "${BUILDSYS_ROOT_DIR}/packages/${PACKAGE}/Cargo.toml"
 '''
 ]
 
 [tasks.build-variant]
-dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup"]
+dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup", "cargo-metadata"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -777,7 +799,7 @@ export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
 
 # Save built artifacts for each architecture.  We don't set this everywhere
 # because we build host tools with cargo as well, like buildsys and pubsys.
-export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}
+export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}
 
 rm -rf "${BUILDSYS_OUTPUT_DIR}/latest"
 cargo build \
@@ -1471,16 +1493,18 @@ dependencies = [
   "clean-repos",
   "clean-state",
   "clean-tools",
+  "clean-metadata",
 ]
 
 [tasks.clean-sources]
 script_runner = "bash"
 script = [
 '''
-for ws in sources; do
-  [ -d "${ws}" ] || continue
-  cargo clean --manifest-path ${ws}/Cargo.toml
-done
+
+if [ -f "${BUILDSYS_SOURCES_DIR}/Cargo.toml" ]; then
+    cargo clean --manifest-path "${BUILDSYS_SOURCES_DIR}/Cargo.toml"
+fi
+
 rm -f ${BUILDSYS_TOOLS_DIR}/bin/*
 '''
 ]
@@ -1489,11 +1513,8 @@ rm -f ${BUILDSYS_TOOLS_DIR}/bin/*
 script_runner = "bash"
 script = [
 '''
-for ws in variants; do
-  [ -d "${ws}" ] || continue
-  cargo clean --manifest-path ${ws}/Cargo.toml
-done
 rm -rf ${BUILDSYS_PACKAGES_DIR}
+cargo clean --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml"
 '''
 ]
 
@@ -1528,6 +1549,14 @@ script = [
 if [ -n "${TWOLITER_TOOLS_DIR}" ] ; then
   rm -rf "${TWOLITER_TOOLS_DIR}"
 fi
+'''
+]
+
+[tasks.clean-metadata]
+script_runner = "bash"
+script = [
+'''
+rm -rf "${BUILDSYS_METADATA_DIR}"
 '''
 ]
 
