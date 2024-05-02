@@ -535,6 +535,7 @@ fn create_marker_dir(
 ) -> Result<PathBuf> {
     let prefix = match kind {
         BuildType::Package => "packages",
+        BuildType::Kit => "kits",
         BuildType::Variant => "variants",
     };
 

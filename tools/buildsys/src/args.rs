@@ -181,13 +181,15 @@ pub(crate) fn rerun_for_envs(build_type: BuildType) {
 #[derive(Debug, Clone, Copy)]
 enum BuildFlags {
     Package = 0b00000001,
-    Variant = 0b00000010,
+    Kit = 0b00000010,
+    Variant = 0b00000100,
 }
 
 impl From<BuildType> for BuildFlags {
     fn from(value: BuildType) -> Self {
         match value {
             BuildType::Package => BuildFlags::Package,
+            BuildType::Kit => BuildFlags::Kit,
             BuildType::Variant => BuildFlags::Variant,
         }
     }
