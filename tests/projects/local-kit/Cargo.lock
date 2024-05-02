@@ -13,6 +13,7 @@ dependencies = [
 name = "extra-1-kit"
 version = "0.1.0"
 dependencies = [
+ "core-kit",
  "pkg-b",
  "pkg-d",
 ]
@@ -21,16 +22,25 @@ dependencies = [
 name = "extra-2-kit"
 version = "0.1.0"
 dependencies = [
+ "core-kit",
  "pkg-c",
+]
+
+[[package]]
+name = "extra-3-kit"
+version = "0.1.0"
+dependencies = [
+ "extra-1-kit",
+ "extra-2-kit",
+ "pkg-e",
+ "pkg-g",
 ]
 
 [[package]]
 name = "hello-ootb"
 version = "0.1.0"
 dependencies = [
- "core-kit",
- "extra-1-kit",
- "extra-2-kit",
+ "extra-3-kit",
 ]
 
 [[package]]
@@ -56,4 +66,27 @@ name = "pkg-d"
 version = "0.1.0"
 dependencies = [
  "core-kit",
+]
+
+[[package]]
+name = "pkg-e"
+version = "0.1.0"
+dependencies = [
+ "extra-1-kit",
+ "extra-2-kit",
+]
+
+[[package]]
+name = "pkg-f"
+version = "0.1.0"
+dependencies = [
+ "core-kit",
+]
+
+[[package]]
+name = "pkg-g"
+version = "0.1.0"
+dependencies = [
+ "core-kit",
+ "pkg-f",
 ]
