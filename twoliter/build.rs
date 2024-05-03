@@ -36,6 +36,7 @@ fn main() {
     paths.copy_file("repack.Dockerfile");
     paths.copy_file("repack.Dockerfile.dockerignore");
     paths.copy_file("rpm2img");
+    paths.copy_file("rpm2kit");
     paths.copy_file("rpm2kmodkit");
     paths.copy_file("rpm2migrations");
     paths.copy_file("metadata.spec");

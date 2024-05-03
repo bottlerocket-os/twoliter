@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# Create a kit from RPM package inputs.
+set -eu -o pipefail
+
+declare -a PACKAGES
+
+for opt in "$@"; do
+   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
+   case "${opt}" in
+      --packages-dir=*) PACKAGES_DIR="${optarg}" ;;
+      --package=*) PACKAGES+=("${optarg}") ;;
+      --output-dir=*) OUTPUT_DIR="${optarg}" ;;
+   esac
+done
+
+KIT_DIR="${OUTPUT_DIR}/${ARCH}"
+rm -rf "${KIT_DIR}"
+
+mkdir -p "${KIT_DIR}/Packages"
+for pkg in ${PACKAGES} ; do
+  find "${PACKAGES_DIR}/${pkg}" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    ! -name '*-debuginfo-*' \
+    ! -name '*-debugsource-*' \
+    -size +0c \
+    -exec install -p -m 0644 -t "${KIT_DIR}/Packages" {} \+
+done
+
+createrepo_c "${KIT_DIR}"
+dnf --disablerepo '*' --repofrompath "kit,file:///${KIT_DIR}" repoquery --all
