@@ -109,6 +109,7 @@ async fn test_install_tools() {
     assert!(toolsdir.join("docker-go").is_file());
     assert!(toolsdir.join("partyplanner").is_file());
     assert!(toolsdir.join("rpm2img").is_file());
+    assert!(toolsdir.join("rpm2kit").is_file());
     assert!(toolsdir.join("rpm2kmodkit").is_file());
     assert!(toolsdir.join("rpm2migrations").is_file());
     assert!(toolsdir.join("metadata.spec").is_file());

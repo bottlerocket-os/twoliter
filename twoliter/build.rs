@@ -32,6 +32,7 @@ fn main() {
     paths.copy_file("docker-go");
     paths.copy_file("partyplanner");
     paths.copy_file("rpm2img");
+    paths.copy_file("rpm2kit");
     paths.copy_file("rpm2kmodkit");
     paths.copy_file("rpm2migrations");
     paths.copy_file("metadata.spec");
