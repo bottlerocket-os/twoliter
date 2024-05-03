@@ -3,9 +3,10 @@
 /build/*
 !/build/rpms/
 /build/rpms/*
-!/build/rpms/*.rpm
-/build/rpms/*-debuginfo-*.rpm
-/build/rpms/*-debugsource-*.rpm
+!/build/rpms/*/*.rpm
+/build/rpms/*/*-debuginfo-*.rpm
+/build/rpms/*/*-debugsource-*.rpm
+!/build/kits/
 !/build/tools/*
 **/target/*
 /sbkeys
