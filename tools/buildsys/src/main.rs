@@ -34,26 +34,24 @@ mod error {
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(super) enum Error {
-        ManifestParse {
-            source: buildsys::manifest::Error,
-        },
+        #[snafu(display("{source}"))]
+        ManifestParse { source: buildsys::manifest::Error },
 
-        SpecParse {
-            source: super::spec::error::Error,
-        },
+        #[snafu(display("{source}"))]
+        SpecParse { source: super::spec::error::Error },
 
-        ExternalFileFetch {
-            source: super::cache::error::Error,
-        },
+        #[snafu(display("{source}"))]
+        ExternalFileFetch { source: super::cache::error::Error },
 
-        GoMod {
-            source: super::gomod::error::Error,
-        },
+        #[snafu(display("{source}"))]
+        GoMod { source: super::gomod::error::Error },
 
+        #[snafu(display("{source}"))]
         ProjectCrawl {
             source: super::project::error::Error,
         },
 
+        #[snafu(display("{source}"))]
         BuildAttempt {
             source: super::builder::error::Error,
         },
