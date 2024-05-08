@@ -57,7 +57,7 @@ impl BuildVariant {
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
         // A temporary directory in the `build` directory
-        let build_temp_dir = TempDir::new_in(project.project_dir())
+        let build_temp_dir = TempDir::new_in("/tmp")
             .context("Unable to create a tempdir for Twoliter's build")?;
         let packages_dir = build_temp_dir.path().join("sdk_rpms");
         fs::create_dir_all(&packages_dir).await?;
