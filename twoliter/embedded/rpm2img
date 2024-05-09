@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034
+# shellcheck disable=SC2034,SC2154,SC2249,SC2312
 
 set -eu -o pipefail
 shopt -qs failglob
@@ -79,39 +79,12 @@ if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
   fi
 fi
 
+# import the imager helper functions and variables
+# shellcheck source=imghelper
+. "${0%/*}/imghelper"
+
 # Store output artifacts in a versioned directory.
-OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
 mkdir -p "${OUTPUT_DIR}"
-
-FILENAME_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-${VERSION_ID}-${BUILD_ID}"
-SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}"
-VERSIONED_SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-${VERSION_ID}"
-FRIENDLY_VERSIONED_SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-v${VERSION_ID}"
-
-OS_IMAGE_NAME="${FILENAME_PREFIX}"
-OS_IMAGE_SYMLINK="${SYMLINK_PREFIX}"
-OS_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}"
-OS_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}"
-
-DATA_IMAGE_NAME="${FILENAME_PREFIX}-data"
-DATA_IMAGE_SYMLINK="${SYMLINK_PREFIX}-data"
-DATA_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-data"
-DATA_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-data"
-
-BOOT_IMAGE_NAME="${FILENAME_PREFIX}-boot.ext4.lz4"
-BOOT_IMAGE_SYMLINK="${SYMLINK_PREFIX}-boot.ext4.lz4"
-BOOT_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-boot.ext4.lz4"
-BOOT_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-boot.ext4.lz4"
-
-VERITY_IMAGE_NAME="${FILENAME_PREFIX}-root.verity.lz4"
-VERITY_IMAGE_SYMLINK="${SYMLINK_PREFIX}-root.verity.lz4"
-VERITY_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-root.verity.lz4"
-VERITY_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-root.verity.lz4"
-
-ROOT_IMAGE_NAME="${FILENAME_PREFIX}-root.ext4.lz4"
-ROOT_IMAGE_SYMLINK="${SYMLINK_PREFIX}-root.ext4.lz4"
-ROOT_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-root.ext4.lz4"
-ROOT_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-root.ext4.lz4"
 
 OS_IMAGE="$(mktemp)"
 BOOT_IMAGE="$(mktemp)"
@@ -128,25 +101,9 @@ DATA_MOUNT="$(mktemp -d)"
 EFI_MOUNT="$(mktemp -d)"
 PRIVATE_MOUNT="$(mktemp -d)"
 
-CROSS_FACTORYDIR="/usr/share/factory"
-CROSS_SYSCONFIGDIR="/etc"
-CROSS_TMPFILESDIR="/usr/lib/tmpfiles.d"
-
-CA_CERTS_BUNDLE="${HOME}/certs/ca-bundle.crt"
-CA_CERTS_DEFAULT_BUNDLE="/usr/share/bottlerocket/ca-certificates/ca-bundle.crt"
-CA_CERTS_DEFAULT_LICENSES="/usr/share/licenses/ca-certificates"
-CA_CERTS_INSTALLDIR="${CROSS_FACTORYDIR}${CROSS_SYSCONFIGDIR}/pki/tls/certs"
-
-SBKEYS="${HOME}/sbkeys"
-
 SELINUX_ROOT="/etc/selinux"
 SELINUX_POLICY="fortified"
 SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/files/file_contexts"
-
-VERITY_VERSION=1
-VERITY_HASH_ALGORITHM=sha256
-VERITY_DATA_BLOCK_SIZE=4096
-VERITY_HASH_BLOCK_SIZE=4096
 
 BOOTCONFIG_DIR="$(mktemp -d)"
 BOOTCONFIG_INPUT="${BOOTCONFIG_DIR}/bootconfig.in"
@@ -250,26 +207,7 @@ INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<< "${INVENTORY_DATA}" | jq '{"Co
 printf "%s\n" "${INVENTORY_DATA}" > "${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
 # install CA certificates
-install -d "${ROOT_MOUNT}${CA_CERTS_INSTALLDIR}"
-if [ -s "${CA_CERTS_BUNDLE}" ]; then
-  install -p -m 0644 \
-    "${CA_CERTS_BUNDLE}"\
-    "${ROOT_MOUNT}${CA_CERTS_INSTALLDIR}"
-elif [ -s "${CA_CERTS_DEFAULT_BUNDLE}" ]; then
-  install -p -m 0644 \
-    "${CA_CERTS_DEFAULT_BUNDLE}" \
-    "${ROOT_MOUNT}${CA_CERTS_INSTALLDIR}"
-  install -p -m 0644 \
-    -D "${CA_CERTS_DEFAULT_LICENSES}"/* \
-    -t "${ROOT_MOUNT}/usr/share/licenses/ca-certificates"
-else
-  echo "no CA certificates found" >&2
-  exit 1
-fi
-cat <<EOF >> "${ROOT_MOUNT}${CROSS_TMPFILESDIR}/ca-certificates.conf"
-C /etc/pki/tls/certs/ca-bundle.crt - - - -
-L /etc/ssl/certs - - - - ../pki/tls/certs
-EOF
+install_ca_certs "${ROOT_MOUNT}"
 
 # install licenses
 mksquashfs \
@@ -300,168 +238,12 @@ mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
 # verification to "just work" later on, regardless of which
 # type of signing profile we have.
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  declare -a SHIM_SIGN_KEY
-  declare -a CODE_SIGN_KEY
-
-  # For an AWS profile, we expect a config file for the PKCS11
-  # helper. Otherwise, there should be a local key and cert.
-  if [ -s "${HOME}/.config/aws-kms-pkcs11/config.json" ] ; then
-    # Set AWS environment variables from build secrets, if present.
-    for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ; do
-      val="${var,,}"
-      val="${HOME}/.aws/${val//_/-}.env"
-      [ -s "${val}" ] || continue
-      declare -x "${var}=$(cat "${val}")"
-    done
-    # Verify that AWS credentials are functional.
-    aws sts get-caller-identity
-    # Log all PKCS11 helper activity, to simplify debugging.
-    export AWS_KMS_PKCS11_DEBUG=1
-    SB_KEY_SOURCE="aws"
-    SHIM_SIGN_KEY=(-c shim-sign-key -t shim-sign-key)
-    CODE_SIGN_KEY=(-c code-sign-key -t code-sign-key)
-  else
-    # Disable the PKCS11 helper.
-    rm /etc/pkcs11/modules/aws-kms-pkcs11.module
-
-    # Generate the PKCS12 archives for import.
-    openssl pkcs12 \
-      -export \
-      -passout pass: \
-      -inkey "${SBKEYS}/shim-sign.key" \
-      -in "${SBKEYS}/shim-sign.crt" \
-      -certfile "${SBKEYS}/db.crt" \
-      -out "${SBKEYS}/shim-sign.p12"
-
-    openssl pkcs12 \
-      -export \
-      -passout pass: \
-      -inkey "${SBKEYS}/code-sign.key" \
-      -in "${SBKEYS}/code-sign.crt" \
-      -certfile "${SBKEYS}/vendor.crt" \
-      -out "${SBKEYS}/code-sign.p12"
-
-    # Import certificates and private key archive.
-    PEDB="/etc/pki/pesign"
-
-    certutil -d "${PEDB}" -A -n db -i "${SBKEYS}/db.crt" -t ",,C"
-    certutil -d "${PEDB}" -A -n shim-sign-key -i "${SBKEYS}/shim-sign.crt" -t ",,P"
-    pk12util -d "${PEDB}" -i "${SBKEYS}/shim-sign.p12" -W ""
-
-    certutil -d "${PEDB}" -A -n vendor -i "${SBKEYS}/vendor.crt" -t ",,C"
-    certutil -d "${PEDB}" -A -n code-sign-key -i "${SBKEYS}/code-sign.crt" -t ",,P"
-    pk12util -d "${PEDB}" -i "${SBKEYS}/code-sign.p12" -W ""
-
-    certutil -d "${PEDB}" -L
-    SB_KEY_SOURCE="local"
-    SHIM_SIGN_KEY=(-c shim-sign-key)
-    CODE_SIGN_KEY=(-c code-sign-key)
-  fi
-
-  # Convert certificates from PEM format (ASCII) to DER (binary). This could be
-  # done when the certificates are created, but the resulting binary files are
-  # not as nice to store in source control.
-  for cert in PK KEK db vendor ; do
-    openssl x509 \
-      -inform PEM -in "${SBKEYS}/${cert}.crt" \
-      -outform DER -out "${SBKEYS}/${cert}.cer"
-  done
-
-  # For signing the grub config, we need to embed the GPG public key in binary
-  # form, which is similarly awkward to store in source control.
-  gpg --import "${SBKEYS}/config-sign.key"
-  if [ "${SB_KEY_SOURCE}" == "aws" ] ; then
-    gpg --card-status
-  fi
-  gpg --export > "${SBKEYS}/config-sign.pubkey"
-  gpg --list-keys
+  declare -a shim_sign_key code_sign_key
+  sbsetup shim_sign_key code_sign_key
 fi
-
-# shim expects the following data structure in `.vendor_cert`:
-#
-# struct {
-#   uint32_t vendor_authorized_size;
-#   uint32_t vendor_deauthorized_size;
-#   uint32_t vendor_authorized_offset;
-#   uint32_t vendor_deauthorized_offset;
-# } cert_table;
-#
-cert_table() {
-  local input output size offset uint32_t
-  input="${1:?}"
-  output="${2:?}"
-  size="$(stat -c %s "${input}")"
-  rm -f "${output}"
-  # The cert payload is offset by four 4-byte uint32_t values in the header.
-  offset="$((4 * 4))"
-  for n in "${size}" 0 "${offset}" "$(( size + offset ))" ; do
-    printf -v uint32_t '\\x%02x\\x%02x\\x%02x\\x%02x' \
-      $((n & 255)) $((n >> 8 & 255)) $((n >> 16 & 255)) $((n >> 24 & 255))
-    printf "${uint32_t}" >> "${output}"
-  done
-  cat "${input}" >> "${output}"
-  # Zero-pad the output to the expected section size. Otherwise a subsequent
-  # `objcopy` operation on the same section might fail to replace it, if the
-  # new vendor certificate is larger than this one.
-  truncate -s 4096 "${output}"
-}
-
-# Helper function to log the object layout before and after changes.
-objdumpcopy() {
-  local obj objdump objcopy
-  obj="${1:?}"
-  shift
-  objdump="${ARCH}-bottlerocket-linux-gnu-objdump"
-  objcopy="${ARCH}-bottlerocket-linux-gnu-objcopy"
-  "${objdump}" -h "${obj}"
-  "${objcopy}" "${@}" "${obj}"
-  "${objdump}" -h "${obj}"
-}
 
 pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
-shims=(boot*.efi)
-shim="${shims[0]}"
-grubs=(grub*.efi)
-grub="${grubs[0]}"
-mokms=(mm*.efi)
-mokm="${mokms[0]}"
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  # Convert the vendor certificate to the expected format.
-  cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
-
-  # Replace the embedded vendor certificate, then sign shim with the db key.
-  objdumpcopy "${shim}" \
-    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
-  pesign -i "${shim}" -o "${shim}.signed" -s "${SHIM_SIGN_KEY[@]}"
-  mv "${shim}.signed" "${shim}"
-  pesigcheck -i "${shim}" -n 0 -c "${SBKEYS}/db.cer"
-
-  # Sign the MOK manager as well.
-  pesign -i "${mokm}" -o "${mokm}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${mokm}.signed" "${mokm}"
-  pesigcheck -i "${mokm}" -n 0 -c "${SBKEYS}/vendor.cer"
-
-  # Replace the embedded gpg public key, then sign grub with the vendor key.
-  objdumpcopy "${grub}" \
-    --file-alignment 4096 \
-    --update-section ".pubkey=${SBKEYS}/config-sign.pubkey"
-  pesign -i "${grub}" -o "${grub}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${grub}.signed" "${grub}"
-  pesigcheck -i "${grub}" -n 0 -c "${SBKEYS}/vendor.cer"
-else
-  # Generate a zero-sized certificate in the expected format.
-  cert_table /dev/null "${SBKEYS}/vendor.obj"
-
-  # Replace the embedded vendor certificate with the zero-sized one, which shim
-  # will ignore when Secure Boot is disabled.
-  objdumpcopy "${shim}" \
-    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
-
-   # Remove the embedded gpg public key to disable GRUB's signature checks.
-   objdumpcopy "${grub}" \
-     --file-alignment 4096 \
-     --remove-section ".pubkey"
-fi
+replace_vendor_certs shim_sign_key code_sign_key "${UEFI_SECURE_BOOT}"
 popd >/dev/null
 
 dd if=/dev/zero of="${EFI_IMAGE}" bs=1M count="${partsize[EFI-A]}"
@@ -484,17 +266,12 @@ mv "${ROOT_MOUNT}/boot"/* "${BOOT_MOUNT}"
 
 pushd "${BOOT_MOUNT}" >/dev/null
 
-vmlinuz="vmlinuz"
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  pesign -i "${vmlinuz}" -o "${vmlinuz}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${vmlinuz}.signed" "${vmlinuz}"
-  pesigcheck -i "${vmlinuz}" -n 0 -c "${SBKEYS}/vendor.cer"
+  vmlinuzsetup vmlinuz
 fi
 
 # Generate an HMAC for the kernel after signing.
-openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" \
-  | awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
-  > ".${vmlinuz}.hmac"
+vmlinuzhmac vmlinuz
 
 popd >/dev/null
 
@@ -534,13 +311,7 @@ dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[ROOT-A
 # BOTTLEROCKET-VERITY-A
 veritypart_mib="${partsize[HASH-A]}"
 truncate -s "${veritypart_mib}M" "${VERITY_IMAGE}"
-veritysetup_output="$(veritysetup format \
-    --format "$VERITY_VERSION" \
-    --hash "$VERITY_HASH_ALGORITHM" \
-    --data-block-size "$VERITY_DATA_BLOCK_SIZE" \
-    --hash-block-size "$VERITY_HASH_BLOCK_SIZE" \
-    "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
-    | tee /dev/stderr)"
+veritysetup_output="$(veritysetup_format "${ROOT_IMAGE}" "${VERITY_IMAGE}")"
 verityimage_size="$(stat -c %s "${VERITY_IMAGE}")"
 veritypart_bytes="$((veritypart_mib * 1024 * 1024))"
 if [ "${verityimage_size}" -gt "${veritypart_bytes}" ] ; then
@@ -626,8 +397,7 @@ menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
 EOF
 
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  gpg --detach-sign "${BOOT_MOUNT}/grub/grub.cfg"
-  gpg --verify "${BOOT_MOUNT}/grub/grub.cfg.sig"
+  sign_grub "${BOOT_MOUNT}/grub/grub.cfg"
 fi
 
 # Combine any bootconfig snippets in /boot for later use, then clean up.
@@ -698,7 +468,7 @@ mkfs_data() {
   if [ "${XFS_DATA_PARTITION}" == "yes" ] ; then
     echo "writing blank partition for DATA"
     # Create a file to write the filesystem to first
-    dd if=/dev/zero of="${BOTTLEROCKET_DATA}" bs=1M count=${size%?}
+    dd if=/dev/zero of="${BOTTLEROCKET_DATA}" bs=1M count="${size%?}"
   else
     # default to ext4
     echo "writing ext4 filesystem for DATA"
@@ -731,18 +501,6 @@ esac
 sgdisk -v "${OS_IMAGE}"
 [ -s "${DATA_IMAGE}" ] && sgdisk -v "${DATA_IMAGE}"
 
-symlink_image() {
-  local ext what
-  ext="${1}"
-  what="${2}"
-  ext="${ext:+.$ext}"
-  target="${what^^}_NAME"
-  for link in symlink versioned_symlink friendly_versioned_symlink ; do
-    link="${what^^}_${link^^}"
-    ln -s "${!target}${ext}" "${OUTPUT_DIR}/${!link}${ext}"
-  done
-}
-
 if [[ ${OUTPUT_FMT} == "raw" ]]; then
   lz4 -vc "${OS_IMAGE}" >"${OUTPUT_DIR}/${OS_IMAGE_NAME}.img.lz4"
   symlink_image "img.lz4" "os_image"
@@ -769,71 +527,11 @@ fi
 
 # Now create the OVA if needed.
 if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
-  os_vmdk="${OS_IMAGE_NAME}.vmdk"
-  data_vmdk="${DATA_IMAGE_NAME}.vmdk"
-  ovf="${OS_IMAGE_NAME}.ovf"
-  ova_dir="$(mktemp -d)"
-
-  # The manifest expects disk sizes in bytes.
-  bytes_in_gib="$((1024 * 1024 * 1024))"
-  os_disk_bytes="$((OS_IMAGE_PUBLISH_SIZE_GIB * bytes_in_gib))"
-  data_disk_bytes="$((DATA_IMAGE_PUBLISH_SIZE_GIB * bytes_in_gib))"
-  sed "${OVF_TEMPLATE}" \
-     -e "s/{{OS_DISK}}/${os_vmdk}/g" \
-     -e "s/{{DATA_DISK}}/${data_vmdk}/g" \
-     -e "s/{{OS_DISK_BYTES}}/${os_disk_bytes}/g" \
-     -e "s/{{DATA_DISK_BYTES}}/${data_disk_bytes}/g" \
-     > "${ova_dir}/${ovf}"
-
-  # The manifest templates for Secure Boot expect the cert data for
-  # PK, KEK, db, and dbx.
-  if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-    pk_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/PK.cer")"
-    kek_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/KEK.cer")"
-    db_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/db.cer")"
-    dbx_empty_hash_hex="$(sha256sum /dev/null | awk '{ print $1 }')"
-    sed -i \
-      -e "s/{{PK_CERT_DER_HEX}}/${pk_cert_der_hex}/g" \
-      -e "s/{{KEK_CERT_DER_HEX}}/${kek_cert_der_hex}/g" \
-      -e "s/{{DB_CERT_DER_HEX}}/${db_cert_der_hex}/g" \
-      -e "s/{{DBX_EMPTY_HASH_HEX}}/${dbx_empty_hash_hex}/g" \
-      "${ova_dir}/${ovf}"
-  fi
-
-  # Make sure we replaced all the '{{...}}' fields with real values.
-  if grep -F -e '{{' -e '}}' "${ova_dir}/${ovf}" ; then
-    echo "Failed to fully render the OVF template" >&2
-    exit 1
-  fi
-
-  # Create the manifest file with the hashes of the VMDKs and the OVF.
-  manifest="${OS_IMAGE_NAME}.mf"
-  pushd "${OUTPUT_DIR}" >/dev/null
-  os_sha256="$(sha256sum ${os_vmdk} | awk '{print $1}')"
-  echo "SHA256(${os_vmdk})= ${os_sha256}" > "${ova_dir}/${manifest}"
-  if [ -s "${DATA_IMAGE}" ] ; then
-    data_sha256="$(sha256sum ${data_vmdk} | awk '{print $1}')"
-    echo "SHA256(${data_vmdk})= ${data_sha256}" >> "${ova_dir}/${manifest}"
-  fi
-  popd >/dev/null
-  pushd "${ova_dir}" >/dev/null
-  ovf_sha256="$(sha256sum ${ovf} | awk '{print $1}')"
-  echo "SHA256(${ovf})= ${ovf_sha256}" >> "${manifest}"
-  popd >/dev/null
-
-  # According to the OVF spec:
-  # https://www.dmtf.org/sites/default/files/standards/documents/DSP0243_2.1.1.pdf,
-  # the OVF must be first in the tar bundle.  Manifest is next, and then the
-  # files must fall in the same order as listed in the References section of the
-  # OVF file
-  ova="${OS_IMAGE_NAME}.ova"
-  tar -cf "${OUTPUT_DIR}/${ova}" -C "${ova_dir}" "${ovf}" "${manifest}"
-  tar -rf "${OUTPUT_DIR}/${ova}" -C "${OUTPUT_DIR}" "${os_vmdk}"
-  if [ -s "${DATA_IMAGE}" ] ; then
-     tar -rf "${OUTPUT_DIR}/${ova}" -C "${OUTPUT_DIR}" "${data_vmdk}"
-  fi
-
-  symlink_image "ova" "os_image"
+  generate_ovf \
+    "${OS_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${OVF_TEMPLATE}" \
+    "${UEFI_SECURE_BOOT}"
 fi
 
 lz4 -9vc "${BOOT_IMAGE}" >"${OUTPUT_DIR}/${BOOT_IMAGE_NAME}"

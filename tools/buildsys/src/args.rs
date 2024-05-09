@@ -40,6 +40,7 @@ pub(crate) struct Buildsys {
 pub(crate) enum Command {
     BuildPackage(Box<BuildPackageArgs>),
     BuildVariant(Box<BuildVariantArgs>),
+    RepackVariant(Box<RepackVariantArgs>),
 }
 
 impl Command {
@@ -47,6 +48,7 @@ impl Command {
         match self {
             Command::BuildPackage(_) => BuildType::Package,
             Command::BuildVariant(_) => BuildType::Variant,
+            Command::RepackVariant(_) => BuildType::Repack,
         }
     }
 }
@@ -156,6 +158,25 @@ pub(crate) struct BuildVariantArgs {
     pub(crate) common: Common,
 }
 
+/// Repack variant from prebuilt images.
+#[derive(Debug, Parser)]
+pub(crate) struct RepackVariantArgs {
+    #[arg(long, env = "BUILDSYS_NAME")]
+    pub(crate) name: String,
+
+    #[arg(long, env = "BUILDSYS_VARIANT")]
+    pub(crate) variant: String,
+
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
+    pub(crate) version_build: String,
+
+    #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
+    pub(crate) version_image: String,
+
+    #[command(flatten)]
+    pub(crate) common: Common,
+}
+
 /// Returns the environment variables that need to be watched for a given `[BuildType]`.
 fn sensitive_env_vars(build_type: BuildType) -> impl Iterator<Item = &'static str> {
     REBUILD_VARS
@@ -165,10 +186,15 @@ fn sensitive_env_vars(build_type: BuildType) -> impl Iterator<Item = &'static st
 }
 
 /// Emits the cargo directives for a the list of sensitive environment variables for a given
-/// `[BuildType]`.
+/// `[BuildType]`, unless the `[BuildType]` is Repack.
 pub(crate) fn rerun_for_envs(build_type: BuildType) {
-    for var in sensitive_env_vars(build_type) {
-        println!("cargo:rerun-if-env-changed={}", var)
+    match build_type {
+        BuildType::Repack => (),
+        _ => {
+            for var in sensitive_env_vars(build_type) {
+                println!("cargo:rerun-if-env-changed={}", var)
+            }
+        }
     }
 }
 
@@ -176,6 +202,7 @@ pub(crate) fn rerun_for_envs(build_type: BuildType) {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BuildType {
+    Repack = 0b00000000,
     Package = 0b00000001,
     Variant = 0b00000010,
 }
@@ -194,11 +221,14 @@ const VARIANT: u8 = BuildType::Variant as u8;
 #[test]
 fn build_type_includes_test() {
     // true
+    assert!(BuildType::Repack.includes(0));
     assert!(BuildType::Package.includes(PACKAGE | VARIANT));
     assert!(BuildType::Variant.includes(VARIANT));
     assert!(BuildType::Variant.includes(VARIANT | PACKAGE));
 
     // false
+    assert!(BuildType::Repack.includes(PACKAGE));
+    assert!(BuildType::Repack.includes(VARIANT));
     assert!(!BuildType::Package.includes(VARIANT));
     assert!(!BuildType::Variant.includes(PACKAGE));
     assert!(!BuildType::Variant.includes(32));

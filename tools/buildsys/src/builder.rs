@@ -6,7 +6,7 @@ the repository's top-level Dockerfile.
 */
 pub(crate) mod error;
 
-use crate::args::{BuildPackageArgs, BuildType, BuildVariantArgs};
+use crate::args::{BuildPackageArgs, BuildType, BuildVariantArgs, RepackVariantArgs};
 use buildsys::manifest::{
     ImageFeature, ImageFormat, ImageLayout, ManifestInfo, PartitionPlan, SupportedArch,
 };
@@ -59,6 +59,15 @@ lazy_static! {
         r#"failed to get dead record"#,
     ))
     .unwrap();
+}
+
+/*
+Sometimes a clean-up action might occur before a container/image has been created.
+We can ignore this.
+*/
+lazy_static! {
+    static ref DOCKER_BUILD_NO_SUCH_THING_ERROR: Regex =
+        Regex::new(r#"No such (container|image): "#).unwrap();
 }
 
 /*
@@ -209,10 +218,46 @@ impl VariantBuildArgs {
     }
 }
 
+struct VariantRepackArgs {
+    data_image_publish_size_gib: i32,
+    image_features: HashSet<ImageFeature>,
+    image_format: String,
+    name: String,
+    os_image_publish_size_gib: String,
+    variant: String,
+    version_build: String,
+    version_image: String,
+}
+
+impl VariantRepackArgs {
+    fn build_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        args.push("--network".into());
+        args.push("host".into());
+        args.build_arg(
+            "DATA_IMAGE_PUBLISH_SIZE_GIB",
+            self.data_image_publish_size_gib.to_string(),
+        );
+        args.build_arg("IMAGE_FORMAT", &self.image_format);
+        args.build_arg("IMAGE_NAME", &self.name);
+        args.build_arg("OS_IMAGE_PUBLISH_SIZE_GIB", &self.os_image_publish_size_gib);
+        args.build_arg("VARIANT", &self.variant);
+        args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("VERSION_ID", &self.version_image);
+
+        for image_feature in self.image_features.iter() {
+            args.build_arg(format!("{}", image_feature), "1");
+        }
+
+        args
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 enum TargetBuildArgs {
     Package(PackageBuildArgs),
     Variant(VariantBuildArgs),
+    Repack(VariantRepackArgs),
 }
 
 impl TargetBuildArgs {
@@ -220,6 +265,7 @@ impl TargetBuildArgs {
         match self {
             TargetBuildArgs::Package(_) => BuildType::Package,
             TargetBuildArgs::Variant(_) => BuildType::Variant,
+            TargetBuildArgs::Repack(_) => BuildType::Repack,
         }
     }
 }
@@ -363,6 +409,54 @@ impl DockerBuild {
         })
     }
 
+    /// Create a new `DockerBuild` that can repackage a variant image.
+    pub(crate) fn repack_variant(args: RepackVariantArgs, manifest: &ManifestInfo) -> Result<Self> {
+        let image_layout = manifest.image_layout().cloned().unwrap_or_default();
+
+        let (os_image_publish_size_gib, data_image_publish_size_gib) =
+            image_layout.publish_image_sizes_gib();
+
+        Ok(Self {
+            dockerfile: args.common.tools_dir.join("repack.Dockerfile"),
+            context: args.common.root_dir.clone(),
+            target: "repack".to_string(),
+            tag: append_token(
+                format!(
+                    "buildsys-repack-{variant}-{arch}",
+                    variant = args.variant,
+                    arch = args.common.arch
+                ),
+                &args.common.root_dir,
+            ),
+            root_dir: args.common.root_dir.clone(),
+            artifacts_dir: args.common.image_arch_variant_dir,
+            state_dir: args.common.state_dir,
+            artifact_name: args.variant.clone(),
+            common_build_args: CommonBuildArgs::new(
+                &args.common.root_dir,
+                args.common.sdk_image,
+                args.common.arch,
+                false,
+            ),
+            target_build_args: TargetBuildArgs::Repack(VariantRepackArgs {
+                data_image_publish_size_gib,
+                image_features: manifest.image_features().unwrap_or_default(),
+                image_format: match manifest.image_format() {
+                    Some(ImageFormat::Raw) | None => "raw",
+                    Some(ImageFormat::Qcow2) => "qcow2",
+                    Some(ImageFormat::Vmdk) => "vmdk",
+                }
+                .to_string(),
+                name: args.name,
+                os_image_publish_size_gib: os_image_publish_size_gib.to_string(),
+                variant: args.variant,
+                version_build: args.version_build,
+                version_image: args.version_image,
+            }),
+            secrets_args: secrets_args()?,
+        })
+    }
+
     pub(crate) fn build(&self) -> Result<()> {
         env::set_current_dir(&self.root_dir).context(error::DirectoryChangeSnafu {
             path: &self.root_dir,
@@ -444,6 +538,7 @@ impl DockerBuild {
         let mut args = match &self.target_build_args {
             TargetBuildArgs::Package(p) => p.build_args(),
             TargetBuildArgs::Variant(v) => v.build_args(),
+            TargetBuildArgs::Repack(r) => r.build_args(),
         };
         args.build_arg("ARCH", self.common_build_args.arch.to_string());
         args.build_arg("GOARCH", self.common_build_args.arch.goarch());
@@ -475,8 +570,17 @@ fn docker(args: &[String], retry: Retry) -> Result<Output> {
             .run()
             .context(error::CommandStartSnafu)?;
 
+        // Print most `docker` output to stdout.
         let stdout = String::from_utf8_lossy(&output.stdout);
-        println!("{}", &stdout);
+        match args[0].as_str() {
+            "rm" | "rmi" => {
+                if !DOCKER_BUILD_NO_SUCH_THING_ERROR.is_match(&stdout) {
+                    println!("{}", &stdout)
+                }
+            }
+            _ => println!("{}", &stdout),
+        }
+
         if output.status.success() {
             return Ok(output);
         }
@@ -559,6 +663,7 @@ fn create_marker_dir(
     let prefix = match kind {
         BuildType::Package => "packages",
         BuildType::Variant => "variants",
+        BuildType::Repack => "repack",
     };
 
     let path = [&state_dir.display().to_string(), arch, prefix, name]

@@ -15,7 +15,7 @@ mod gomod;
 mod project;
 mod spec;
 
-use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command};
+use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs};
 use crate::builder::DockerBuild;
 use buildsys::manifest::{BundleModule, ManifestInfo, SupportedArch};
 use cache::LookasideCache;
@@ -105,6 +105,7 @@ fn run(args: Buildsys) -> Result<()> {
     match args.command {
         Command::BuildPackage(args) => build_package(*args),
         Command::BuildVariant(args) => build_variant(*args),
+        Command::RepackVariant(args) => repack_variant(*args),
     }
 }
 
@@ -246,6 +247,20 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     supported_arch(&manifest, args.common.arch)?;
 
     DockerBuild::new_variant(args, &manifest)
+        .context(error::BuilderInstantiationSnafu)?
+        .build()
+        .context(error::BuildAttemptSnafu)
+}
+
+fn repack_variant(args: RepackVariantArgs) -> Result<()> {
+    let manifest_file = "Cargo.toml";
+
+    let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
+        .context(error::ManifestParseSnafu)?;
+
+    supported_arch(&manifest, args.common.arch)?;
+
+    DockerBuild::repack_variant(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)
