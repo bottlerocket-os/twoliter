@@ -606,7 +606,7 @@ fi
 ]
 
 [tasks.build-sbkeys]
-dependencies = ["fetch"]
+dependencies = ["fetch-sdk"]
 script_runner = "bash"
 script = [
 '''

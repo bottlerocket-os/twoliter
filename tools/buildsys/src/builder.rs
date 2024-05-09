@@ -90,10 +90,16 @@ struct CommonBuildArgs {
     sdk: String,
     nocache: String,
     token: String,
+    clean_output_before_build: bool,
 }
 
 impl CommonBuildArgs {
-    fn new(root: impl AsRef<Path>, sdk: String, arch: SupportedArch) -> Self {
+    fn new(
+        root: impl AsRef<Path>,
+        sdk: String,
+        arch: SupportedArch,
+        clean_output_before_build: bool,
+    ) -> Self {
         let mut d = Sha512::new();
         d.update(root.as_ref().display().to_string());
         let digest = hex::encode(d.finalize());
@@ -107,6 +113,7 @@ impl CommonBuildArgs {
             sdk,
             nocache,
             token,
+            clean_output_before_build,
         }
     }
 }
@@ -245,7 +252,7 @@ impl DockerBuild {
         };
 
         Ok(Self {
-            dockerfile: args.common.tools_dir.join("Dockerfile"),
+            dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
             target: "package".to_string(),
             tag: append_token(
@@ -264,6 +271,7 @@ impl DockerBuild {
                 &args.common.root_dir,
                 args.common.sdk_image,
                 args.common.arch,
+                true,
             ),
             target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
                 image_features,
@@ -293,7 +301,7 @@ impl DockerBuild {
             image_layout.publish_image_sizes_gib();
 
         Ok(Self {
-            dockerfile: args.common.tools_dir.join("Dockerfile"),
+            dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
             target: "variant".to_string(),
             tag: append_token(
@@ -312,6 +320,7 @@ impl DockerBuild {
                 &args.common.root_dir,
                 args.common.sdk_image,
                 args.common.arch,
+                true,
             ),
             target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
                 data_image_publish_size_gib,
@@ -368,7 +377,9 @@ impl DockerBuild {
         )?;
 
         // Clean up any previous outputs we have tracked.
-        clean_build_files(&marker_dir, &self.artifacts_dir)?;
+        if self.common_build_args.clean_output_before_build {
+            clean_build_files(&marker_dir, &self.artifacts_dir)?;
+        };
 
         let mut build = format!(
             "build {context} \
@@ -524,7 +535,7 @@ fn secrets_args() -> Result<Vec<String>> {
         }
     }
 
-    for var in &[
+    for var in [
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "AWS_SESSION_TOKEN",
