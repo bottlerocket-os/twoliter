@@ -397,9 +397,13 @@ impl ManifestInfo {
         self.build_package().and_then(|b| b.external_files.as_ref())
     }
 
-    /// Convenience method to return the package name override, if any.
-    pub fn package_name(&self) -> Option<&String> {
-        self.build_package().and_then(|b| b.package_name.as_ref())
+    /// Convenience method to return the package name. If the manifest has an override in the
+    /// `package.metadata.build-package.package-name` key, it is returned, otherwise the Cargo
+    /// manifest name is returned from `package.name`.
+    pub fn package_name(&self) -> &str {
+        self.build_package()
+            .and_then(|b| b.package_name.as_deref())
+            .unwrap_or_else(|| self.manifest_name())
     }
 
     /// Convenience method to find whether the package is sensitive to variant changes.
