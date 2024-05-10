@@ -6,7 +6,8 @@ publish = false
 build = "../build.rs"
 
 [package.metadata.build-package]
-source-groups = []
+# Give this package an "override" name.
+package-name = "pkg-a-renamed"
 
 [lib]
 path = "../packages.rs"
