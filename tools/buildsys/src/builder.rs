@@ -248,6 +248,13 @@ impl DockerBuild {
         image_features: HashSet<ImageFeature>,
     ) -> Result<Self> {
         let package = manifest.info().package_name();
+        let per_package_dir = format!(
+            "{}/{}",
+            args.packages_dir.display(),
+            manifest.info().manifest_name()
+        )
+        .into();
+
         Ok(Self {
             dockerfile: args.common.tools_dir.join("Dockerfile"),
             context: args.common.root_dir.clone(),
@@ -261,7 +268,7 @@ impl DockerBuild {
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dir: args.packages_dir,
+            artifacts_dir: per_package_dir,
             state_dir: args.common.state_dir,
             artifact_name: package.to_string(),
             common_build_args: CommonBuildArgs::new(
