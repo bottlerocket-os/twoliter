@@ -119,9 +119,6 @@ pub(crate) struct BuildPackageArgs {
     #[arg(long, env = "BUILDSYS_UPSTREAM_SOURCE_FALLBACK")]
     pub(crate) upstream_source_fallback: String,
 
-    #[arg(long, env = "CARGO_PKG_NAME")]
-    pub(crate) cargo_package_name: String,
-
     #[command(flatten)]
     pub(crate) common: Common,
 }

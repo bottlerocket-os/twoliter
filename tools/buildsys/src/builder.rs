@@ -247,12 +247,7 @@ impl DockerBuild {
         manifest: &Manifest,
         image_features: HashSet<ImageFeature>,
     ) -> Result<Self> {
-        let package = if let Some(name_override) = manifest.info().package_name() {
-            name_override.clone()
-        } else {
-            args.cargo_package_name
-        };
-
+        let package = manifest.info().package_name();
         Ok(Self {
             dockerfile: args.common.tools_dir.join("Dockerfile"),
             context: args.common.root_dir.clone(),
@@ -268,7 +263,7 @@ impl DockerBuild {
             root_dir: args.common.root_dir.clone(),
             artifacts_dir: args.packages_dir,
             state_dir: args.common.state_dir,
-            artifact_name: package.clone(),
+            artifact_name: package.to_string(),
             common_build_args: CommonBuildArgs::new(
                 &args.common.root_dir,
                 args.common.sdk_image,
@@ -276,7 +271,7 @@ impl DockerBuild {
             ),
             target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
                 image_features,
-                package,
+                package: package.to_string(),
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
                 publish_repo: args.publish_repo,
