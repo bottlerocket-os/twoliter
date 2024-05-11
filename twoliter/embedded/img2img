@@ -1,3 +1,288 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2249,SC2312
 
-echo "img2img not yet implemented" >&2 ; exit 1
+set -eux -o pipefail
+shopt -qs failglob
+
+OUTPUT_FMT="raw"
+OVF_TEMPLATE=""
+UEFI_SECURE_BOOT="no"
+
+for opt in "$@"; do
+  optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
+  case "${opt}" in
+  --input-dir=*) INPUT_DIR="${optarg}" ;;
+  --output-dir=*) OUTPUT_DIR="${optarg}" ;;
+  --output-fmt=*) OUTPUT_FMT="${optarg}" ;;
+  --os-image-publish-size-gib=*) OS_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
+  --data-image-publish-size-gib=*) DATA_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
+  --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
+  --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
+  esac
+done
+
+# Fail fast if the OVF template doesn't exist, or doesn't match the layout.
+if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
+  if [[ ! -s "${OVF_TEMPLATE}" ]]; then
+    echo "required OVF template not found: ${OVF_TEMPLATE}" >&2
+    exit 1
+  fi
+
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    if ! grep -Fq '{{DB_CERT_DER_HEX}}' "${OVF_TEMPLATE}"; then
+      echo "Missing CA certificate field in OVF template, which is required for Secure Boot support." >&2
+      exit 1
+    fi
+  fi
+fi
+
+WORKDIR="$(mktemp -d)"
+pushd "${WORKDIR}" >/dev/null
+cleanup() {
+  [[ -n "${WORKDIR}" ]] && rm -rf "${WORKDIR}"
+}
+trap 'cleanup' EXIT
+
+# import the image helper functions and variables
+# shellcheck source=imghelper
+. "${0%/*}/imghelper"
+
+# step 1: decompress the input image
+OS_IMAGE="${OS_IMAGE_NAME}.img"
+if [[ "${OUTPUT_FMT}" == "raw" ]]; then
+  DATA_IMAGE="${INPUT_DIR}/${DATA_IMAGE_NAME}.img.lz4"
+  unlz4 -f "${INPUT_DIR}/${OS_IMAGE_NAME}.img.lz4" "${OS_IMAGE}"
+elif [[ "${OUTPUT_FMT}" == "qcow2" ]]; then
+  DATA_IMAGE="${INPUT_DIR}/${DATA_IMAGE_NAME}.qcow2"
+  qemu-img convert -f qcow2 -O raw \
+    "${INPUT_DIR}/${OS_IMAGE_NAME}.qcow2" "${OS_IMAGE}"
+elif [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
+  DATA_IMAGE="${INPUT_DIR}/${DATA_IMAGE_NAME}.vmdk"
+  if [[ -s "${INPUT_DIR}/${OS_IMAGE_NAME}.vmdk" ]]; then
+    qemu-img convert -f vmdk -O raw \
+      "${INPUT_DIR}/${OS_IMAGE_NAME}.vmdk" "${OS_IMAGE}"
+  else
+    tar xvf \
+      "${INPUT_DIR}/${IMAGE_NAME}-${VARIANT}-${ARCH}-v${VERSION_ID}.ova" \
+      "${OS_IMAGE_NAME%-dirty}.vmdk"
+    qemu-img convert -f vmdk -O raw \
+      "${OS_IMAGE_NAME%-dirty}.vmdk" "${OS_IMAGE}"
+    rm "${OS_IMAGE_NAME%-dirty}.vmdk"
+  fi
+else
+  echo "unexpected image output format '${OUTPUT_FMT}'" >&2
+  exit 1
+fi
+
+# step 2: extract the root filesystem
+echo -e "Starting extract of root for ${OS_IMAGE}"
+ROOT_IMAGE="${WORKDIR}/root.ext4"
+ROOT_START="$(sgdisk --print "${OS_IMAGE}" | awk '/BOTTLEROCKET-ROOT-A/{ print $2 }')"
+ROOT_END="$(sgdisk --print "${OS_IMAGE}" | awk '/BOTTLEROCKET-ROOT-A/{ print $3 }')"
+ROOT_SIZE="$((ROOT_END - ROOT_START + 1))"
+dd if="${OS_IMAGE}" of="${ROOT_IMAGE}" count="${ROOT_SIZE}" skip="${ROOT_START}"
+
+# step 3: replace artifacts
+ROOT_MOUNT="${WORKDIR}/root"
+mkdir -p "${ROOT_MOUNT}"
+
+# install CA certificates
+install_ca_certs "${ROOT_MOUNT}"
+
+# replace artifacts in root filesystem
+mapfile -t new_root_artifacts <<<"$(find "${ROOT_MOUNT}" -type f)"
+if [[ -z "${new_root_artifacts[0]}" ]]; then
+  echo "Nothing to write, skipping..."
+else
+  for artifact in "${new_root_artifacts[@]}"; do
+    cat <<EOF | debugfs -w -f - "${ROOT_IMAGE}"
+rm ${artifact#"${ROOT_MOUNT}"}
+write ${artifact} ${artifact#"${ROOT_MOUNT}"}
+ea_set ${artifact#"${ROOT_MOUNT}"} security.selinux system_u:object_r:os_t:s0
+EOF
+  done
+fi
+
+# step 4: write the root filesystem back
+echo "Getting root image written back"
+OLD_ROOT_SIZE="$((ROOT_SIZE * 512))"
+NEW_ROOT_SIZE="$(stat --format='%s' "${ROOT_IMAGE}")"
+if [[ ${NEW_ROOT_SIZE} -gt ${OLD_ROOT_SIZE} ]]; then
+  echo "new root image size of ${NEW_ROOT_SIZE} bytes is greater than old size of ${OLD_ROOT_SIZE} bytes" >&2
+  exit 1
+fi
+dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc seek="${ROOT_START}"
+echo "Wrote files, recomputing verity"
+
+# step 5: regenerate the verity image
+VERITY_IMAGE="${WORKDIR}/root.verity"
+VERITY_START="$(sgdisk --print "${OS_IMAGE}" | awk '/BOTTLEROCKET-HASH-A/{ print $2 }')"
+VERITY_END="$(sgdisk --print "${OS_IMAGE}" | awk '/BOTTLEROCKET-HASH-A/{ print $3 }')"
+VERITY_SIZE="$((VERITY_END - VERITY_START + 1))"
+veritysetup_output="$(veritysetup_format "${ROOT_IMAGE}" "${VERITY_IMAGE}")"
+VERITY_DATA_4K_BLOCKS="$(grep '^Data blocks:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
+VERITY_DATA_512B_BLOCKS="$((VERITY_DATA_4K_BLOCKS * 8))"
+VERITY_ROOT_HASH="$(grep '^Root hash:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
+VERITY_SALT="$(grep '^Salt:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
+OLD_VERITY_SIZE="$((VERITY_SIZE * 512))"
+NEW_VERITY_SIZE="$(stat --format='%s' "${VERITY_IMAGE}")"
+if [[ ${NEW_VERITY_SIZE} -gt ${OLD_VERITY_SIZE} ]]; then
+  echo "new hash image size of ${NEW_VERITY_SIZE} bytes is greater than old size of ${OLD_VERITY_SIZE} bytes" >&2
+  exit 1
+fi
+
+# step 6: write the verity image back
+dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc seek="${VERITY_START}"
+
+# step 7: extract the boot filesystem
+BOOT_IMAGE="${WORKDIR}/boot.ext4"
+BOOT_START="$(sgdisk --print "${OS_IMAGE}" | awk '/BOTTLEROCKET-BOOT-A/{ print $2 }')"
+BOOT_END="$(sgdisk --print "${OS_IMAGE}" | awk '/BOTTLEROCKET-BOOT-A/{ print $3 }')"
+BOOT_SIZE="$((BOOT_END - BOOT_START + 1))"
+dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" count="${BOOT_SIZE}" skip="${BOOT_START}"
+BOOT_MOUNT="${WORKDIR}/boot"
+mkdir -p "${BOOT_MOUNT}"
+debugfs -R "rdump / ${BOOT_MOUNT}" "${BOOT_IMAGE}"
+
+# step 8: maybe secure boot
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  EFI_IMAGE="${WORKDIR}/efi.vfat"
+  EFI_START="$(sgdisk --print "${OS_IMAGE}" | awk '/EFI-SYSTEM/{ print $2 }')"
+  EFI_END="$(sgdisk --print "${OS_IMAGE}" | awk '/EFI-SYSTEM/{ print $3 }')"
+  EFI_SIZE="$((EFI_END - EFI_START + 1))"
+  dd if="${OS_IMAGE}" of="${EFI_IMAGE}" count="${EFI_SIZE}" skip="${EFI_START}"
+  EFI_MOUNT="${WORKDIR}/efi"
+  mkdir -p "${EFI_MOUNT}/EFI/BOOT"
+  mcopy -i "${EFI_IMAGE}" -sv ::/EFI/BOOT "${EFI_MOUNT}/EFI/"
+
+  # Do the setup required for `pesign` and `gpg` signing and
+  # verification to "just work" later on, regardless of which
+  # type of signing profile we have.
+  declare -a shim_sign_key code_sign_key
+  sbsetup shim_sign_key code_sign_key
+
+  # remove the original signing certificate to avoid confusion
+  rm "${EFI_MOUNT}/EFI/BOOT/db.cer" "${EFI_MOUNT}/EFI/BOOT/db.crt"
+
+  # replace artifacts in efi filesystem
+  pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
+  replace_vendor_certs shim_sign_key code_sign_key "${UEFI_SECURE_BOOT}"
+  mcopy -i "${EFI_IMAGE}" -ov "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
+  mcopy -i "${EFI_IMAGE}" -ov "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
+  popd >/dev/null
+
+  # write the efi image back
+  dd if="${EFI_IMAGE}" of="${OS_IMAGE}" conv=notrunc seek="${EFI_START}"
+
+  pushd "${BOOT_MOUNT}" >/dev/null
+
+  # resign the kernel
+  vmlinuzsetup vmlinuz
+  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}"
+rm vmlinuz
+write vmlinuz vmlinuz
+ea_set vmlinuz security.selinux system_u:object_r:os_t:s0
+EOF
+
+  # generate an HMAC for the kernel after signing
+  vmlinuzhmac vmlinuz
+  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}"
+rm .vmlinuz.hmac
+write .vmlinuz.hmac .vmlinuz.hmac
+ea_set .vmlinuz.hmac security.selinux system_u:object_r:os_t:s0
+EOF
+
+  popd >/dev/null
+fi
+
+# step 9: modify grub.cfg
+DM_MOD_OPTS_PATTERN="[0-9]\+ verity ${VERITY_VERSION}"
+DM_MOD_OPTS="${VERITY_DATA_512B_BLOCKS} verity ${VERITY_VERSION}"
+
+VERITY_OPTS_PATTERN="[0-9]\+ [0-9]\+ [0-9]\+"
+VERITY_OPTS_PATTERN+=" 1 ${VERITY_HASH_ALGORITHM}"
+VERITY_OPTS_PATTERN+=" [0-9a-f]\+ [0-9a-f]\+"
+
+VERITY_OPTS="${VERITY_DATA_BLOCK_SIZE} ${VERITY_HASH_BLOCK_SIZE} ${VERITY_DATA_4K_BLOCKS}"
+VERITY_OPTS+=" 1 ${VERITY_HASH_ALGORITHM}"
+VERITY_OPTS+=" ${VERITY_ROOT_HASH} ${VERITY_SALT}"
+
+sed -i \
+  -e "s,\(.*\) ${DM_MOD_OPTS_PATTERN} \(.*\),\1 ${DM_MOD_OPTS} \2," \
+  -e "s,\(.*\) ${VERITY_OPTS_PATTERN} \(.*\),\1 ${VERITY_OPTS} \2," \
+  "${BOOT_MOUNT}/grub/grub.cfg"
+
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  rm -f "${BOOT_MOUNT}/grub/grub.cfg.sig"
+  sign_grub "${BOOT_MOUNT}/grub/grub.cfg"
+  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}"
+rm /grub/grub.cfg.sig
+write ${BOOT_MOUNT}/grub/grub.cfg.sig /grub/grub.cfg.sig
+ea_set /grub/grub.cfg.sig security.selinux system_u:object_r:os_t:s0
+EOF
+fi
+
+cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}"
+rm /grub/grub.cfg
+write ${BOOT_MOUNT}/grub/grub.cfg /grub/grub.cfg
+ea_set /grub/grub.cfg security.selinux system_u:object_r:os_t:s0
+EOF
+
+OLD_BOOT_SIZE="$((BOOT_SIZE * 512))"
+NEW_BOOT_SIZE="$(stat --format='%s' "${BOOT_IMAGE}")"
+if [[ ${NEW_BOOT_SIZE} -gt ${OLD_BOOT_SIZE} ]]; then
+  echo "new boot image size of ${NEW_BOOT_SIZE} bytes is greater than old size of ${OLD_BOOT_SIZE} bytes" >&2
+  exit 1
+fi
+
+# step 10: write the boot filesystem back
+dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc seek="${BOOT_START}"
+
+# now that the images have been written byte for byte back,
+# we can resize them before compressing
+resize2fs -M "${ROOT_IMAGE}"
+resize2fs -M "${BOOT_IMAGE}"
+
+# step 11: re-compress the images and copy them to the outdir
+sgdisk -v "${OS_IMAGE}"
+
+mkdir -p "${OUTPUT_DIR}"
+echo -e "Compressing and copying ${OS_IMAGE} back to ${OUTPUT_DIR}"
+
+if [[ "${OUTPUT_FMT}" == "raw" ]]; then
+  lz4 -vc "${OS_IMAGE}" >"${OUTPUT_DIR}/${OS_IMAGE_NAME}.img.lz4"
+  symlink_image "img.lz4" "os_image"
+  [[ -s "${DATA_IMAGE}" ]] && symlink_image "img.lz4" "data_image"
+elif [[ "${OUTPUT_FMT}" == "qcow2" ]]; then
+  qemu-img convert -f raw -O qcow2 \
+    "${OS_IMAGE}" "${OUTPUT_DIR}/${OS_IMAGE_NAME}.qcow2"
+  symlink_image "qcow2" "os_image"
+  [[ -s "${DATA_IMAGE}" ]] && symlink_image "qcow2" "data_image"
+elif [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
+  # stream optimization is required for creating Open Virtual Appliances (OVAs)
+  qemu-img convert -f raw -O vmdk -o subformat=streamOptimized \
+    "${OS_IMAGE}" "${OUTPUT_DIR}/${OS_IMAGE_NAME}.vmdk"
+  symlink_image "vmdk" "os_image"
+  [[ -s "${DATA_IMAGE}" ]] && symlink_image "vmdk" "data_image"
+fi
+
+# now create the OVA if needed.
+if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
+  generate_ovf \
+    "${OS_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${OVF_TEMPLATE}" \
+    "${UEFI_SECURE_BOOT}"
+fi
+
+lz4 -9vc "${BOOT_IMAGE}" >"${OUTPUT_DIR}/${BOOT_IMAGE_NAME}"
+lz4 -9vc "${VERITY_IMAGE}" >"${OUTPUT_DIR}/${VERITY_IMAGE_NAME}"
+lz4 -9vc "${ROOT_IMAGE}" >"${OUTPUT_DIR}/${ROOT_IMAGE_NAME}"
+
+symlink_image "" "boot_image"
+symlink_image "" "verity_image"
+symlink_image "" "root_image"
+
+popd >/dev/null
+
+find "${OUTPUT_DIR}" -type f -print -exec chown 1000:1000 {} \;
