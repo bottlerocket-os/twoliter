@@ -124,6 +124,25 @@ to indicate a good URL for checking whether the software has had a new release.
 releases-url = "https://www.example.com/releases"
 ```
 
+## Metadata for kits
+
+When building a kit, it is necessary to include a `package.metadata.build-kit` key even though there
+are no additional keys or attributes to add. This tells `buildsys` that the Cargo package is a kit.
+
+For example:
+
+```toml
+[package]
+name = "my-kit"
+version = "0.1.0"
+
+[package.metadata.build-kit]
+
+[build-dependencies]
+another-kit = { path = "../../kits/another-kit" }
+some-package = { path = "../../packages/some-package" }
+```
+
 ## Metadata for variants
 
 `included-packages` is a list of packages that should be included in a variant.
@@ -246,8 +265,11 @@ fips = true
 
 mod error;
 
+use crate::BuildType;
+use guppy::graph::{DependencyDirection, PackageGraph, PackageLink, PackageMetadata};
+use guppy::{CargoMetadata, PackageId};
 use serde::{Deserialize, Serialize};
-use snafu::{ResultExt, Snafu};
+use snafu::{OptionExt, ResultExt, Snafu};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -258,6 +280,89 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Snafu)]
 pub struct Error(error::Error);
 type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
+pub struct Manifest {
+    graph: PackageGraph,
+    manifest_info: ManifestInfo,
+}
+
+impl Manifest {
+    /// Extract the settings we understand from `Cargo.toml` and construct a dependency graph.
+    pub fn new(manifest: impl AsRef<Path>, cargo_metadata: impl AsRef<Path>) -> Result<Self> {
+        let manifest_info = ManifestInfo::new(manifest)?;
+        let cargo_metadata = cargo_metadata.as_ref();
+        let cargo_metadata_json_contents =
+            fs::read_to_string(cargo_metadata).context(error::CargoMetadataReadSnafu {
+                path: &cargo_metadata,
+            })?;
+        let graph = CargoMetadata::parse_json(cargo_metadata_json_contents)
+            .context(error::CargoMetadataParseSnafu {
+                path: cargo_metadata,
+            })?
+            .build_graph()
+            .context(error::GraphBuildSnafu {
+                path: cargo_metadata,
+            })?;
+        Ok(Self {
+            manifest_info,
+            graph,
+        })
+    }
+
+    /// List all packages that are package dependencies. That is, follow all dependencies in the cargo
+    /// dependency graph that lead to more packages, and do not follow those that involve kits. This
+    /// gives a list of all the packages that are required when we are build a package, or all of the
+    /// packages that should be included when building a kit.
+    pub fn package_dependencies(&self) -> Result<Vec<String>> {
+        let name = self.info().manifest_name();
+        let manifest_type = self.info().build_type()?;
+        let id = find_id(name, &self.graph, manifest_type)
+            .context(error::RootDependencyMissingSnafu { name })?;
+        let ids = [&id];
+        let query = self
+            .graph
+            .query_forward(ids.into_iter())
+            .context(error::CargoPackageQuerySnafuSnafu { id })?;
+        let package_set = query.resolve_with_fn(|_, link| {
+            let to = link.to();
+            is_valid_dep(name, &link) && is_manifest_type(&to, BuildType::Package)
+        });
+        let mut packages: Vec<String> = package_set
+            .packages(DependencyDirection::Forward)
+            .filter_map(|pkg_metadata| filter_map_to_name(name, &pkg_metadata))
+            .collect();
+
+        // Sort so that this function has consistent, dependable output regardless of graph internals.
+        packages.sort();
+        Ok(packages)
+    }
+
+    /// List all kits needed for the build.
+    pub fn kit_dependencies(&self) -> Result<Vec<String>> {
+        let name = self.info().manifest_name();
+        let manifest_type = self.info().build_type()?;
+        let id = find_id(name, &self.graph, manifest_type)
+            .context(error::RootDependencyMissingSnafu { name })?;
+        let ids = [&id];
+        let query = self
+            .graph
+            .query_forward(ids.into_iter())
+            .context(error::CargoPackageQuerySnafuSnafu { id })?;
+        let package_set = query.resolve();
+        let mut kits: Vec<String> = package_set
+            .packages(DependencyDirection::Forward)
+            .filter(|pkg_metadata| is_manifest_type(pkg_metadata, BuildType::Kit))
+            .filter_map(|pkg_metadata| filter_map_to_name(name, &pkg_metadata))
+            .collect();
+        kits.sort();
+        Ok(kits)
+    }
+
+    pub fn info(&self) -> &ManifestInfo {
+        &self.manifest_info
+    }
+}
 
 /// The nested structures here are somewhat complex, but they make it trivial
 /// to deserialize the structure we expect to find in the manifest.
@@ -273,9 +378,13 @@ impl ManifestInfo {
         let path = path.as_ref();
         let manifest_data =
             fs::read_to_string(path).context(error::ManifestFileReadSnafu { path })?;
-        let manifest =
+        let manifest_info: ManifestInfo =
             toml::from_str(&manifest_data).context(error::ManifestFileLoadSnafu { path })?;
-        Ok(manifest)
+        Ok(manifest_info)
+    }
+
+    pub fn manifest_name(&self) -> &str {
+        &self.package.name
     }
 
     /// Convenience method to return the list of source groups.
@@ -342,12 +451,33 @@ impl ManifestInfo {
         })
     }
 
+    /// Returns the type of build the manifest is requesting.
+    // TODO - alter ManifestInfo struct to use an enum and eliminate the use of Result here.
+    pub fn build_type(&self) -> Result<BuildType> {
+        if self.build_package().is_some() {
+            Ok(BuildType::Package)
+        } else if self.build_kit().is_some() {
+            Ok(BuildType::Kit)
+        } else if self.build_variant().is_some() {
+            Ok(BuildType::Variant)
+        } else {
+            Err(Error(error::UnknownManifestTypeSnafu {}.build()))
+        }
+    }
+
     /// Helper methods to navigate the series of optional struct fields.
     fn build_package(&self) -> Option<&BuildPackage> {
         self.package
             .metadata
             .as_ref()
             .and_then(|m| m.build_package.as_ref())
+    }
+
+    fn build_kit(&self) -> Option<&BuildKit> {
+        self.package
+            .metadata
+            .as_ref()
+            .and_then(|m| m.build_kit.as_ref())
     }
 
     fn build_variant(&self) -> Option<&BuildVariant> {
@@ -358,9 +488,65 @@ impl ManifestInfo {
     }
 }
 
+/// For the "top-level manifest", i.e. the thing that `buildsys` is building, only
+/// `build-dependencies` are valid. This is because we would need all artifacts before the top-level
+/// manifest's `build.rs` runs. Once we go deeper in the graph, then both `build-dependencies` and
+/// `dependencies` are valid because they would be built in time for the top-level `build.rs`.
+fn is_valid_dep(top_manifest_name: &str, link: &PackageLink<'_>) -> bool {
+    let is_top_level_manifest = link.from().name() == top_manifest_name;
+    let is_deeper_level_manifest = !is_top_level_manifest;
+    is_deeper_level_manifest || link.build().is_present()
+}
+
+fn is_manifest_type(pkg_metadata: &PackageMetadata, manifest_type: BuildType) -> bool {
+    let metadata_table = pkg_metadata.metadata_table();
+    match manifest_type {
+        BuildType::Package => metadata_table.get("build-package").is_some(),
+        BuildType::Kit => metadata_table.get("build-kit").is_some(),
+        BuildType::Variant => metadata_table.get("build-variant").is_some(),
+    }
+}
+
+fn find_id(name: &str, graph: &PackageGraph, manifest_type: BuildType) -> Option<PackageId> {
+    for pkg_metadata in graph.packages() {
+        if is_manifest_type(&pkg_metadata, manifest_type) && pkg_metadata.name() == name {
+            return Some(pkg_metadata.id().to_owned());
+        }
+    }
+    None
+}
+
+/// Lists include the "top-level manifest", i.e. the thing that `buildsys` is being asked to build.
+/// We do not want this, we want only a list of things that it depends on. Here we convert
+/// `PackageMetadata` objects to the `String` name, and filter out the "top-level manifest".
+fn filter_map_to_name(top_manifest_name: &str, pkg_metadata: &PackageMetadata) -> Option<String> {
+    if pkg_metadata.name() == top_manifest_name {
+        None
+    } else {
+        // Return the package override name, if it exists, or else the Cargo manifest name.
+        Some(get_buildsys_package_name(pkg_metadata))
+    }
+}
+
+/// Get the `package.metadata.build-package.package-name` value if there is one, otherwise return
+/// the Cargo manifest's package name. This is the same as `manifest_info.package_name()`.
+fn get_buildsys_package_name(pkg_metadata: &PackageMetadata) -> String {
+    let package_name_override = pkg_metadata
+        .metadata_table()
+        .get("build-package")
+        .and_then(|v| v.as_object())
+        .and_then(|build_package| build_package.get("package-name"))
+        .and_then(|package_name| package_name.as_str());
+
+    package_name_override
+        .unwrap_or_else(|| pkg_metadata.name())
+        .to_string()
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "kebab-case")]
 struct Package {
+    name: String,
     metadata: Option<Metadata>,
 }
 
@@ -368,6 +554,7 @@ struct Package {
 #[serde(rename_all = "kebab-case")]
 struct Metadata {
     build_package: Option<BuildPackage>,
+    build_kit: Option<BuildKit>,
     build_variant: Option<BuildVariant>,
 }
 
@@ -381,6 +568,13 @@ pub struct BuildPackage {
     pub source_groups: Option<Vec<PathBuf>>,
     pub variant_sensitive: Option<VariantSensitivity>,
     pub package_features: Option<Vec<ImageFeature>>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
+#[allow(dead_code)]
+pub struct BuildKit {
+    pub included_packages: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -585,4 +779,127 @@ pub struct ExternalFile {
     pub bundle_modules: Option<Vec<BundleModule>>,
     pub bundle_root_path: Option<PathBuf>,
     pub bundle_output_path: Option<PathBuf>,
+}
+
+// =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use guppy::MetadataCommand;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn test_projects_dir() -> PathBuf {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.pop();
+        p.join("tests").join("projects")
+    }
+
+    fn cargo_manifest(name: &str) -> PathBuf {
+        let subdir = if name.starts_with("pkg-") {
+            "packages"
+        } else if name.ends_with("kit") {
+            "kits"
+        } else {
+            "variants"
+        };
+
+        let path = test_projects_dir()
+            .join("local-kit")
+            .join(subdir)
+            .join(name)
+            .join("Cargo.toml");
+        path.canonicalize()
+            .unwrap_or_else(|_| panic!("unable to canonicalize {}", path.display()))
+    }
+
+    fn cargo_metadata_path(temp_dir: &TempDir) -> PathBuf {
+        let output_path = temp_dir.path().join("cargo_metadata.json");
+        let output = MetadataCommand::new()
+            .manifest_path(test_projects_dir().join("local-kit").join("Cargo.toml"))
+            .current_dir(temp_dir.path())
+            .other_options(["--locked", "--frozen", "--offline"])
+            .cargo_command()
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            panic!("cargo command failed {:?}", output)
+        }
+
+        fs::write(&output_path, output.stdout).unwrap();
+        output_path
+    }
+
+    #[test]
+    fn test_package_list_pkg_g() {
+        let manifest_path = cargo_manifest("pkg-g");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let package_list = manifest.package_dependencies().unwrap();
+        assert!(package_list.is_empty());
+    }
+
+    /// This test confirms that we are using the `build-package.package-name` if there is one when
+    /// returning lists from the Cargo graph.
+    #[test]
+    fn test_package_list_core_kit() {
+        let manifest_path = cargo_manifest("core-kit");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let package_list = manifest.package_dependencies().unwrap();
+        let expected = vec!["pkg-a-renamed".to_string()];
+        assert_eq!(package_list, expected);
+    }
+
+    #[test]
+    fn test_package_list_extra_3_kit() {
+        let manifest_path = cargo_manifest("extra-3-kit");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let package_list = manifest.package_dependencies().unwrap();
+        let expected = vec![
+            "pkg-e".to_string(),
+            "pkg-f".to_string(),
+            "pkg-g".to_string(),
+        ];
+        assert_eq!(package_list, expected);
+    }
+
+    #[test]
+    fn test_kit_dependencies_pkg_e() {
+        let manifest_path = cargo_manifest("pkg-e");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let kit_list = manifest.kit_dependencies().unwrap();
+        let expected = vec![
+            "core-kit".to_string(),
+            "extra-1-kit".to_string(),
+            "extra-2-kit".to_string(),
+        ];
+        assert_eq!(kit_list, expected);
+    }
+
+    #[test]
+    fn test_kit_dependencies_variant_hello_ootb() {
+        let manifest_path = cargo_manifest("hello-ootb");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let kit_list = manifest.kit_dependencies().unwrap();
+        let expected = vec![
+            "core-kit".to_string(),
+            "extra-1-kit".to_string(),
+            "extra-2-kit".to_string(),
+            "extra-3-kit".to_string(),
+        ];
+        assert_eq!(kit_list, expected);
+    }
 }

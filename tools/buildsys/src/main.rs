@@ -17,7 +17,7 @@ mod spec;
 
 use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command};
 use crate::builder::DockerBuild;
-use buildsys::manifest::{BundleModule, ManifestInfo, SupportedArch};
+use buildsys::manifest::{BundleModule, Manifest, ManifestInfo, SupportedArch};
 use cache::LookasideCache;
 use clap::Parser;
 use gomod::GoMod;
@@ -34,26 +34,24 @@ mod error {
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(super) enum Error {
-        ManifestParse {
-            source: buildsys::manifest::Error,
-        },
+        #[snafu(display("{source}"))]
+        ManifestParse { source: buildsys::manifest::Error },
 
-        SpecParse {
-            source: super::spec::error::Error,
-        },
+        #[snafu(display("{source}"))]
+        SpecParse { source: super::spec::error::Error },
 
-        ExternalFileFetch {
-            source: super::cache::error::Error,
-        },
+        #[snafu(display("{source}"))]
+        ExternalFileFetch { source: super::cache::error::Error },
 
-        GoMod {
-            source: super::gomod::error::Error,
-        },
+        #[snafu(display("{source}"))]
+        GoMod { source: super::gomod::error::Error },
 
+        #[snafu(display("{source}"))]
         ProjectCrawl {
             source: super::project::error::Error,
         },
 
+        #[snafu(display("{source}"))]
         BuildAttempt {
             source: super::builder::error::Error,
         },
@@ -118,14 +116,18 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         .join("variants")
         .join(&args.variant)
         .join(manifest_file);
+
     let variant_manifest =
         ManifestInfo::new(variant_manifest_path).context(error::ManifestParseSnafu)?;
     supported_arch(&variant_manifest, args.common.arch)?;
     let mut image_features = variant_manifest.image_features();
 
-    let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
-        .context(error::ManifestParseSnafu)?;
-    let package_features = manifest.package_features();
+    let manifest = Manifest::new(
+        args.common.cargo_manifest_dir.join(manifest_file),
+        &args.common.cargo_metadata_path,
+    )
+    .context(error::ManifestParseSnafu)?;
+    let package_features = manifest.info().package_features();
 
     // For any package feature specified in the package manifest, track the corresponding
     // environment variable for changes to the ambient set of image features for the current
@@ -149,7 +151,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
 
     // If manifest has package.metadata.build-package.variant-sensitive set, then track the
     // appropriate environment variable for changes.
-    if let Some(sensitivity) = manifest.variant_sensitive() {
+    if let Some(sensitivity) = manifest.info().variant_sensitive() {
         use buildsys::manifest::{SensitivityType::*, VariantSensitivity::*};
         fn emit_variant_env(suffix: Option<&str>) {
             if let Some(suffix) = suffix {
@@ -171,7 +173,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         }
     }
 
-    if let Some(files) = manifest.external_files() {
+    if let Some(files) = manifest.info().external_files() {
         let lookaside_cache = LookasideCache::new(
             &args.common.version_full,
             args.lookaside_cache.clone(),
@@ -199,7 +201,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         }
     }
 
-    if let Some(groups) = manifest.source_groups() {
+    if let Some(groups) = manifest.info().source_groups() {
         let dirs = groups
             .iter()
             .map(|d| args.sources_dir.join(d))
@@ -212,7 +214,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
 
     // Package developer can override name of package if desired, e.g. to name package with
     // characters invalid in Cargo crate names
-    let package = if let Some(name_override) = manifest.package_name() {
+    let package = if let Some(name_override) = manifest.info().package_name() {
         name_override.clone()
     } else {
         args.cargo_package_name.clone()
@@ -241,12 +243,15 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     println!("cargo:rerun-if-changed={}", manifest_file);
 
-    let manifest = ManifestInfo::new(args.common.cargo_manifest_dir.join(manifest_file))
-        .context(error::ManifestParseSnafu)?;
+    let manifest = Manifest::new(
+        args.common.cargo_manifest_dir.join(manifest_file),
+        &args.common.cargo_metadata_path,
+    )
+    .context(error::ManifestParseSnafu)?;
 
-    supported_arch(&manifest, args.common.arch)?;
+    supported_arch(manifest.info(), args.common.arch)?;
 
-    if manifest.included_packages().is_some() {
+    if manifest.info().included_packages().is_some() {
         DockerBuild::new_variant(args, &manifest)
             .context(error::BuilderInstantiationSnafu)?
             .build()

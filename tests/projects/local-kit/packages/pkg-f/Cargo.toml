@@ -1,16 +1,19 @@
 [package]
-name = "extra-1-kit"
+name = "pkg-f"
 version = "0.1.0"
 edition = "2021"
 publish = false
 build = "../build.rs"
 
-[package.metadata.build-kit]
+[package.metadata.build-package]
+source-groups = []
 
 [lib]
-path = "../kit.rs"
+path = "../packages.rs"
 
+# RPM BuildRequires
 [build-dependencies]
 core-kit = { path = "../../kits/core-kit" }
-pkg-b = { path = "../../packages/pkg-b" }
-pkg-d = { path = "../../packages/pkg-d" }
+
+# RPM Requires
+[dependencies]

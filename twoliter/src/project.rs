@@ -298,9 +298,9 @@ mod test {
             schema_version: Default::default(),
             release_version: String::from("1.0.0"),
             sdk: Some(ImageUri {
-                registry: Some("example.com".try_into().unwrap()),
-                repo: "foo-abc".try_into().unwrap(),
-                tag: "version1".try_into().unwrap(),
+                registry: Some("example.com".into()),
+                repo: "foo-abc".into(),
+                tag: "version1".into(),
             }),
         };
 
