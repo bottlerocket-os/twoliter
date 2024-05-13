@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
+# shellcheck disable=SC2154  # variables are defined externally by the environment
 
 set -eu -o pipefail
 shopt -qs failglob
@@ -15,6 +16,8 @@ OVF_TEMPLATE=""
 GRUB_SET_PRIVATE_VAR="no"
 XFS_DATA_PARTITION="no"
 UEFI_SECURE_BOOT="no"
+
+SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}"
 
 for opt in "$@"; do
    optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -33,6 +36,10 @@ for opt in "$@"; do
       --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
    esac
 done
+
+# import the image helper functions
+# shellcheck source=imghelper
+. "${0%/*}/imghelper"
 
 case "${OUTPUT_FMT}" in
    raw|qcow2|vmdk) ;;
@@ -84,34 +91,11 @@ OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
 mkdir -p "${OUTPUT_DIR}"
 
 FILENAME_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-${VERSION_ID}-${BUILD_ID}"
-SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}"
-VERSIONED_SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-${VERSION_ID}"
-FRIENDLY_VERSIONED_SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-v${VERSION_ID}"
-
 OS_IMAGE_NAME="${FILENAME_PREFIX}"
-OS_IMAGE_SYMLINK="${SYMLINK_PREFIX}"
-OS_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}"
-OS_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}"
-
 DATA_IMAGE_NAME="${FILENAME_PREFIX}-data"
-DATA_IMAGE_SYMLINK="${SYMLINK_PREFIX}-data"
-DATA_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-data"
-DATA_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-data"
-
 BOOT_IMAGE_NAME="${FILENAME_PREFIX}-boot.ext4.lz4"
-BOOT_IMAGE_SYMLINK="${SYMLINK_PREFIX}-boot.ext4.lz4"
-BOOT_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-boot.ext4.lz4"
-BOOT_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-boot.ext4.lz4"
-
 VERITY_IMAGE_NAME="${FILENAME_PREFIX}-root.verity.lz4"
-VERITY_IMAGE_SYMLINK="${SYMLINK_PREFIX}-root.verity.lz4"
-VERITY_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-root.verity.lz4"
-VERITY_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-root.verity.lz4"
-
 ROOT_IMAGE_NAME="${FILENAME_PREFIX}-root.ext4.lz4"
-ROOT_IMAGE_SYMLINK="${SYMLINK_PREFIX}-root.ext4.lz4"
-ROOT_IMAGE_VERSIONED_SYMLINK="${VERSIONED_SYMLINK_PREFIX}-root.ext4.lz4"
-ROOT_IMAGE_FRIENDLY_VERSIONED_SYMLINK="${FRIENDLY_VERSIONED_SYMLINK_PREFIX}-root.ext4.lz4"
 
 OS_IMAGE="$(mktemp)"
 BOOT_IMAGE="$(mktemp)"
@@ -346,47 +330,6 @@ if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   gpg --list-keys
 fi
 
-# shim expects the following data structure in `.vendor_cert`:
-#
-# struct {
-#   uint32_t vendor_authorized_size;
-#   uint32_t vendor_deauthorized_size;
-#   uint32_t vendor_authorized_offset;
-#   uint32_t vendor_deauthorized_offset;
-# } cert_table;
-#
-cert_table() {
-  local input output size offset uint32_t
-  input="${1:?}"
-  output="${2:?}"
-  size="$(stat -c %s "${input}")"
-  rm -f "${output}"
-  # The cert payload is offset by four 4-byte uint32_t values in the header.
-  offset="$((4 * 4))"
-  for n in "${size}" 0 "${offset}" "$(( size + offset ))" ; do
-    printf -v uint32_t '\\x%02x\\x%02x\\x%02x\\x%02x' \
-      $((n & 255)) $((n >> 8 & 255)) $((n >> 16 & 255)) $((n >> 24 & 255))
-    printf "${uint32_t}" >> "${output}"
-  done
-  cat "${input}" >> "${output}"
-  # Zero-pad the output to the expected section size. Otherwise a subsequent
-  # `objcopy` operation on the same section might fail to replace it, if the
-  # new vendor certificate is larger than this one.
-  truncate -s 4096 "${output}"
-}
-
-# Helper function to log the object layout before and after changes.
-objdumpcopy() {
-  local obj objdump objcopy
-  obj="${1:?}"
-  shift
-  objdump="${ARCH}-bottlerocket-linux-gnu-objdump"
-  objcopy="${ARCH}-bottlerocket-linux-gnu-objcopy"
-  "${objdump}" -h "${obj}"
-  "${objcopy}" "${@}" "${obj}"
-  "${objdump}" -h "${obj}"
-}
-
 pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
 shims=(boot*.efi)
 shim="${shims[0]}"
@@ -399,7 +342,7 @@ if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
 
   # Replace the embedded vendor certificate, then sign shim with the db key.
-  objdumpcopy "${shim}" \
+  "${ARCH}-objdumpcopy" "${shim}" \
     --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
   pesign -i "${shim}" -o "${shim}.signed" -s "${SHIM_SIGN_KEY[@]}"
   mv "${shim}.signed" "${shim}"
@@ -411,7 +354,7 @@ if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   pesigcheck -i "${mokm}" -n 0 -c "${SBKEYS}/vendor.cer"
 
   # Replace the embedded gpg public key, then sign grub with the vendor key.
-  objdumpcopy "${grub}" \
+  "${ARCH}-objdumpcopy" "${grub}" \
     --file-alignment 4096 \
     --update-section ".pubkey=${SBKEYS}/config-sign.pubkey"
   pesign -i "${grub}" -o "${grub}.signed" -s "${CODE_SIGN_KEY[@]}"
@@ -423,11 +366,11 @@ else
 
   # Replace the embedded vendor certificate with the zero-sized one, which shim
   # will ignore when Secure Boot is disabled.
-  objdumpcopy "${shim}" \
+  "${ARCH}-objdumpcopy" "${shim}" \
     --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
 
    # Remove the embedded gpg public key to disable GRUB's signature checks.
-   objdumpcopy "${grub}" \
+   "${ARCH}-objdumpcopy" "${grub}" \
      --file-alignment 4096 \
      --remove-section ".pubkey"
 fi
@@ -658,24 +601,6 @@ dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRI
 UNLABELED=$(find "${DATA_MOUNT}" \
     | awk -v root="${DATA_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_rm", $1, "security.selinux"}')
 
-mkfs_data() {
-  local target size offset
-  target="${1:?}"
-  size="${2:?}"
-  offset="${3:?}"
-  # Create an XFS filesystem if requested
-  if [ "${XFS_DATA_PARTITION}" == "yes" ] ; then
-    echo "writing blank partition for DATA"
-    # Create a file to write the filesystem to first
-    dd if=/dev/zero of="${BOTTLEROCKET_DATA}" bs=1M count=${size%?}
-  else
-    # default to ext4
-    echo "writing ext4 filesystem for DATA"
-    mkfs.ext4 -m 0 -d "${DATA_MOUNT}" "${BOTTLEROCKET_DATA}" "${size}"
-    echo "${UNLABELED}" | debugfs -w -f - "${BOTTLEROCKET_DATA}"
-  fi
-  dd if="${BOTTLEROCKET_DATA}" of="${target}" conv=notrunc bs=1M seek="${offset}"
-}
 
 # Decide which data filesystem to create at build time based on layout.
 #
@@ -688,51 +613,52 @@ mkfs_data() {
 #
 # If the other partition is available at runtime, the filesystem will be created
 # during first boot instead, providing flexibility at the cost of a minor delay.
+if [ "${XFS_DATA_PARTITION}" == "yes" ]; then
+  mkfs_data_fn="mkfs_data_xfs"
+else
+  mkfs_data_fn="mkfs_data_ext4"
+fi
+
 case "${PARTITION_PLAN}" in
   unified)
-    mkfs_data "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}"
+    "${mkfs_data_fn}" "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}" \
+      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
     ;;
   split)
-    mkfs_data "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}"
+    "${mkfs_data_fn}" "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}" \
+      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
     ;;
 esac
 
 sgdisk -v "${OS_IMAGE}"
 [ -s "${DATA_IMAGE}" ] && sgdisk -v "${DATA_IMAGE}"
-
-symlink_image() {
-  local ext what
-  ext="${1}"
-  what="${2}"
-  ext="${ext:+.$ext}"
-  target="${what^^}_NAME"
-  for link in symlink versioned_symlink friendly_versioned_symlink ; do
-    link="${what^^}_${link^^}"
-    ln -s "${!target}${ext}" "${OUTPUT_DIR}/${!link}${ext}"
-  done
-}
-
 if [[ ${OUTPUT_FMT} == "raw" ]]; then
   lz4 -vc "${OS_IMAGE}" >"${OUTPUT_DIR}/${OS_IMAGE_NAME}.img.lz4"
-  symlink_image "img.lz4" "os_image"
+  symlink_image "img.lz4" "os_image" \
+    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
   if [ -s "${DATA_IMAGE}" ] ; then
     lz4 -vc "${DATA_IMAGE}" >"${OUTPUT_DIR}/${DATA_IMAGE_NAME}.img.lz4"
-    symlink_image "img.lz4" "data_image"
+    symlink_image "img.lz4" "data_image" \
+      "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
   fi
 elif [[ ${OUTPUT_FMT} == "qcow2" ]]; then
   qemu-img convert -f raw -O qcow2 "${OS_IMAGE}" "${OUTPUT_DIR}/${OS_IMAGE_NAME}.qcow2"
-  symlink_image "qcow2" "os_image"
+  symlink_image "qcow2" "os_image" \
+    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
   if [ -s "${DATA_IMAGE}" ] ; then
     qemu-img convert -f raw -O qcow2 "${DATA_IMAGE}" "${OUTPUT_DIR}/${DATA_IMAGE_NAME}.qcow2"
-    symlink_image "qcow2" "data_image"
+    symlink_image "qcow2" "data_image" \
+      "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
   fi
 elif [[ ${OUTPUT_FMT} == "vmdk" ]]; then
   # Stream optimization is required for creating an Open Virtual Appliance (OVA)
   qemu-img convert -f raw -O vmdk -o subformat=streamOptimized "${OS_IMAGE}" "${OUTPUT_DIR}/${OS_IMAGE_NAME}.vmdk"
-  symlink_image "vmdk" "os_image"
+  symlink_image "vmdk" "os_image" \
+    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
   if [ -s "${DATA_IMAGE}" ] ; then
     qemu-img convert -f raw -O vmdk -o subformat=streamOptimized "${DATA_IMAGE}" "${OUTPUT_DIR}/${DATA_IMAGE_NAME}.vmdk"
-    symlink_image "vmdk" "data_image"
+    symlink_image "vmdk" "data_image" \
+      "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
   fi
 fi
 
@@ -802,16 +728,20 @@ if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
      tar -rf "${OUTPUT_DIR}/${ova}" -C "${OUTPUT_DIR}" "${data_vmdk}"
   fi
 
-  symlink_image "ova" "os_image"
+  symlink_image "ova" "os_image" \
+    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
 fi
 
 lz4 -9vc "${BOOT_IMAGE}" >"${OUTPUT_DIR}/${BOOT_IMAGE_NAME}"
 lz4 -9vc "${VERITY_IMAGE}" >"${OUTPUT_DIR}/${VERITY_IMAGE_NAME}"
 lz4 -9vc "${ROOT_IMAGE}" >"${OUTPUT_DIR}/${ROOT_IMAGE_NAME}"
 
-symlink_image "" "boot_image"
-symlink_image "" "verity_image"
-symlink_image "" "root_image"
+symlink_image "" "boot_image" \
+  "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+symlink_image "" "verity_image" \
+  "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+symlink_image "" "root_image" \
+  "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
 
 find "${OUTPUT_DIR}" -type f -print -exec chown 1000:1000 {} \;
 

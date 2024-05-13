@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+
+# shellcheck disable=SC2034 # variables are used through parameter substitution
+symlink_image() {
+  local ext what target symlink_prefix version_id output_dir symlink_suffix
+  ext="$1"
+  what="${2:?}"
+  symlink_prefix="${3:?}"
+  version_id="${4:?}"
+  output_dir="${5:?}"
+
+  ext="${ext:+.$ext}"
+  target="${what^^}_NAME"
+
+  case "${what}" in
+  os_image) symlink_suffix="" ;;
+  data_image) symlink_suffix="-data" ;;
+  boot_image) symlink_suffix="-boot.ext4.lz4" ;;
+  verity_image) symlink_suffix="-root.verity.lz4" ;;
+  root_image) symlink_suffix="-root.ext4.lz4" ;;
+  *)
+    echo "unknown image '${what}'" >&2
+    exit 1
+    ;;
+  esac
+
+  local symlink="${symlink_prefix}${symlink_suffix}"
+  local versioned_symlink="${symlink_prefix}-${version_id}${symlink_suffix}"
+  local friendly_versioned_symlink="${symlink_prefix}-v${version_id}${symlink_suffix}"
+
+  for link in symlink versioned_symlink friendly_versioned_symlink; do
+    ln -sf "${!target}${ext}" "${output_dir}/${!link}${ext}"
+  done
+}
+
+# shim expects the following data structure in `.vendor_cert`:
+#
+# struct {
+#   uint32_t vendor_authorized_size;
+#   uint32_t vendor_deauthorized_size;
+#   uint32_t vendor_authorized_offset;
+#   uint32_t vendor_deauthorized_offset;
+# } cert_table;
+#
+cert_table() {
+  local input output size offset uint32_t
+  input="${1:?}"
+  output="${2:?}"
+  size="$(stat -c %s "${input}")"
+  rm -f "${output}"
+  # The cert payload is offset by four 4-byte uint32_t values in the header.
+  offset="$((4 * 4))"
+  for n in "${size}" 0 "${offset}" "$((size + offset))"; do
+    printf -v uint32_t '\\x%02x\\x%02x\\x%02x\\x%02x' \
+      $((n & 255)) $((n >> 8 & 255)) $((n >> 16 & 255)) $((n >> 24 & 255))
+    # shellcheck disable=SC2059  # Variable contains a pattern
+    printf "${uint32_t}" >>"${output}"
+  done
+  cat "${input}" >>"${output}"
+  # Zero-pad the output to the expected section size. Otherwise a subsequent
+  # `objcopy` operation on the same section might fail to replace it, if the
+  # new vendor certificate is larger than this one.
+  truncate -s 4096 "${output}"
+}
+
+# Helper functions to log the object layout before and after changes.
+aarch64-objdumpcopy() {
+  local obj
+  obj="${1:?}"
+  aarch64-bottlerocket-linux-gnu-objdump -h "${obj}"
+  aarch64-bottlerocket-linux-gnu-objcopy "${@}" "${obj}"
+  aarch64-bottlerocket-linux-gnu-objdump -h "${obj}"
+}
+
+x86_64-objdumpcopy() {
+  local obj
+  obj="${1:?}"
+  x86_64-bottlerocket-linux-gnu-objdump -h "${obj}"
+  x86_64-bottlerocket-linux-gnu-objcopy "${@}" "${obj}"
+  x86_64-bottlerocket-linux-gnu-objdump -h "${obj}"
+}
+
+mkfs_data_ext4() {
+  local target size offset bottlerocket_data data_mount unlabeled
+  target="${1:?}"
+  size="${2:?}"
+  offset="${3:?}"
+  bottlerocket_data="${4:?}"
+  data_mount="${5:?}"
+  unlabeled="${6:?}"
+  echo "writing ext4 filesystem for DATA"
+  mkfs.ext4 -m 0 -d "${data_mount}" "${bottlerocket_data}" "${size}"
+  echo "${unlabeled}" | debugfs -w -f - "${bottlerocket_data}"
+  dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
+}
+
+mkfs_data_xfs() {
+  local target size offset bottlerocket_data data_mount unlabeled
+  target="${1:?}"
+  size="${2:?}"
+  offset="${3:?}"
+  bottlerocket_data="${4:?}"
+  data_mount="${5:?}"
+  unlabeled="${6:?}"
+  echo "writing blank partition for DATA"
+  # Create a file to write the filesystem to first
+  dd if=/dev/zero of="${bottlerocket_data}" bs=1M count="${size%?}"
+  dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
+}
