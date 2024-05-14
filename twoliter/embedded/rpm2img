@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034
 # shellcheck disable=SC2154  # variables are defined externally by the environment
 
 set -eu -o pipefail
@@ -10,7 +9,6 @@ shopt -qs failglob
 . "${0%/*}/partyplanner"
 
 OUTPUT_FMT="raw"
-BUILDER_ARCH="$(uname -m)"
 OVF_TEMPLATE=""
 
 GRUB_SET_PRIVATE_VAR="no"
