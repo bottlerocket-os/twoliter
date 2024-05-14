@@ -15,20 +15,21 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 13] = [
-    ("BUILDSYS_ARCH", PACKAGE | VARIANT),
-    ("BUILDSYS_OUTPUT_GENERATION_ID", PACKAGE | VARIANT),
+const REBUILD_VARS: [(&str, u8); 14] = [
+    ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
+    ("BUILDSYS_KITS_DIR", KIT),
     ("BUILDSYS_NAME", VARIANT),
     ("BUILDSYS_OUTPUT_DIR", VARIANT),
+    ("BUILDSYS_OUTPUT_GENERATION_ID", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_PACKAGES_DIR", PACKAGE),
     ("BUILDSYS_PRETTY_NAME", VARIANT),
-    ("BUILDSYS_ROOT_DIR", PACKAGE | VARIANT),
-    ("BUILDSYS_STATE_DIR", PACKAGE | VARIANT),
+    ("BUILDSYS_ROOT_DIR", PACKAGE | KIT | VARIANT),
+    ("BUILDSYS_STATE_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_TIMESTAMP", VARIANT),
     ("BUILDSYS_VARIANT", VARIANT),
     ("BUILDSYS_VERSION_BUILD", VARIANT),
     ("BUILDSYS_VERSION_IMAGE", VARIANT),
-    ("TLPRIVATE_SDK_IMAGE", PACKAGE | VARIANT),
+    ("TLPRIVATE_SDK_IMAGE", PACKAGE | KIT | VARIANT),
 ];
 
 /// A tool for building Bottlerocket images and artifacts.
@@ -41,6 +42,7 @@ pub(crate) struct Buildsys {
 #[derive(Subcommand, Debug)]
 pub(crate) enum Command {
     BuildPackage(Box<BuildPackageArgs>),
+    BuildKit(Box<BuildKitArgs>),
     BuildVariant(Box<BuildVariantArgs>),
     RepackVariant(Box<RepackVariantArgs>),
 }
@@ -49,6 +51,7 @@ impl Command {
     pub(crate) fn build_type(&self) -> BuildType {
         match self {
             Command::BuildPackage(_) => BuildType::Package,
+            Command::BuildKit(_) => BuildType::Kit,
             Command::BuildVariant(_) => BuildType::Variant,
             Command::RepackVariant(_) => BuildType::Repack,
         }
@@ -121,6 +124,21 @@ pub(crate) struct BuildPackageArgs {
 
     #[arg(long, env = "BUILDSYS_UPSTREAM_SOURCE_FALLBACK")]
     pub(crate) upstream_source_fallback: String,
+
+    #[command(flatten)]
+    pub(crate) common: Common,
+}
+
+/// Place the required RPMs into a kit (directory) and make a yum repo.
+#[derive(Debug, Parser)]
+pub(crate) struct BuildKitArgs {
+    /// The directory where built RPMs go, e.g. build/rpms
+    #[arg(long, env = "BUILDSYS_PACKAGES_DIR")]
+    pub(crate) packages_dir: PathBuf,
+
+    /// The directory where built kits go, e.g. build/kits
+    #[arg(long, env = "BUILDSYS_KITS_DIR")]
+    pub(crate) kits_dir: PathBuf,
 
     #[command(flatten)]
     pub(crate) common: Common,
@@ -230,6 +248,7 @@ impl BuildFlags {
 #[allow(dead_code)]
 const REPACK: u8 = BuildFlags::Repack as u8;
 const PACKAGE: u8 = BuildFlags::Package as u8;
+const KIT: u8 = BuildFlags::Kit as u8;
 const VARIANT: u8 = BuildFlags::Variant as u8;
 
 #[test]
