@@ -107,6 +107,7 @@ async fn test_install_tools() {
     assert!(toolsdir.join("Dockerfile").is_file());
     assert!(toolsdir.join("Makefile.toml").is_file());
     assert!(toolsdir.join("docker-go").is_file());
+    assert!(toolsdir.join("imghelper").is_file());
     assert!(toolsdir.join("partyplanner").is_file());
     assert!(toolsdir.join("rpm2img").is_file());
     assert!(toolsdir.join("rpm2kmodkit").is_file());
