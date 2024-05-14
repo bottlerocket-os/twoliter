@@ -611,7 +611,7 @@ fi
 ]
 
 [tasks.build-sbkeys]
-dependencies = ["fetch"]
+dependencies = ["fetch-sdk"]
 script_runner = "bash"
 script = [
 '''
@@ -1672,7 +1672,7 @@ script = [
 
 # This task will call watch on the `status` testsys command to show the results of all tests and
 # resources.
-# To see all incomplete crds use `cargo make watch-test-all --running` 
+# To see all incomplete crds use `cargo make watch-test-all --running`
 [tasks.watch-test-all]
 script = [
    '''

@@ -235,8 +235,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
     DockerBuild::new_package(args, &manifest, image_features.unwrap_or_default())
         .context(error::BuilderInstantiationSnafu)?
         .build()
-        .context(error::BuildAttemptSnafu)?;
-    Ok(())
+        .context(error::BuildAttemptSnafu)
 }
 
 fn build_variant(args: BuildVariantArgs) -> Result<()> {
@@ -251,15 +250,10 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
 
     supported_arch(manifest.info(), args.common.arch)?;
 
-    if manifest.info().included_packages().is_some() {
-        DockerBuild::new_variant(args, &manifest)
-            .context(error::BuilderInstantiationSnafu)?
-            .build()
-            .context(error::BuildAttemptSnafu)?;
-    } else {
-        println!("cargo:warning=No included packages in manifest. Skipping variant build.");
-    }
-    Ok(())
+    DockerBuild::new_variant(args, &manifest)
+        .context(error::BuilderInstantiationSnafu)?
+        .build()
+        .context(error::BuildAttemptSnafu)
 }
 
 /// Ensure that the current arch is supported by the current variant
