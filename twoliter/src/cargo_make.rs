@@ -1,4 +1,4 @@
-use crate::common::exec_log;
+use crate::common::{exec_log, BUILDSYS_EPOCH};
 use crate::docker::ImageUri;
 use crate::project::Project;
 use anyhow::{bail, Result};
@@ -53,7 +53,9 @@ impl CargoMake {
     /// definition in `Twoliter.toml`.
     pub(crate) fn new(project: &Project) -> Result<Self> {
         let sdk = require_sdk(project)?;
-        Ok(Self::default().env("TLPRIVATE_SDK_IMAGE", sdk))
+        Ok(Self::default()
+            .env("TLPRIVATE_SDK_IMAGE", sdk)
+            .env("BUILDSYS_EPOCH", BUILDSYS_EPOCH.to_string()))
     }
 
     /// Specify the path to the `Makefile.toml` for the `cargo make` command
@@ -189,10 +191,11 @@ const ENV_VARS: [&str; 23] = [
     "no_proxy",
 ];
 
-const DISALLOWED_SDK_VARS: [&str; 3] = [
+const DISALLOWED_ENV_VARS: [&str; 4] = [
     "BUILDSYS_SDK_NAME",
     "BUILDSYS_SDK_VERSION",
     "BUILDSYS_REGISTRY",
+    "BUILDSYS_EPOCH",
 ];
 
 /// Returns `true` if `key` is an environment variable that needs to be passed to `cargo make`.
@@ -208,11 +211,8 @@ fn is_build_system_env(key: impl AsRef<str>) -> bool {
 }
 
 fn check_for_disallowed_var(key: &str) -> Result<()> {
-    if DISALLOWED_SDK_VARS.contains(&key) {
-        bail!(
-            "The environment variable '{}' can no longer be used. Specify the SDK in Twoliter.toml",
-            key
-        )
+    if DISALLOWED_ENV_VARS.contains(&key) {
+        bail!("The environment variable '{}' can not be used.", key)
     }
     Ok(())
 }
@@ -242,4 +242,6 @@ fn test_is_build_system_env() {
 fn test_check_for_disallowed_var() {
     assert!(check_for_disallowed_var("BUILDSYS_REGISTRY").is_err());
     assert!(check_for_disallowed_var("BUILDSYS_PRETTY_NAME").is_ok());
+    assert!(check_for_disallowed_var("BUILDSYS_EPOCH").is_err());
+    assert!(check_for_disallowed_var("BUILDSYS_FOO").is_ok());
 }
