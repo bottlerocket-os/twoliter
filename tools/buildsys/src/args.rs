@@ -41,6 +41,7 @@ pub(crate) struct Buildsys {
 pub(crate) enum Command {
     BuildPackage(Box<BuildPackageArgs>),
     BuildVariant(Box<BuildVariantArgs>),
+    RepackVariant(Box<RepackVariantArgs>),
 }
 
 impl Command {
@@ -48,6 +49,7 @@ impl Command {
         match self {
             Command::BuildPackage(_) => BuildType::Package,
             Command::BuildVariant(_) => BuildType::Variant,
+            Command::RepackVariant(_) => BuildType::Repack,
         }
     }
 }
@@ -160,6 +162,25 @@ pub(crate) struct BuildVariantArgs {
     pub(crate) common: Common,
 }
 
+/// Repack variant from prebuilt images.
+#[derive(Debug, Parser)]
+pub(crate) struct RepackVariantArgs {
+    #[arg(long, env = "BUILDSYS_NAME")]
+    pub(crate) name: String,
+
+    #[arg(long, env = "BUILDSYS_VARIANT")]
+    pub(crate) variant: String,
+
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
+    pub(crate) version_build: String,
+
+    #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
+    pub(crate) version_image: String,
+
+    #[command(flatten)]
+    pub(crate) common: Common,
+}
+
 /// Returns the environment variables that need to be watched for a given `[BuildType]`.
 fn sensitive_env_vars(build_type: BuildFlags) -> impl Iterator<Item = &'static str> {
     REBUILD_VARS
@@ -186,6 +207,7 @@ enum BuildFlags {
     Package = 0b00000001,
     Kit = 0b00000010,
     Variant = 0b00000100,
+    Repack = 0b0001000,
 }
 
 impl From<BuildType> for BuildFlags {
@@ -194,6 +216,7 @@ impl From<BuildType> for BuildFlags {
             BuildType::Package => BuildFlags::Package,
             BuildType::Kit => BuildFlags::Kit,
             BuildType::Variant => BuildFlags::Variant,
+            BuildType::Repack => BuildFlags::Repack,
         }
     }
 }
@@ -206,17 +229,21 @@ impl BuildFlags {
     }
 }
 
+#[allow(dead_code)]
+const REPACK: u8 = BuildFlags::Repack as u8;
 const PACKAGE: u8 = BuildFlags::Package as u8;
 const VARIANT: u8 = BuildFlags::Variant as u8;
 
 #[test]
 fn build_type_includes_test() {
     // true
+    assert!(BuildFlags::Repack.includes(REPACK));
     assert!(BuildFlags::Package.includes(PACKAGE | VARIANT));
     assert!(BuildFlags::Variant.includes(VARIANT));
     assert!(BuildFlags::Variant.includes(VARIANT | PACKAGE));
 
     // false
+    assert!(!BuildFlags::Repack.includes(PACKAGE | VARIANT));
     assert!(!BuildFlags::Package.includes(VARIANT));
     assert!(!BuildFlags::Variant.includes(PACKAGE));
     assert!(!BuildFlags::Variant.includes(32));

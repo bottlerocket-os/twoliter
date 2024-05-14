@@ -611,7 +611,7 @@ fi
 ]
 
 [tasks.build-sbkeys]
-dependencies = ["fetch"]
+dependencies = ["fetch-sdk"]
 script_runner = "bash"
 script = [
 '''
@@ -808,6 +808,20 @@ cargo build \
   ${CARGO_MAKE_CARGO_LIMIT_JOBS} \
   --manifest-path variants/${BUILDSYS_VARIANT}/Cargo.toml
 ln -snf "${BUILDSYS_VERSION_FULL}" "${BUILDSYS_OUTPUT_DIR}/latest"
+'''
+]
+
+[tasks.repack-variant]
+dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup"]
+script = [
+'''
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+# Parse the variant into its components and set additional variables.
+eval "$(bottlerocket-variant)"
+
+buildsys repack-variant \
+  --cargo-manifest-dir variants/${BUILDSYS_VARIANT}
 '''
 ]
 
@@ -1672,7 +1686,7 @@ script = [
 
 # This task will call watch on the `status` testsys command to show the results of all tests and
 # resources.
-# To see all incomplete crds use `cargo make watch-test-all --running` 
+# To see all incomplete crds use `cargo make watch-test-all --running`
 [tasks.watch-test-all]
 script = [
    '''

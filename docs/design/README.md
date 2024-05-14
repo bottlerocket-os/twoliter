@@ -278,7 +278,7 @@ These will not be available and need to be added to the Bottlerocket SDK:
 The existing build system relies on certain binaries, scripts and static files, such as
 
 - buildsys, pubsys, testsys, etc.
-- rpm2img, Dockerfile, and Makefile.toml
+- rpm2img, the Dockerfiles, and Makefile.toml
 
 These tools and files will be embedded into the Twoliter binary and  installed on-the-fly when Twoliter runs.
 The binaries will be built and embedded using the unstable Cargo feature [bindeps].
@@ -292,7 +292,7 @@ We can pin the project to a specific toolchain using `rust-toolchain.toml` and w
 Certain scripts used during the Bottlerocket build system are tightly coupled to the operation of twoliter.
 These will be moved out of the Bottlerocket monorepo and into the twoliter git repository.
 Before using the SDK, these scripts will need to be copied into it.
-These will be copied as part of the build system's main Dockerfile.
+These will be copied as part of the build system's main Dockerfile (`build.Dockerfile`).
 
 ### Docker Domain Socket
 

@@ -1,0 +1,4 @@
+/
+!/build/images/*
+!/build/tools/*
+!/variants/*/template*.ovf

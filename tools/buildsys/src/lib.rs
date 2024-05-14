@@ -6,4 +6,5 @@ pub enum BuildType {
     Package,
     Kit,
     Variant,
+    Repack,
 }

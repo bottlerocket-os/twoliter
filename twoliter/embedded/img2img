@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+echo "img2img not yet implemented" >&2 ; exit 1

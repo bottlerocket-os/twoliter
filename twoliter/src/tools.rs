@@ -37,7 +37,7 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
         .context("Unable to install tools")?;
 
     // Pick one of the embedded files for use as the canonical mtime.
-    let metadata = fs::metadata(dir.join("Dockerfile"))
+    let metadata = fs::metadata(dir.join("build.Dockerfile"))
         .await
         .context("Unable to get Dockerfile metadata")?;
     let mtime = FileTime::from_last_modification_time(&metadata);
@@ -104,15 +104,19 @@ async fn test_install_tools() {
     // Assert that the expected files exist in the tools directory.
 
     // Check that non-binary files were copied.
-    assert!(toolsdir.join("Dockerfile").is_file());
     assert!(toolsdir.join("Makefile.toml").is_file());
+    assert!(toolsdir.join("build.Dockerfile").is_file());
+    assert!(toolsdir.join("build.Dockerfile.dockerignore").is_file());
     assert!(toolsdir.join("docker-go").is_file());
+    assert!(toolsdir.join("img2img").is_file());
     assert!(toolsdir.join("imghelper").is_file());
+    assert!(toolsdir.join("metadata.spec").is_file());
     assert!(toolsdir.join("partyplanner").is_file());
+    assert!(toolsdir.join("repack.Dockerfile").is_file());
+    assert!(toolsdir.join("repack.Dockerfile.dockerignore").is_file());
     assert!(toolsdir.join("rpm2img").is_file());
     assert!(toolsdir.join("rpm2kmodkit").is_file());
     assert!(toolsdir.join("rpm2migrations").is_file());
-    assert!(toolsdir.join("metadata.spec").is_file());
 
     // Check that binaries were copied.
     assert!(toolsdir.join("bottlerocket-variant").is_file());
@@ -123,7 +127,9 @@ async fn test_install_tools() {
     assert!(toolsdir.join("tuftool").is_file());
 
     // Check that the mtimes match.
-    let dockerfile_metadata = fs::metadata(toolsdir.join("Dockerfile")).await.unwrap();
+    let dockerfile_metadata = fs::metadata(toolsdir.join("build.Dockerfile"))
+        .await
+        .unwrap();
     let buildsys_metadata = fs::metadata(toolsdir.join("buildsys")).await.unwrap();
     let dockerfile_mtime = FileTime::from_last_modification_time(&dockerfile_metadata);
     let buildsys_mtime = FileTime::from_last_modification_time(&buildsys_metadata);
