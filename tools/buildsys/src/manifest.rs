@@ -504,6 +504,7 @@ fn is_manifest_type(pkg_metadata: &PackageMetadata, manifest_type: BuildType) ->
         BuildType::Package => metadata_table.get("build-package").is_some(),
         BuildType::Kit => metadata_table.get("build-kit").is_some(),
         BuildType::Variant => metadata_table.get("build-variant").is_some(),
+        BuildType::Repack => unreachable!("Repacking is not defined in manifests"),
     }
 }
 

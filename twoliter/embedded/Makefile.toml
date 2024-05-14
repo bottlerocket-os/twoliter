@@ -811,6 +811,20 @@ ln -snf "${BUILDSYS_VERSION_FULL}" "${BUILDSYS_OUTPUT_DIR}/latest"
 '''
 ]
 
+[tasks.repack-variant]
+dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup"]
+script = [
+'''
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+# Parse the variant into its components and set additional variables.
+eval "$(bottlerocket-variant)"
+
+buildsys repack-variant \
+  --cargo-manifest-dir variants/${BUILDSYS_VARIANT}
+'''
+]
+
 [tasks.check-licenses]
 dependencies = ["fetch"]
 script = [
