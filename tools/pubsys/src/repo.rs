@@ -16,7 +16,6 @@ use pubsys_config::{
 };
 use semver::Version;
 use snafu::{ensure, OptionExt, ResultExt};
-use std::convert::TryInto;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
