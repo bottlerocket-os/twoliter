@@ -59,8 +59,6 @@ DATA_MOUNT="$(mktemp -d)"
 EFI_MOUNT="$(mktemp -d)"
 PRIVATE_MOUNT="$(mktemp -d)"
 
-SBKEYS="${HOME}/sbkeys"
-
 SELINUX_ROOT="/etc/selinux"
 SELINUX_POLICY="fortified"
 SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/files/file_contexts"
@@ -191,87 +189,6 @@ fi
 # package has placed the image in /boot/efi/EFI/BOOT.
 mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
 
-# Do the setup required for `pesign` and `gpg` signing and
-# verification to "just work" later on, regardless of which
-# type of signing profile we have.
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  declare -a SHIM_SIGN_KEY
-  declare -a CODE_SIGN_KEY
-
-  # For an AWS profile, we expect a config file for the PKCS11
-  # helper. Otherwise, there should be a local key and cert.
-  if [ -s "${HOME}/.config/aws-kms-pkcs11/config.json" ] ; then
-    # Set AWS environment variables from build secrets, if present.
-    for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ; do
-      val="${var,,}"
-      val="${HOME}/.aws/${val//_/-}.env"
-      [ -s "${val}" ] || continue
-      declare -x "${var}=$(cat "${val}")"
-    done
-    # Verify that AWS credentials are functional.
-    aws sts get-caller-identity
-    # Log all PKCS11 helper activity, to simplify debugging.
-    export AWS_KMS_PKCS11_DEBUG=1
-    SB_KEY_SOURCE="aws"
-    SHIM_SIGN_KEY=(-c shim-sign-key -t shim-sign-key)
-    CODE_SIGN_KEY=(-c code-sign-key -t code-sign-key)
-  else
-    # Disable the PKCS11 helper.
-    rm /etc/pkcs11/modules/aws-kms-pkcs11.module
-
-    # Generate the PKCS12 archives for import.
-    openssl pkcs12 \
-      -export \
-      -passout pass: \
-      -inkey "${SBKEYS}/shim-sign.key" \
-      -in "${SBKEYS}/shim-sign.crt" \
-      -certfile "${SBKEYS}/db.crt" \
-      -out "${SBKEYS}/shim-sign.p12"
-
-    openssl pkcs12 \
-      -export \
-      -passout pass: \
-      -inkey "${SBKEYS}/code-sign.key" \
-      -in "${SBKEYS}/code-sign.crt" \
-      -certfile "${SBKEYS}/vendor.crt" \
-      -out "${SBKEYS}/code-sign.p12"
-
-    # Import certificates and private key archive.
-    PEDB="/etc/pki/pesign"
-
-    certutil -d "${PEDB}" -A -n db -i "${SBKEYS}/db.crt" -t ",,C"
-    certutil -d "${PEDB}" -A -n shim-sign-key -i "${SBKEYS}/shim-sign.crt" -t ",,P"
-    pk12util -d "${PEDB}" -i "${SBKEYS}/shim-sign.p12" -W ""
-
-    certutil -d "${PEDB}" -A -n vendor -i "${SBKEYS}/vendor.crt" -t ",,C"
-    certutil -d "${PEDB}" -A -n code-sign-key -i "${SBKEYS}/code-sign.crt" -t ",,P"
-    pk12util -d "${PEDB}" -i "${SBKEYS}/code-sign.p12" -W ""
-
-    certutil -d "${PEDB}" -L
-    SB_KEY_SOURCE="local"
-    SHIM_SIGN_KEY=(-c shim-sign-key)
-    CODE_SIGN_KEY=(-c code-sign-key)
-  fi
-
-  # Convert certificates from PEM format (ASCII) to DER (binary). This could be
-  # done when the certificates are created, but the resulting binary files are
-  # not as nice to store in source control.
-  for cert in PK KEK db vendor ; do
-    openssl x509 \
-      -inform PEM -in "${SBKEYS}/${cert}.crt" \
-      -outform DER -out "${SBKEYS}/${cert}.cer"
-  done
-
-  # For signing the grub config, we need to embed the GPG public key in binary
-  # form, which is similarly awkward to store in source control.
-  gpg --import "${SBKEYS}/config-sign.key"
-  if [ "${SB_KEY_SOURCE}" == "aws" ] ; then
-    gpg --card-status
-  fi
-  gpg --export > "${SBKEYS}/config-sign.pubkey"
-  gpg --list-keys
-fi
-
 pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
 shims=(boot*.efi)
 shim="${shims[0]}"
@@ -280,6 +197,11 @@ grub="${grubs[0]}"
 mokms=(mm*.efi)
 mokm="${mokms[0]}"
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
+  # Do the setup required for `pesign` and `gpg` signing and
+  # verification to "just work", regardless of which type of
+  # signing profile we have.
+  sbsetup_signing_profile
+
   # Convert the vendor certificate to the expected format.
   cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
 
@@ -570,7 +492,6 @@ if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
     "${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
     "${OVF_TEMPLATE}" \
     "${UEFI_SECURE_BOOT}" \
-    "${SBKEYS}" \
     "${OUTPUT_DIR}"
   symlink_image "ova" "os_image" "${OUTPUT_DIR}"
 fi
