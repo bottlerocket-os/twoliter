@@ -662,70 +662,15 @@ fi
 
 # Now create the OVA if needed.
 if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
-  os_vmdk="${OS_IMAGE_NAME}.vmdk"
-  data_vmdk="${DATA_IMAGE_NAME}.vmdk"
-  ovf="${OS_IMAGE_NAME}.ovf"
-  ova_dir="$(mktemp -d)"
-
-  # The manifest expects disk sizes in bytes.
-  bytes_in_gib="$((1024 * 1024 * 1024))"
-  os_disk_bytes="$((OS_IMAGE_PUBLISH_SIZE_GIB * bytes_in_gib))"
-  data_disk_bytes="$((DATA_IMAGE_PUBLISH_SIZE_GIB * bytes_in_gib))"
-  sed "${OVF_TEMPLATE}" \
-     -e "s/{{OS_DISK}}/${os_vmdk}/g" \
-     -e "s/{{DATA_DISK}}/${data_vmdk}/g" \
-     -e "s/{{OS_DISK_BYTES}}/${os_disk_bytes}/g" \
-     -e "s/{{DATA_DISK_BYTES}}/${data_disk_bytes}/g" \
-     > "${ova_dir}/${ovf}"
-
-  # The manifest templates for Secure Boot expect the cert data for
-  # PK, KEK, db, and dbx.
-  if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-    pk_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/PK.cer")"
-    kek_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/KEK.cer")"
-    db_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/db.cer")"
-    dbx_empty_hash_hex="$(sha256sum /dev/null | awk '{ print $1 }')"
-    sed -i \
-      -e "s/{{PK_CERT_DER_HEX}}/${pk_cert_der_hex}/g" \
-      -e "s/{{KEK_CERT_DER_HEX}}/${kek_cert_der_hex}/g" \
-      -e "s/{{DB_CERT_DER_HEX}}/${db_cert_der_hex}/g" \
-      -e "s/{{DBX_EMPTY_HASH_HEX}}/${dbx_empty_hash_hex}/g" \
-      "${ova_dir}/${ovf}"
-  fi
-
-  # Make sure we replaced all the '{{...}}' fields with real values.
-  if grep -F -e '{{' -e '}}' "${ova_dir}/${ovf}" ; then
-    echo "Failed to fully render the OVF template" >&2
-    exit 1
-  fi
-
-  # Create the manifest file with the hashes of the VMDKs and the OVF.
-  manifest="${OS_IMAGE_NAME}.mf"
-  pushd "${OUTPUT_DIR}" >/dev/null
-  os_sha256="$(sha256sum ${os_vmdk} | awk '{print $1}')"
-  echo "SHA256(${os_vmdk})= ${os_sha256}" > "${ova_dir}/${manifest}"
-  if [ -s "${DATA_IMAGE}" ] ; then
-    data_sha256="$(sha256sum ${data_vmdk} | awk '{print $1}')"
-    echo "SHA256(${data_vmdk})= ${data_sha256}" >> "${ova_dir}/${manifest}"
-  fi
-  popd >/dev/null
-  pushd "${ova_dir}" >/dev/null
-  ovf_sha256="$(sha256sum ${ovf} | awk '{print $1}')"
-  echo "SHA256(${ovf})= ${ovf_sha256}" >> "${manifest}"
-  popd >/dev/null
-
-  # According to the OVF spec:
-  # https://www.dmtf.org/sites/default/files/standards/documents/DSP0243_2.1.1.pdf,
-  # the OVF must be first in the tar bundle.  Manifest is next, and then the
-  # files must fall in the same order as listed in the References section of the
-  # OVF file
-  ova="${OS_IMAGE_NAME}.ova"
-  tar -cf "${OUTPUT_DIR}/${ova}" -C "${ova_dir}" "${ovf}" "${manifest}"
-  tar -rf "${OUTPUT_DIR}/${ova}" -C "${OUTPUT_DIR}" "${os_vmdk}"
-  if [ -s "${DATA_IMAGE}" ] ; then
-     tar -rf "${OUTPUT_DIR}/${ova}" -C "${OUTPUT_DIR}" "${data_vmdk}"
-  fi
-
+  generate_ova \
+    "${OS_IMAGE_NAME}.vmdk" \
+    "${DATA_IMAGE_NAME}.vmdk" \
+    "${OS_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${OVF_TEMPLATE}" \
+    "${UEFI_SECURE_BOOT}" \
+    "${SBKEYS}" \
+    "${OUTPUT_DIR}"
   symlink_image "ova" "os_image" \
     "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
 fi
