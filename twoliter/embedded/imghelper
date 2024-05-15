@@ -107,3 +107,89 @@ mkfs_data_xfs() {
   dd if=/dev/zero of="${bottlerocket_data}" bs=1M count="${size%?}"
   dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
 }
+
+generate_ova() {
+  local os_vmdk data_vmdk
+  os_vmdk="${1:?}"
+  data_vmdk="${2:?}"
+
+  local os_image_publish_size_gib data_image_publish_size_gib
+  os_image_publish_size_gib="${3:?}"
+  data_image_publish_size_gib="${4:?}"
+
+  local ovf_template uefi_secure_boot sbkeys output_dir
+  ovf_template="${5:?}"
+  uefi_secure_boot="${6:?}"
+  sbkeys="${7:?}"
+  output_dir="${8:?}"
+
+  local ova_dir
+  ova_dir="$(mktemp -d)"
+
+  local file_prefix="${os_vmdk%.vmdk}"
+  local ovf="${file_prefix}.ovf"
+
+  # The manifest expects disk sizes in bytes.
+  local bytes_in_gib os_disk_bytes data_disk_bytes
+  bytes_in_gib="$((1024 * 1024 * 1024))"
+  os_disk_bytes="$((os_image_publish_size_gib * bytes_in_gib))"
+  data_disk_bytes="$((data_image_publish_size_gib * bytes_in_gib))"
+  sed "${ovf_template}" \
+    -e "s/{{OS_DISK}}/${os_vmdk}/g" \
+    -e "s/{{DATA_DISK}}/${data_vmdk}/g" \
+    -e "s/{{OS_DISK_BYTES}}/${os_disk_bytes}/g" \
+    -e "s/{{DATA_DISK_BYTES}}/${data_disk_bytes}/g" \
+    >"${ova_dir}/${ovf}"
+
+  # The manifest templates for Secure Boot expect the cert data for
+  # PK, KEK, db, and dbx.
+  if [[ "${uefi_secure_boot}" == "yes" ]]; then
+    local data_disk_bytes kek_cert_der_hex db_cert_der_hex dbx_empty_hash_hex
+    pk_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${sbkeys}/PK.cer")"
+    kek_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${sbkeys}/KEK.cer")"
+    db_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${sbkeys}/db.cer")"
+    dbx_empty_hash_hex="$(sha256sum /dev/null | awk '{ print $1 }')"
+    sed -i \
+      -e "s/{{PK_CERT_DER_HEX}}/${pk_cert_der_hex}/g" \
+      -e "s/{{KEK_CERT_DER_HEX}}/${kek_cert_der_hex}/g" \
+      -e "s/{{DB_CERT_DER_HEX}}/${db_cert_der_hex}/g" \
+      -e "s/{{DBX_EMPTY_HASH_HEX}}/${dbx_empty_hash_hex}/g" \
+      "${ova_dir}/${ovf}"
+  fi
+
+  # Make sure we replaced all the '{{...}}' fields with real values.
+  if grep -F -e '{{' -e '}}' "${ova_dir}/${ovf}"; then
+    echo "Failed to fully render the OVF template" >&2
+    exit 1
+  fi
+
+  # Create the manifest file with the hashes of the VMDKs and the OVF.
+  local os_sha256 data_sha256 ovf_sha256
+  local manifest="${file_prefix}.mf"
+  pushd "${output_dir}" >/dev/null || exit 1
+  os_sha256="$(sha256sum "${os_vmdk}" | awk '{print $1}')"
+  echo "SHA256(${os_vmdk})= ${os_sha256}" >"${ova_dir}/${manifest}"
+  if [[ -s "${data_vmdk}" ]]; then
+    data_sha256="$(sha256sum "${data_vmdk}" | awk '{print $1}')"
+    echo "SHA256(${data_vmdk})= ${data_sha256}" >>"${ova_dir}/${manifest}"
+  fi
+  popd >/dev/null || exit 1
+  pushd "${ova_dir}" >/dev/null || exit 1
+  ovf_sha256="$(sha256sum "${ovf}" | awk '{print $1}')"
+  echo "SHA256(${ovf})= ${ovf_sha256}" >>"${manifest}"
+  popd >/dev/null || exit 1
+
+  # According to the OVF spec:
+  # https://www.dmtf.org/sites/default/files/standards/documents/DSP0243_2.1.1.pdf,
+  # the OVF must be first in the tar bundle.  Manifest is next, and then the
+  # files must fall in the same order as listed in the References section of the
+  # OVF file
+  local ova="${file_prefix}.ova"
+  tar -cf "${output_dir}/${ova}" -C "${ova_dir}" "${ovf}" "${manifest}"
+  tar -rf "${output_dir}/${ova}" -C "${output_dir}" "${os_vmdk}"
+  if [[ -s "${data_vmdk}" ]]; then
+    tar -rf "${output_dir}/${ova}" -C "${output_dir}" "${data_vmdk}"
+  fi
+
+  rm -rf "${ova_dir}"
+}
