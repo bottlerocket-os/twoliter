@@ -501,7 +501,6 @@ mod error {
     use crate::aws::{ami, publish_ami};
     use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::modify_image_attribute::ModifyImageAttributeError;
-    use aws_sdk_ec2::types::LaunchPermission;
     use aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityError;
     use snafu::Snafu;
     use std::path::PathBuf;
@@ -527,12 +526,6 @@ mod error {
             image_id: String,
             region: String,
             source: super::launch_permissions::Error,
-        },
-
-        #[snafu(display("Failed to create file '{}': {}", path.display(), source))]
-        FileCreate {
-            path: PathBuf,
-            source: std::io::Error,
         },
 
         #[snafu(display("Error getting AMI ID for {} {} in {}: {}", arch, name, region, source))]
@@ -586,9 +579,6 @@ mod error {
             region: String,
             source: public::Error,
         },
-
-        #[snafu(display("Invalid launch permission: {:?}", launch_permission))]
-        InvalidLaunchPermission { launch_permission: LaunchPermission },
 
         #[snafu(display("Infra.toml is missing {}", missing))]
         MissingConfig { missing: String },

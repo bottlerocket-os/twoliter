@@ -61,18 +61,6 @@ mod error {
             source: crate::builder::error::Error,
         },
 
-        #[snafu(display("Missing environment variable '{}'", var))]
-        Environment {
-            var: String,
-            source: std::env::VarError,
-        },
-
-        #[snafu(display("Unknown architecture: '{}'", arch))]
-        UnknownArch {
-            arch: String,
-            source: serde_plain::Error,
-        },
-
         #[snafu(display(
             "Unsupported architecture {}, this variant supports {}",
             arch,

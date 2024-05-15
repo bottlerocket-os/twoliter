@@ -18,9 +18,6 @@ pub(super) enum Error {
     #[snafu(display("Failed to create dependency graph from '{}': {}", path.display(), source))]
     GraphBuild { path: PathBuf, source: guppy::Error },
 
-    #[snafu(display("Invalid image size {}; must be between 1 and 1024", value))]
-    InvalidImageSize { value: i32 },
-
     #[snafu(display("Failed to read manifest file '{}': {}", path.display(), source))]
     ManifestFileRead { path: PathBuf, source: io::Error },
 

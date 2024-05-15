@@ -148,29 +148,17 @@ mod error {
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(crate) enum Error {
-        #[snafu(display("Error running async code: {}", source))]
-        Async { source: std::io::Error },
-
-        #[snafu(display("Invalid percentage specified: {} is greater than 100", percentage))]
-        InvalidPercentage { percentage: u8 },
-
         #[snafu(context(false), display("{}", source))]
         Repo {
             #[snafu(source(from(crate::repo::Error, Box::new)))]
             source: Box<crate::repo::Error>,
         },
 
-        #[snafu(display("Error parallelizing download tasks: {}", source))]
-        Semaphore { source: tokio::sync::AcquireError },
-
         #[snafu(display("Error reading bytes from stream: {}", source))]
         Stream { source: tough::error::Error },
 
         #[snafu(display("Failed to download and write target '{}': {}", target, source))]
         TargetDownload { target: String, source: io::Error },
-
-        #[snafu(display("Failed to complete download task: {}", source))]
-        Join { source: tokio::task::JoinError },
 
         #[snafu(display("Missing target: {}", target))]
         TargetMissing { target: String },

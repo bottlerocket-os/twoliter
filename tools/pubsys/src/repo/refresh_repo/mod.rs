@@ -200,7 +200,6 @@ pub(crate) async fn run(args: &Args, refresh_repo_args: &RefreshRepoArgs) -> Res
 
 mod error {
     use snafu::Snafu;
-    use url::Url;
 
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
@@ -210,9 +209,6 @@ mod error {
             #[snafu(source(from(crate::repo::Error, Box::new)))]
             source: Box<crate::repo::Error>,
         },
-
-        #[snafu(display("Failed to refresh & re-sign metadata for: {:#?}", list_of_urls))]
-        RepoRefresh { list_of_urls: Vec<Url> },
     }
 }
 pub(crate) use error::Error;

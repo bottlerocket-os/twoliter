@@ -206,12 +206,6 @@ mod error {
             source: pubsys_config::vmware::Error,
         },
 
-        #[snafu(display("Missing environment variable '{}'", var))]
-        Environment {
-            var: String,
-            source: std::env::VarError,
-        },
-
         #[snafu(display("Failed to {} '{}': {}", action, path.display(), source))]
         File {
             action: String,

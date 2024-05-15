@@ -769,9 +769,6 @@ mod error {
         #[snafu(display("Repo exists at '{}' - remove it and try again", path.display()))]
         RepoExists { path: PathBuf },
 
-        #[snafu(display("Could not fetch repo at '{}': {}", url, msg))]
-        RepoFetch { url: Url, msg: String },
-
         #[snafu(display(
             "Failed to load repo from metadata URL '{}': {}",
             metadata_base_url,
@@ -782,9 +779,6 @@ mod error {
             #[snafu(source(from(tough::error::Error, Box::new)))]
             source: Box<tough::error::Error>,
         },
-
-        #[snafu(display("Requested repository does not exist: '{}'", url))]
-        RepoNotFound { url: Url },
 
         #[snafu(display("Failed to sign repository: {}", source))]
         RepoSign {

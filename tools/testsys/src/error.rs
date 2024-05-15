@@ -49,12 +49,6 @@ pub enum Error {
         source: Box<handlebars::TemplateError>,
     },
 
-    #[snafu(display("Unable to create map from {}: {}", what, source))]
-    IntoMap {
-        what: String,
-        source: testsys_model::Error,
-    },
-
     #[snafu(display("{}", what))]
     Invalid { what: String },
 
