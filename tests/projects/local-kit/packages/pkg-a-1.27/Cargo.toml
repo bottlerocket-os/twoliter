@@ -1,5 +1,5 @@
 [package]
-name = "pkg-a"
+name = "pkg-a-1_27"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -7,7 +7,7 @@ build = "../build.rs"
 
 [package.metadata.build-package]
 # Give this package an "override" name.
-package-name = "pkg-a-renamed"
+package-name = "pkg-a-1.27"
 
 [lib]
 path = "../packages.rs"

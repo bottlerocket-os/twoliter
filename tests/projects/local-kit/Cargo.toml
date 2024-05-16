@@ -5,7 +5,7 @@ members = [
     "kits/extra-1-kit",
     "kits/extra-2-kit",
     "kits/extra-3-kit",
-    "packages/pkg-a",
+    "packages/pkg-a-1.27",
     "packages/pkg-b",
     "packages/pkg-c",
     "packages/pkg-d",
