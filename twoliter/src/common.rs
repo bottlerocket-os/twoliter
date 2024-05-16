@@ -2,6 +2,12 @@ use anyhow::{ensure, Context, Result};
 use log::{self, debug, LevelFilter};
 use tokio::process::Command;
 
+/// This is passed as an environment variable to Buildsys. Buildsys tells Cargo to watch this
+/// environment variable for changes. So if we have a breaking change to the way Buildsys and/or
+/// Twoliter function, we can increment this so that we know users will rebuild after updating
+/// Twoliter.
+pub(crate) const BUILDSYS_EPOCH: u32 = 1;
+
 /// Run a `tokio::process::Command` and return a `Result` letting us know whether or not it worked.
 /// Pipes stdout/stderr when logging `LevelFilter` is more verbose than `Warn`.
 pub(crate) async fn exec_log(cmd: &mut Command) -> Result<()> {
