@@ -39,50 +39,8 @@ done
 # shellcheck source=imghelper
 . "${0%/*}/imghelper"
 
-case "${OUTPUT_FMT}" in
-   raw|qcow2|vmdk) ;;
-   *)
-      echo "unexpected image output format '${OUTPUT_FMT}'" >&2
-      exit 1
-      ;;
-esac
-
-case "${PARTITION_PLAN}" in
-  split|unified) ;;
-  *)
-    echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
-    exit 1
-    ;;
-esac
-
-# Fail fast if the OVF template doesn't exist, or doesn't match the layout.
-if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
-  if [ ! -s "${OVF_TEMPLATE}" ] ; then
-    echo "required OVF template not found: ${OVF_TEMPLATE}" >&2
-    exit 1
-  fi
-
-  if [ "${PARTITION_PLAN}" == "split" ] ; then
-    if ! grep -Fq '{{DATA_DISK}}' "${OVF_TEMPLATE}" ; then
-      echo "Missing data disk in OVF template, which is required for 'split' layout." >&2
-      exit 1
-    fi
-  fi
-
-  if [ "${PARTITION_PLAN}" == "unified" ] ; then
-    if grep -Fq '{{DATA_DISK}}' "${OVF_TEMPLATE}" ; then
-      echo "Incorrect data disk in OVF template, which is not supported for 'unified' layout." >&2
-      exit 1
-    fi
-  fi
-
-  if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-    if ! grep -Fq '{{DB_CERT_DER_HEX}}' "${OVF_TEMPLATE}" ; then
-      echo "Missing CA certificate field in OVF template, which is required for Secure Boot support." >&2
-      exit 1
-    fi
-  fi
-fi
+sanity_checks \
+  "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
 
 # Store output artifacts in a versioned directory.
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
