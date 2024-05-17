@@ -750,6 +750,34 @@ cargo metadata \
 '''
 ]
 
+# This task is temporarily necessary due to changes in Twoliter that occurred in June 2024. A new
+# directory structure was introduced for build/rpms. Attempts to do an incremental build when the
+# build output was in the old directory structure would fail, so we needed a way to inform users
+# that they need to run a cargo make clean.
+#
+# Once the changed build/rpms structure has been around long enough (in, say, August 2024), this
+# task can be removed as we can assume that no lingering old incremental builds exist in the wild.
+#
+# TODO - remove this task sometime around, or after, August 2024.
+[tasks.check-rpm-structure]
+script_runner = "bash"
+script = [
+'''
+if [ ! -d "${BUILDSYS_PACKAGES_DIR}" ]; then
+  exit 0
+fi
+
+count=$(find "${BUILDSYS_PACKAGES_DIR}" -maxdepth 1 -name "*.rpm" | wc -l)
+
+if [ "${count}" != "0" ]; then
+    echo "ERROR: You have rpms in a flat structure in ${BUILDSYS_PACKAGES_DIR}"
+    echo "Twoliter and Buildsys have been updated to use a different RPM directory structure"
+    echo "PLEASE RUN: cargo make clean"
+    exit 1
+fi
+'''
+]
+
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
 dependencies = ["check-cargo-version", "fetch", "publish-setup", "fetch-licenses", "cargo-metadata"]
