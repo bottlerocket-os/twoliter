@@ -11,6 +11,7 @@ BUILDSYS_ARCH = { script = ['echo "${BUILDSYS_ARCH:-$(uname -m)}"'] }
 BUILDSYS_ROOT_DIR = "${CARGO_MAKE_WORKING_DIRECTORY}"
 BUILDSYS_BUILD_DIR = "${BUILDSYS_ROOT_DIR}/build"
 BUILDSYS_PACKAGES_DIR = "${BUILDSYS_BUILD_DIR}/rpms"
+BUILDSYS_KITS_DIR = "${BUILDSYS_BUILD_DIR}/kits"
 BUILDSYS_STATE_DIR = "${BUILDSYS_BUILD_DIR}/state"
 BUILDSYS_IMAGES_DIR = "${BUILDSYS_BUILD_DIR}/images"
 BUILDSYS_TOOLS_DIR = "${BUILDSYS_ROOT_DIR}/tools"
@@ -280,6 +281,7 @@ fi
 mkdir -p ${BUILDSYS_BUILD_DIR}
 mkdir -p ${BUILDSYS_OUTPUT_DIR}
 mkdir -p ${BUILDSYS_PACKAGES_DIR}
+mkdir -p ${BUILDSYS_KITS_DIR}
 mkdir -p ${BUILDSYS_STATE_DIR}
 mkdir -p ${BUILDSYS_METADATA_DIR}
 mkdir -p ${GO_MOD_CACHE}
@@ -1531,11 +1533,13 @@ extend = "_upload-ova-base"
 dependencies = [
   "clean-sources",
   "clean-packages",
+  "clean-kits",
   "clean-images",
   "clean-repos",
   "clean-state",
   "clean-tools",
   "clean-metadata",
+  "clean-workspace",
 ]
 
 [tasks.clean-sources]
@@ -1551,12 +1555,27 @@ rm -f ${BUILDSYS_TOOLS_DIR}/bin/*
 '''
 ]
 
+[tasks.clean-workspace]
+script_runner = "bash"
+script = [
+'''
+cargo clean --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml"
+'''
+]
+
 [tasks.clean-packages]
 script_runner = "bash"
 script = [
 '''
 rm -rf ${BUILDSYS_PACKAGES_DIR}
-cargo clean --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml"
+'''
+]
+
+[tasks.clean-kits]
+script_runner = "bash"
+script = [
+'''
+rm -rf ${BUILDSYS_KITS_DIR}
 '''
 ]
 
