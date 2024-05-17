@@ -80,43 +80,6 @@ naming.
 package-name = "better.name"
 ```
 
-`variant-sensitive` lets you specify whether the package should be rebuilt when
-building a new variant, and defaults to false; set it to true if a package is
-using the variant to affect its build process.
-
-```ignore
-[package.metadata.build-package]
-variant-sensitive = true
-```
-
-Some packages might only be sensitive to certain components of the variant
-tuple, such as the platform, runtime, or family. The `variant-sensitive` field
-can also take a string to indicate the source of the sensitivity.
-
-```ignore
-[package.metadata.build-package]
-# sensitive to platform, like "metal" or "aws"
-variant-sensitive = "platform"
-
-# sensitive to runtime, like "k8s" or "ecs"
-variant-sensitive = "runtime"
-
-# sensitive to family, like "metal-k8s" or "aws-ecs"
-variant-sensitive = "family"
-```
-
-`package-features` is a list of image features that the package tracks. This is
-useful when the way the package is built changes based on whether a particular
-image feature is enabled for the current variant, rather than when the variant
-tuple changes.
-
-```ignore
-[package.metadata.build-package]
-package-features = [
-    "grub-set-private-var",
-]
-```
-
 `releases-url` is ignored by buildsys, but can be used by packager maintainers
 to indicate a good URL for checking whether the software has had a new release.
 ```ignore
