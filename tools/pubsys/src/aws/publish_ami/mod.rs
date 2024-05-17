@@ -569,7 +569,7 @@ mod error {
     use crate::aws::ami;
     use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::{
-        describe_images::DescribeImagesError, modify_image_attribute::ModifyImageAttributeError,
+        describe_images::DescribeImagesError,
         modify_snapshot_attribute::ModifySnapshotAttributeError,
     };
     use snafu::Snafu;
@@ -653,18 +653,6 @@ mod error {
         },
 
         #[snafu(display(
-            "Failed to modify permissions of {} in {}: {}",
-            image_id,
-            region,
-            source
-        ))]
-        ModifyImageAttributes {
-            image_id: String,
-            region: String,
-            source: SdkError<ModifyImageAttributeError>,
-        },
-
-        #[snafu(display(
             "Failed to modify permissions of {} of {} snapshots",
             error_count, error_count + success_count,
         ))]
@@ -714,7 +702,6 @@ mod error {
                 | Error::MissingInResponse { .. }
                 | Error::MissingRegion { .. }
                 | Error::ModifyImageAttribute { .. }
-                | Error::ModifyImageAttributes { .. }
                 | Error::ModifySnapshotAttributes { .. }
                 | Error::MultipleImages { .. }
                 | Error::Serialize { .. }

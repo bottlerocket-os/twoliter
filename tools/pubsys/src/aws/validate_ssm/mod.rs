@@ -256,7 +256,6 @@ pub(crate) async fn run(args: &Args, validate_ssm_args: &ValidateSsmArgs) -> Res
 }
 
 pub(crate) mod error {
-    use crate::aws::ssm::ssm;
     use snafu::Snafu;
     use std::path::PathBuf;
 
@@ -266,15 +265,6 @@ pub(crate) mod error {
         #[snafu(display("Error reading config: {}", source))]
         Config { source: pubsys_config::Error },
 
-        #[snafu(display("Failed to fetch parameters from SSM: {}", source))]
-        FetchSsm { source: ssm::error::Error },
-
-        #[snafu(display("Infra.toml is missing {}", missing))]
-        MissingConfig { missing: String },
-
-        #[snafu(display("Failed to validate SSM parameters: {}", missing))]
-        ValidateSsm { missing: String },
-
         #[snafu(display("Failed to parse expected parameters file: {}", source))]
         ParseExpectedParameterFile { source: serde_json::Error },
 
@@ -283,9 +273,6 @@ pub(crate) mod error {
             source: std::io::Error,
             path: PathBuf,
         },
-
-        #[snafu(display("Invalid validation status filter: {}", filter))]
-        InvalidStatusFilter { filter: String },
 
         #[snafu(display("Failed to serialize validation results to json: {}", source))]
         SerializeValidationResults { source: serde_json::Error },

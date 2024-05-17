@@ -74,12 +74,6 @@ pub(crate) enum Error {
         prefix: PathBuf,
         source: std::path::StripPrefixError,
     },
-
-    #[snafu(display("Unsupported architecture '{}'", arch))]
-    UnsupportedArch {
-        arch: String,
-        source: serde_plain::Error,
-    },
 }
 
 pub(super) type Result<T> = std::result::Result<T, Error>;

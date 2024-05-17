@@ -355,11 +355,6 @@ mod error {
             path: PathBuf,
         },
 
-        #[snafu(display("Failed to parse rendered SSM parameters to JSON: {}", source))]
-        ParseRenderedSsmParameters {
-            source: serde_json::Error,
-        },
-
         #[snafu(display("Failed to write rendered SSM parameters to {}: {}", path.display(), source))]
         WriteRenderedSsmParameters {
             path: PathBuf,

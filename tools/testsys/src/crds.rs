@@ -512,7 +512,7 @@ pub(crate) trait CrdCreator: Sync {
                 .bottlerocket_crd(BottlerocketInput {
                     cluster_crd_name: &cluster_crd_name,
                     image_id: image_id.clone(),
-                    test_type,
+                    _test_type: test_type,
                     crd_input,
                 })
                 .await?;
@@ -723,7 +723,7 @@ pub struct BottlerocketInput<'a> {
     pub cluster_crd_name: &'a Option<String>,
     /// The image id that should be used by this CRD
     pub image_id: String,
-    pub test_type: &'a KnownTestType,
+    pub _test_type: &'a KnownTestType,
     pub crd_input: &'a CrdInput<'a>,
 }
 

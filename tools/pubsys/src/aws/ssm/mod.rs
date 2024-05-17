@@ -459,11 +459,6 @@ mod error {
             source: crate::aws::ami::public::Error,
         },
 
-        #[snafu(display("Failed to create EC2 client for region {}", region))]
-        CreateEc2Client {
-            region: String,
-        },
-
         #[snafu(display("Failed to deserialize input from '{}': {}", path.display(), source))]
         Deserialize {
             path: PathBuf,
