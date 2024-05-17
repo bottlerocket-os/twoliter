@@ -1,4 +1,4 @@
-use crate::common::{exec_log, BUILDSYS_EPOCH};
+use crate::common::{exec_log, BUILDSYS_OUTPUT_GENERATION_ID};
 use crate::docker::ImageUri;
 use crate::project::Project;
 use anyhow::{bail, Result};
@@ -53,9 +53,10 @@ impl CargoMake {
     /// definition in `Twoliter.toml`.
     pub(crate) fn new(project: &Project) -> Result<Self> {
         let sdk = require_sdk(project)?;
-        Ok(Self::default()
-            .env("TLPRIVATE_SDK_IMAGE", sdk)
-            .env("BUILDSYS_EPOCH", BUILDSYS_EPOCH.to_string()))
+        Ok(Self::default().env("TLPRIVATE_SDK_IMAGE", sdk).env(
+            "BUILDSYS_OUTPUT_GENERATION_ID",
+            BUILDSYS_OUTPUT_GENERATION_ID.to_string(),
+        ))
     }
 
     /// Specify the path to the `Makefile.toml` for the `cargo make` command
@@ -195,7 +196,7 @@ const DISALLOWED_ENV_VARS: [&str; 4] = [
     "BUILDSYS_SDK_NAME",
     "BUILDSYS_SDK_VERSION",
     "BUILDSYS_REGISTRY",
-    "BUILDSYS_EPOCH",
+    "BUILDSYS_OUTPUT_GENERATION_ID",
 ];
 
 /// Returns `true` if `key` is an environment variable that needs to be passed to `cargo make`.
@@ -242,6 +243,6 @@ fn test_is_build_system_env() {
 fn test_check_for_disallowed_var() {
     assert!(check_for_disallowed_var("BUILDSYS_REGISTRY").is_err());
     assert!(check_for_disallowed_var("BUILDSYS_PRETTY_NAME").is_ok());
-    assert!(check_for_disallowed_var("BUILDSYS_EPOCH").is_err());
+    assert!(check_for_disallowed_var("BUILDSYS_OUTPUT_GENERATION_ID").is_err());
     assert!(check_for_disallowed_var("BUILDSYS_FOO").is_ok());
 }

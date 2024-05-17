@@ -6,7 +6,7 @@ use tokio::process::Command;
 /// environment variable for changes. So if we have a breaking change to the way Buildsys and/or
 /// Twoliter function, we can increment this so that we know users will rebuild after updating
 /// Twoliter.
-pub(crate) const BUILDSYS_EPOCH: u32 = 1;
+pub(crate) const BUILDSYS_OUTPUT_GENERATION_ID: u32 = 1;
 
 /// Run a `tokio::process::Command` and return a `Result` letting us know whether or not it worked.
 /// Pipes stdout/stderr when logging `LevelFilter` is more verbose than `Warn`.
