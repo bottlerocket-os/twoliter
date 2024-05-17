@@ -752,7 +752,7 @@ cargo metadata \
 
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
-dependencies = ["check-cargo-version", "fetch-sdk", "publish-setup", "fetch-licenses", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "fetch-licenses", "cargo-metadata"]
 script_runner = "bash"
 script = [
 '''
@@ -785,7 +785,7 @@ cargo build \
 ]
 
 [tasks.build-variant]
-dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup", "cargo-metadata"]
+dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
