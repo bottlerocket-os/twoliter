@@ -68,6 +68,34 @@ sanity_checks() {
   fi
 }
 
+decompress_image() {
+  local ext what input_dir input_image image_name
+  ext="${1:?}"
+  what="${2:?}"
+  input_dir="${3:?}"
+
+  input_image="${what^^}"
+  image_name="${what^^}_NAME"
+
+  case "${ext}" in
+  *lz4)
+    unlz4 -f "${input_dir}/${!image_name}${ext:+.${ext}}" "${!image_name}.img"
+    ;;
+  qcow2)
+    qemu-img convert -f "${ext}" -O raw \
+      "${input_dir}/${!image_name}${ext:+.${ext}}" "${!image_name}.img"
+    ;;
+  vmdk)
+    qemu-img convert -f "${ext}" -O raw \
+      "${input_dir}/${!image_name}${ext:+.${ext}}" "${!image_name}.img"
+    ;;
+  *)
+    echo "unexpected extension: ${ext}" >&2
+    exit 1
+    ;;
+  esac
+}
+
 compress_image() {
   local ext what output_dir input_image image_name
   ext="${1:?}"
