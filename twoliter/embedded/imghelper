@@ -392,6 +392,93 @@ sbsetup_signing_profile() {
   fi
 }
 
+undo_sign() {
+  local what
+  what="${1:?}"
+  if [[ "$(pesign -i "${what}" -l)" != "No signatures found." ]]; then
+    mv "${what}" "${what}.orig"
+    pesign -i "${what}.orig" -o "${what}" -u 0 -r
+    rm "${what}.orig"
+  fi
+}
+
+do_sign() {
+  local what cert
+  local -n sign_key
+  what="${1:?}"
+  cert="${2:?}"
+  sign_key="${3:?}"
+
+  pesign -i "${what}" -o "${what}.signed" -s "${sign_key[@]}"
+  mv "${what}.signed" "${what}"
+  pesign -i "${what}" -l
+  pesigcheck -i "${what}" -n 0 -c "${cert}"
+}
+
+sign_shim() {
+  local shim
+  shim="${1:?}"
+
+  # Convert the vendor certificate to the expected format.
+  cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
+
+  # Replace the embedded vendor certificate, then sign shim with the db key.
+  undo_sign "${shim}"
+  "${ARCH:?}-objdumpcopy" "${shim}" \
+    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
+  do_sign "${shim}" "${SBKEYS}/db.cer" SHIM_SIGN_KEY
+}
+
+zero_shim() {
+  local shim
+  shim="${1:?}"
+
+  # Generate a zero-sized certificate in the expected format.
+  cert_table /dev/null "${SBKEYS}/vendor.obj"
+
+  # Replace the embedded vendor certificate with the zero-sized one, which
+  # shim will ignore when Secure Boot is disabled.
+  "${ARCH:?}-objdumpcopy" "${shim}" \
+    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
+}
+
+sign_mokm() {
+  local mokm
+  mokm="${1:?}"
+
+  undo_sign "${mokm}"
+  do_sign "${mokm}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+sign_grub() {
+  local grub
+  grub="${1:?}"
+
+  # Remove the original vendor key if necessary, replace the embedded gpg
+  # public key, then sign grub with the vendor key.
+  undo_sign "${grub}"
+  "${ARCH:?}-objdumpcopy" "${grub}" \
+    --file-alignment 4096 \
+    --update-section ".pubkey=${SBKEYS}/config-sign.pubkey"
+  do_sign "${grub}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+unembed_grub() {
+  local grub
+  grub="${1:?}"
+
+  # Remove the embedded gpg public key to disable GRUB's signature checks.
+  "${ARCH:?}-objdumpcopy" "${grub}" \
+    --file-alignment 4096 \
+    --remove-section ".pubkey"
+}
+
+provide_certs() {
+  local efi_image
+  efi_image="${1:?}"
+  mcopy -i "${efi_image}" "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
+}
+
 generate_ova() {
   local os_vmdk data_vmdk
   os_vmdk="${1:?}"

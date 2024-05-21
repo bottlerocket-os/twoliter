@@ -202,41 +202,12 @@ if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   # signing profile we have.
   sbsetup_signing_profile
 
-  # Convert the vendor certificate to the expected format.
-  cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
-
-  # Replace the embedded vendor certificate, then sign shim with the db key.
-  "${ARCH}-objdumpcopy" "${shim}" \
-    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
-  pesign -i "${shim}" -o "${shim}.signed" -s "${SHIM_SIGN_KEY[@]}"
-  mv "${shim}.signed" "${shim}"
-  pesigcheck -i "${shim}" -n 0 -c "${SBKEYS}/db.cer"
-
-  # Sign the MOK manager as well.
-  pesign -i "${mokm}" -o "${mokm}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${mokm}.signed" "${mokm}"
-  pesigcheck -i "${mokm}" -n 0 -c "${SBKEYS}/vendor.cer"
-
-  # Replace the embedded gpg public key, then sign grub with the vendor key.
-  "${ARCH}-objdumpcopy" "${grub}" \
-    --file-alignment 4096 \
-    --update-section ".pubkey=${SBKEYS}/config-sign.pubkey"
-  pesign -i "${grub}" -o "${grub}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${grub}.signed" "${grub}"
-  pesigcheck -i "${grub}" -n 0 -c "${SBKEYS}/vendor.cer"
+  sign_shim "${shim}"
+  sign_mokm "${mokm}"
+  sign_grub "${grub}"
 else
-  # Generate a zero-sized certificate in the expected format.
-  cert_table /dev/null "${SBKEYS}/vendor.obj"
-
-  # Replace the embedded vendor certificate with the zero-sized one, which shim
-  # will ignore when Secure Boot is disabled.
-  "${ARCH}-objdumpcopy" "${shim}" \
-    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
-
-   # Remove the embedded gpg public key to disable GRUB's signature checks.
-   "${ARCH}-objdumpcopy" "${grub}" \
-     --file-alignment 4096 \
-     --remove-section ".pubkey"
+  zero_shim "${shim}"
+  unembed_grub "${grub}"
 fi
 popd >/dev/null
 
@@ -248,7 +219,7 @@ mcopy -i "${EFI_IMAGE}" "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   # Make the signing certificate available on the EFI system partition so it
   # can be imported through the firmware setup UI on bare metal systems.
-  mcopy -i "${EFI_IMAGE}" "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
+  provide_certs "${EFI_IMAGE}"
 fi
 dd if="${EFI_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[EFI-A]}"
 
