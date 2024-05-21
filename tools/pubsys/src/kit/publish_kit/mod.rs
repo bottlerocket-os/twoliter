@@ -113,7 +113,7 @@ ADD kit-$TARGETARCH.tar /
         KIT_METADATA_KEY, metadata_encoded
     );
     let docker_file_path = kit_path.join("Dockerfile");
-    write(docker_file_path, docker_file)
+    write(&docker_file_path, docker_file)
         .await
         .context(error::IoSnafu)?;
     let tag = format!("--tag={}", target_uri);
@@ -142,7 +142,7 @@ ADD kit-$TARGETARCH.tar /
     info!("Successfully published kit to {}", target_uri);
 
     // Clean up the Dockerfile
-    remove_file(docker_file_path.clone())
+    remove_file(&docker_file_path)
         .await
         .context(error::IoSnafu)?;
 

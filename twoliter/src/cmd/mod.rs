@@ -4,12 +4,14 @@ mod debug;
 mod fetch;
 mod make;
 mod update;
+mod publish_kit;
 
 use self::build::BuildCommand;
 use crate::cmd::debug::DebugAction;
 use crate::cmd::fetch::Fetch;
 use crate::cmd::make::Make;
 use crate::cmd::update::Update;
+use crate::cmd::publish_kit::PublishCommand;
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
@@ -44,6 +46,10 @@ pub(crate) enum Subcommand {
     /// Update Twoliter.lock
     Update(Update),
 
+    /// Publish something, such as a Kit
+    #[clap(subcommand)]
+    Publish(PublishCommand),
+
     /// Commands that are used for checking and troubleshooting Twoliter's internals.
     #[clap(subcommand)]
     Debug(DebugAction),
@@ -56,6 +62,7 @@ pub(super) async fn run(args: Args) -> Result<()> {
         Subcommand::Fetch(fetch_args) => fetch_args.run().await,
         Subcommand::Make(make_args) => make_args.run().await,
         Subcommand::Update(update_args) => update_args.run().await,
+        Subcommand::Publish(publish_command) => publish_command.run().await,
         Subcommand::Debug(debug_action) => debug_action.run().await,
     }
 }
