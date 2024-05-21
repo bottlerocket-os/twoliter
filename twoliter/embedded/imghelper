@@ -23,6 +23,11 @@ VERITY_HASH_ALGORITHM=sha256
 VERITY_DATA_BLOCK_SIZE=4096
 VERITY_HASH_BLOCK_SIZE=4096
 
+SBKEYS="${HOME}/sbkeys"
+
+# Pre-emptively declare global arrays to be populated later.
+declare -a SHIM_SIGN_KEY CODE_SIGN_KEY
+
 sanity_checks() {
   local output_fmt partition_plan ovf_template uefi_secure_boot
   output_fmt="${1:?}"
@@ -296,6 +301,209 @@ generate_verity_root() {
   )
 }
 
+sbsetup_wrapup() {
+  local sb_key_source
+  sb_key_source="${1:?}"
+
+  # Convert certificates from PEM format (ASCII) to DER (binary). This could be
+  # done when the certificates are created, but the resulting binary files are
+  # not as nice to store in source control.
+  for cert in PK KEK db vendor; do
+    openssl x509 \
+      -inform PEM -in "${SBKEYS}/${cert}.crt" \
+      -outform DER -out "${SBKEYS}/${cert}.cer"
+  done
+
+  # For signing the grub config, we need to embed the GPG public key in binary
+  # form, which is similarly awkward to store in source control.
+  gpg --batch --no-tty --import "${SBKEYS}/config-sign.key"
+  if [[ "${sb_key_source}" == "aws" ]]; then
+    gpg --batch --no-tty --card-status
+  fi
+  gpg --batch --no-tty --export >"${SBKEYS}/config-sign.pubkey"
+  gpg --batch --no-tty --list-keys
+}
+
+sbsetup_aws_profile() {
+  # Set AWS environment variables from build secrets, if present.
+  local var val
+  for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+    val="${var,,}"
+    val="${HOME}/.aws/${val//_/-}.env"
+    [[ -s "${val}" ]] || continue
+    declare -x "${var}=$(cat "${val}")"
+  done
+  # Verify that AWS credentials are functional.
+  aws sts get-caller-identity
+  # Log all PKCS11 helper activity, to simplify debugging.
+  export AWS_KMS_PKCS11_DEBUG=1
+  SHIM_SIGN_KEY+=(-c shim-sign-key -t shim-sign-key)
+  CODE_SIGN_KEY+=(-c code-sign-key -t code-sign-key)
+
+  local sb_key_source="aws"
+  sbsetup_wrapup "${sb_key_source}"
+}
+
+sbsetup_local_profile() {
+  # Disable the PKCS11 helper.
+  rm /etc/pkcs11/modules/aws-kms-pkcs11.module
+
+  # Generate the PKCS12 archives for import.
+  openssl pkcs12 \
+    -export \
+    -passout pass: \
+    -inkey "${SBKEYS}/shim-sign.key" \
+    -in "${SBKEYS}/shim-sign.crt" \
+    -certfile "${SBKEYS}/db.crt" \
+    -out "${SBKEYS}/shim-sign.p12"
+
+  openssl pkcs12 \
+    -export \
+    -passout pass: \
+    -inkey "${SBKEYS}/code-sign.key" \
+    -in "${SBKEYS}/code-sign.crt" \
+    -certfile "${SBKEYS}/vendor.crt" \
+    -out "${SBKEYS}/code-sign.p12"
+
+  # Import certificates and private key archive.
+  local pedb="/etc/pki/pesign"
+
+  certutil -d "${pedb}" -A -n db -i "${SBKEYS}/db.crt" -t ",,C"
+  certutil -d "${pedb}" -A -n shim-sign-key -i "${SBKEYS}/shim-sign.crt" -t ",,P"
+  pk12util -d "${pedb}" -i "${SBKEYS}/shim-sign.p12" -W ""
+
+  certutil -d "${pedb}" -A -n vendor -i "${SBKEYS}/vendor.crt" -t ",,C"
+  certutil -d "${pedb}" -A -n code-sign-key -i "${SBKEYS}/code-sign.crt" -t ",,P"
+  pk12util -d "${pedb}" -i "${SBKEYS}/code-sign.p12" -W ""
+
+  certutil -d "${pedb}" -L
+  SHIM_SIGN_KEY+=(-c shim-sign-key)
+  CODE_SIGN_KEY+=(-c code-sign-key)
+
+  local sb_key_source="local"
+  sbsetup_wrapup "${sb_key_source}"
+}
+
+sbsetup_signing_profile() {
+  if [[ -s "${HOME}/.config/aws-kms-pkcs11/config.json" ]]; then
+    sbsetup_aws_profile
+  else
+    sbsetup_local_profile
+  fi
+}
+
+undo_sign() {
+  local what
+  what="${1:?}"
+  if [[ "$(pesign -i "${what}" -l)" != "No signatures found." ]]; then
+    mv "${what}" "${what}.orig"
+    pesign -i "${what}.orig" -o "${what}" -u 0 -r
+    rm "${what}.orig"
+  fi
+}
+
+do_sign() {
+  local what cert
+  local -n sign_key
+  what="${1:?}"
+  cert="${2:?}"
+  sign_key="${3:?}"
+
+  pesign -i "${what}" -o "${what}.signed" -s "${sign_key[@]}"
+  mv "${what}.signed" "${what}"
+  pesign -i "${what}" -l
+  pesigcheck -i "${what}" -n 0 -c "${cert}"
+}
+
+sign_shim() {
+  local shim
+  shim="${1:?}"
+
+  # Convert the vendor certificate to the expected format.
+  cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
+
+  # Replace the embedded vendor certificate, then sign shim with the db key.
+  undo_sign "${shim}"
+  "${ARCH:?}-objdumpcopy" "${shim}" \
+    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
+  do_sign "${shim}" "${SBKEYS}/db.cer" SHIM_SIGN_KEY
+}
+
+zero_shim() {
+  local shim
+  shim="${1:?}"
+
+  # Generate a zero-sized certificate in the expected format.
+  cert_table /dev/null "${SBKEYS}/vendor.obj"
+
+  # Replace the embedded vendor certificate with the zero-sized one, which
+  # shim will ignore when Secure Boot is disabled.
+  "${ARCH:?}-objdumpcopy" "${shim}" \
+    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
+}
+
+sign_mokm() {
+  local mokm
+  mokm="${1:?}"
+
+  undo_sign "${mokm}"
+  do_sign "${mokm}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+sign_grub() {
+  local grub
+  grub="${1:?}"
+
+  # Remove the original vendor key if necessary, replace the embedded gpg
+  # public key, then sign grub with the vendor key.
+  undo_sign "${grub}"
+  "${ARCH:?}-objdumpcopy" "${grub}" \
+    --file-alignment 4096 \
+    --update-section ".pubkey=${SBKEYS}/config-sign.pubkey"
+  do_sign "${grub}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+unembed_grub() {
+  local grub
+  grub="${1:?}"
+
+  # Remove the embedded gpg public key to disable GRUB's signature checks.
+  "${ARCH:?}-objdumpcopy" "${grub}" \
+    --file-alignment 4096 \
+    --remove-section ".pubkey"
+}
+
+provide_certs() {
+  local efi_image
+  efi_image="${1:?}"
+  mcopy -i "${efi_image}" "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
+}
+
+sign_vmlinuz() {
+  local vmlinuz
+  vmlinuz="${1:?}"
+
+  undo_sign "${vmlinuz}"
+  do_sign "${vmlinuz}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+generate_hmac() {
+  local vmlinuz
+  vmlinuz="${1:?}"
+  openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" |
+    awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
+      >"${vmlinuz%/*}.${vmlinuz##*/}.hmac"
+}
+
+sign_grubcfg() {
+  local grub_cfg grub_cfg_sig
+  grub_cfg="${1:?}"
+  grub_cfg_sig="${grub_cfg}.sig"
+  [[ -f "${grub_cfg_sig}" ]] && rm "${grub_cfg_sig}"
+  gpg --batch --no-tty --detach-sign "${grub_cfg}"
+  gpg --batch --no-tty --verify "${grub_cfg_sig}" "${grub_cfg}"
+}
+
 generate_ova() {
   local os_vmdk data_vmdk
   os_vmdk="${1:?}"
@@ -305,11 +513,10 @@ generate_ova() {
   os_image_publish_size_gib="${3:?}"
   data_image_publish_size_gib="${4:?}"
 
-  local ovf_template uefi_secure_boot sbkeys output_dir
+  local ovf_template uefi_secure_boot output_dir
   ovf_template="${5:?}"
   uefi_secure_boot="${6:?}"
-  sbkeys="${7:?}"
-  output_dir="${8:?}"
+  output_dir="${7:?}"
 
   local ova_dir
   ova_dir="$(mktemp -d)"
@@ -333,9 +540,9 @@ generate_ova() {
   # PK, KEK, db, and dbx.
   if [[ "${uefi_secure_boot}" == "yes" ]]; then
     local data_disk_bytes kek_cert_der_hex db_cert_der_hex dbx_empty_hash_hex
-    pk_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${sbkeys}/PK.cer")"
-    kek_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${sbkeys}/KEK.cer")"
-    db_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${sbkeys}/db.cer")"
+    pk_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/PK.cer")"
+    kek_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/KEK.cer")"
+    db_cert_der_hex="$(hexdump -ve '1/1 "%02x"' "${SBKEYS}/db.cer")"
     dbx_empty_hash_hex="$(sha256sum /dev/null | awk '{ print $1 }')"
     sed -i \
       -e "s/{{PK_CERT_DER_HEX}}/${pk_cert_der_hex}/g" \

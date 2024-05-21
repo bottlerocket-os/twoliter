@@ -59,8 +59,6 @@ DATA_MOUNT="$(mktemp -d)"
 EFI_MOUNT="$(mktemp -d)"
 PRIVATE_MOUNT="$(mktemp -d)"
 
-SBKEYS="${HOME}/sbkeys"
-
 SELINUX_ROOT="/etc/selinux"
 SELINUX_POLICY="fortified"
 SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/files/file_contexts"
@@ -191,87 +189,6 @@ fi
 # package has placed the image in /boot/efi/EFI/BOOT.
 mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
 
-# Do the setup required for `pesign` and `gpg` signing and
-# verification to "just work" later on, regardless of which
-# type of signing profile we have.
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  declare -a SHIM_SIGN_KEY
-  declare -a CODE_SIGN_KEY
-
-  # For an AWS profile, we expect a config file for the PKCS11
-  # helper. Otherwise, there should be a local key and cert.
-  if [ -s "${HOME}/.config/aws-kms-pkcs11/config.json" ] ; then
-    # Set AWS environment variables from build secrets, if present.
-    for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ; do
-      val="${var,,}"
-      val="${HOME}/.aws/${val//_/-}.env"
-      [ -s "${val}" ] || continue
-      declare -x "${var}=$(cat "${val}")"
-    done
-    # Verify that AWS credentials are functional.
-    aws sts get-caller-identity
-    # Log all PKCS11 helper activity, to simplify debugging.
-    export AWS_KMS_PKCS11_DEBUG=1
-    SB_KEY_SOURCE="aws"
-    SHIM_SIGN_KEY=(-c shim-sign-key -t shim-sign-key)
-    CODE_SIGN_KEY=(-c code-sign-key -t code-sign-key)
-  else
-    # Disable the PKCS11 helper.
-    rm /etc/pkcs11/modules/aws-kms-pkcs11.module
-
-    # Generate the PKCS12 archives for import.
-    openssl pkcs12 \
-      -export \
-      -passout pass: \
-      -inkey "${SBKEYS}/shim-sign.key" \
-      -in "${SBKEYS}/shim-sign.crt" \
-      -certfile "${SBKEYS}/db.crt" \
-      -out "${SBKEYS}/shim-sign.p12"
-
-    openssl pkcs12 \
-      -export \
-      -passout pass: \
-      -inkey "${SBKEYS}/code-sign.key" \
-      -in "${SBKEYS}/code-sign.crt" \
-      -certfile "${SBKEYS}/vendor.crt" \
-      -out "${SBKEYS}/code-sign.p12"
-
-    # Import certificates and private key archive.
-    PEDB="/etc/pki/pesign"
-
-    certutil -d "${PEDB}" -A -n db -i "${SBKEYS}/db.crt" -t ",,C"
-    certutil -d "${PEDB}" -A -n shim-sign-key -i "${SBKEYS}/shim-sign.crt" -t ",,P"
-    pk12util -d "${PEDB}" -i "${SBKEYS}/shim-sign.p12" -W ""
-
-    certutil -d "${PEDB}" -A -n vendor -i "${SBKEYS}/vendor.crt" -t ",,C"
-    certutil -d "${PEDB}" -A -n code-sign-key -i "${SBKEYS}/code-sign.crt" -t ",,P"
-    pk12util -d "${PEDB}" -i "${SBKEYS}/code-sign.p12" -W ""
-
-    certutil -d "${PEDB}" -L
-    SB_KEY_SOURCE="local"
-    SHIM_SIGN_KEY=(-c shim-sign-key)
-    CODE_SIGN_KEY=(-c code-sign-key)
-  fi
-
-  # Convert certificates from PEM format (ASCII) to DER (binary). This could be
-  # done when the certificates are created, but the resulting binary files are
-  # not as nice to store in source control.
-  for cert in PK KEK db vendor ; do
-    openssl x509 \
-      -inform PEM -in "${SBKEYS}/${cert}.crt" \
-      -outform DER -out "${SBKEYS}/${cert}.cer"
-  done
-
-  # For signing the grub config, we need to embed the GPG public key in binary
-  # form, which is similarly awkward to store in source control.
-  gpg --import "${SBKEYS}/config-sign.key"
-  if [ "${SB_KEY_SOURCE}" == "aws" ] ; then
-    gpg --card-status
-  fi
-  gpg --export > "${SBKEYS}/config-sign.pubkey"
-  gpg --list-keys
-fi
-
 pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
 shims=(boot*.efi)
 shim="${shims[0]}"
@@ -280,41 +197,17 @@ grub="${grubs[0]}"
 mokms=(mm*.efi)
 mokm="${mokms[0]}"
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  # Convert the vendor certificate to the expected format.
-  cert_table "${SBKEYS}/vendor.cer" "${SBKEYS}/vendor.obj"
+  # Do the setup required for `pesign` and `gpg` signing and
+  # verification to "just work", regardless of which type of
+  # signing profile we have.
+  sbsetup_signing_profile
 
-  # Replace the embedded vendor certificate, then sign shim with the db key.
-  "${ARCH}-objdumpcopy" "${shim}" \
-    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
-  pesign -i "${shim}" -o "${shim}.signed" -s "${SHIM_SIGN_KEY[@]}"
-  mv "${shim}.signed" "${shim}"
-  pesigcheck -i "${shim}" -n 0 -c "${SBKEYS}/db.cer"
-
-  # Sign the MOK manager as well.
-  pesign -i "${mokm}" -o "${mokm}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${mokm}.signed" "${mokm}"
-  pesigcheck -i "${mokm}" -n 0 -c "${SBKEYS}/vendor.cer"
-
-  # Replace the embedded gpg public key, then sign grub with the vendor key.
-  "${ARCH}-objdumpcopy" "${grub}" \
-    --file-alignment 4096 \
-    --update-section ".pubkey=${SBKEYS}/config-sign.pubkey"
-  pesign -i "${grub}" -o "${grub}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${grub}.signed" "${grub}"
-  pesigcheck -i "${grub}" -n 0 -c "${SBKEYS}/vendor.cer"
+  sign_shim "${shim}"
+  sign_mokm "${mokm}"
+  sign_grub "${grub}"
 else
-  # Generate a zero-sized certificate in the expected format.
-  cert_table /dev/null "${SBKEYS}/vendor.obj"
-
-  # Replace the embedded vendor certificate with the zero-sized one, which shim
-  # will ignore when Secure Boot is disabled.
-  "${ARCH}-objdumpcopy" "${shim}" \
-    --update-section ".vendor_cert=${SBKEYS}/vendor.obj"
-
-   # Remove the embedded gpg public key to disable GRUB's signature checks.
-   "${ARCH}-objdumpcopy" "${grub}" \
-     --file-alignment 4096 \
-     --remove-section ".pubkey"
+  zero_shim "${shim}"
+  unembed_grub "${grub}"
 fi
 popd >/dev/null
 
@@ -326,7 +219,7 @@ mcopy -i "${EFI_IMAGE}" "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
   # Make the signing certificate available on the EFI system partition so it
   # can be imported through the firmware setup UI on bare metal systems.
-  mcopy -i "${EFI_IMAGE}" "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
+  provide_certs "${EFI_IMAGE}"
 fi
 dd if="${EFI_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[EFI-A]}"
 
@@ -336,21 +229,12 @@ mkdir -p "${ROOT_MOUNT}/boot/grub"
 # Now that we're done messing with /, move /boot out of it
 mv "${ROOT_MOUNT}/boot"/* "${BOOT_MOUNT}"
 
-pushd "${BOOT_MOUNT}" >/dev/null
-
-vmlinuz="vmlinuz"
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  pesign -i "${vmlinuz}" -o "${vmlinuz}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${vmlinuz}.signed" "${vmlinuz}"
-  pesigcheck -i "${vmlinuz}" -n 0 -c "${SBKEYS}/vendor.cer"
+  sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
 fi
 
 # Generate an HMAC for the kernel after signing.
-openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" \
-  | awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
-  > ".${vmlinuz}.hmac"
-
-popd >/dev/null
+generate_hmac "${BOOT_MOUNT}/vmlinuz"
 
 # Set the Bottlerocket variant, version, and build-id
 SYS_ROOT="${ARCH}-bottlerocket-linux-gnu/sys-root"
@@ -443,8 +327,7 @@ menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
 EOF
 
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  gpg --detach-sign "${BOOT_MOUNT}/grub/grub.cfg"
-  gpg --verify "${BOOT_MOUNT}/grub/grub.cfg.sig"
+  sign_grubcfg "${BOOT_MOUNT}/grub/grub.cfg"
 fi
 
 # Combine any bootconfig snippets in /boot for later use, then clean up.
@@ -570,7 +453,6 @@ if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
     "${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
     "${OVF_TEMPLATE}" \
     "${UEFI_SECURE_BOOT}" \
-    "${SBKEYS}" \
     "${OUTPUT_DIR}"
   symlink_image "ova" "os_image" "${OUTPUT_DIR}"
 fi
