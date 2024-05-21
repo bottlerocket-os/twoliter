@@ -15,8 +15,6 @@ GRUB_SET_PRIVATE_VAR="no"
 XFS_DATA_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 
-SYMLINK_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}"
-
 for opt in "$@"; do
    optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
    case "${opt}" in
@@ -39,61 +37,12 @@ done
 # shellcheck source=imghelper
 . "${0%/*}/imghelper"
 
-case "${OUTPUT_FMT}" in
-   raw|qcow2|vmdk) ;;
-   *)
-      echo "unexpected image output format '${OUTPUT_FMT}'" >&2
-      exit 1
-      ;;
-esac
-
-case "${PARTITION_PLAN}" in
-  split|unified) ;;
-  *)
-    echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
-    exit 1
-    ;;
-esac
-
-# Fail fast if the OVF template doesn't exist, or doesn't match the layout.
-if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
-  if [ ! -s "${OVF_TEMPLATE}" ] ; then
-    echo "required OVF template not found: ${OVF_TEMPLATE}" >&2
-    exit 1
-  fi
-
-  if [ "${PARTITION_PLAN}" == "split" ] ; then
-    if ! grep -Fq '{{DATA_DISK}}' "${OVF_TEMPLATE}" ; then
-      echo "Missing data disk in OVF template, which is required for 'split' layout." >&2
-      exit 1
-    fi
-  fi
-
-  if [ "${PARTITION_PLAN}" == "unified" ] ; then
-    if grep -Fq '{{DATA_DISK}}' "${OVF_TEMPLATE}" ; then
-      echo "Incorrect data disk in OVF template, which is not supported for 'unified' layout." >&2
-      exit 1
-    fi
-  fi
-
-  if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-    if ! grep -Fq '{{DB_CERT_DER_HEX}}' "${OVF_TEMPLATE}" ; then
-      echo "Missing CA certificate field in OVF template, which is required for Secure Boot support." >&2
-      exit 1
-    fi
-  fi
-fi
+sanity_checks \
+  "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
 
 # Store output artifacts in a versioned directory.
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
 mkdir -p "${OUTPUT_DIR}"
-
-FILENAME_PREFIX="${IMAGE_NAME}-${VARIANT}-${ARCH}-${VERSION_ID}-${BUILD_ID}"
-OS_IMAGE_NAME="${FILENAME_PREFIX}"
-DATA_IMAGE_NAME="${FILENAME_PREFIX}-data"
-BOOT_IMAGE_NAME="${FILENAME_PREFIX}-boot.ext4.lz4"
-VERITY_IMAGE_NAME="${FILENAME_PREFIX}-root.verity.lz4"
-ROOT_IMAGE_NAME="${FILENAME_PREFIX}-root.ext4.lz4"
 
 OS_IMAGE="$(mktemp)"
 BOOT_IMAGE="$(mktemp)"
@@ -631,32 +580,26 @@ esac
 sgdisk -v "${OS_IMAGE}"
 [ -s "${DATA_IMAGE}" ] && sgdisk -v "${DATA_IMAGE}"
 if [[ ${OUTPUT_FMT} == "raw" ]]; then
-  lz4 -vc "${OS_IMAGE}" >"${OUTPUT_DIR}/${OS_IMAGE_NAME}.img.lz4"
-  symlink_image "img.lz4" "os_image" \
-    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+  compress_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  symlink_image "img.lz4" "os_image" "${OUTPUT_DIR}"
   if [ -s "${DATA_IMAGE}" ] ; then
-    lz4 -vc "${DATA_IMAGE}" >"${OUTPUT_DIR}/${DATA_IMAGE_NAME}.img.lz4"
-    symlink_image "img.lz4" "data_image" \
-      "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+    compress_image "img.lz4" "data_image" "${OUTPUT_DIR}"
+    symlink_image "img.lz4" "data_image" "${OUTPUT_DIR}"
   fi
 elif [[ ${OUTPUT_FMT} == "qcow2" ]]; then
-  qemu-img convert -f raw -O qcow2 "${OS_IMAGE}" "${OUTPUT_DIR}/${OS_IMAGE_NAME}.qcow2"
-  symlink_image "qcow2" "os_image" \
-    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+  compress_image "qcow2" "os_image" "${OUTPUT_DIR}"
+  symlink_image "qcow2" "os_image" "${OUTPUT_DIR}"
   if [ -s "${DATA_IMAGE}" ] ; then
-    qemu-img convert -f raw -O qcow2 "${DATA_IMAGE}" "${OUTPUT_DIR}/${DATA_IMAGE_NAME}.qcow2"
-    symlink_image "qcow2" "data_image" \
-      "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+    compress_image "qcow2" "data_image" "${OUTPUT_DIR}"
+    symlink_image "qcow2" "data_image" "${OUTPUT_DIR}"
   fi
 elif [[ ${OUTPUT_FMT} == "vmdk" ]]; then
   # Stream optimization is required for creating an Open Virtual Appliance (OVA)
-  qemu-img convert -f raw -O vmdk -o subformat=streamOptimized "${OS_IMAGE}" "${OUTPUT_DIR}/${OS_IMAGE_NAME}.vmdk"
-  symlink_image "vmdk" "os_image" \
-    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+  compress_image "vmdk" "os_image" "${OUTPUT_DIR}"
+  symlink_image "vmdk" "os_image" "${OUTPUT_DIR}"
   if [ -s "${DATA_IMAGE}" ] ; then
-    qemu-img convert -f raw -O vmdk -o subformat=streamOptimized "${DATA_IMAGE}" "${OUTPUT_DIR}/${DATA_IMAGE_NAME}.vmdk"
-    symlink_image "vmdk" "data_image" \
-      "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+    compress_image "vmdk" "data_image" "${OUTPUT_DIR}"
+    symlink_image "vmdk" "data_image" "${OUTPUT_DIR}"
   fi
 fi
 
@@ -671,20 +614,16 @@ if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
     "${UEFI_SECURE_BOOT}" \
     "${SBKEYS}" \
     "${OUTPUT_DIR}"
-  symlink_image "ova" "os_image" \
-    "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+  symlink_image "ova" "os_image" "${OUTPUT_DIR}"
 fi
 
-lz4 -9vc "${BOOT_IMAGE}" >"${OUTPUT_DIR}/${BOOT_IMAGE_NAME}"
-lz4 -9vc "${VERITY_IMAGE}" >"${OUTPUT_DIR}/${VERITY_IMAGE_NAME}"
-lz4 -9vc "${ROOT_IMAGE}" >"${OUTPUT_DIR}/${ROOT_IMAGE_NAME}"
+compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+compress_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
+compress_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
-symlink_image "" "boot_image" \
-  "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
-symlink_image "" "verity_image" \
-  "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
-symlink_image "" "root_image" \
-  "${SYMLINK_PREFIX}" "${VERSION_ID}" "${OUTPUT_DIR}"
+symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
+symlink_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
 find "${OUTPUT_DIR}" -type f -print -exec chown 1000:1000 {} \;
 

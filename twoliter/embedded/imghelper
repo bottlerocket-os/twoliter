@@ -1,23 +1,147 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034 # some variables are used through parameter substitution
 
-# shellcheck disable=SC2034 # variables are used through parameter substitution
+# shellcheck disable=SC2154  # some variables are defined externally by the environment
+FILENAME_PREFIX="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}-${VERSION_ID:?}-${BUILD_ID:?}"
+SYMLINK_PREFIX="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}"
+
+DATA_IMAGE_SUFFIX="-data"
+BOOT_IMAGE_SUFFIX="-boot"
+VERITY_IMAGE_SUFFIX="-root"
+ROOT_IMAGE_SUFFIX="-root"
+
+OS_IMAGE_NAME="${FILENAME_PREFIX}"
+DATA_IMAGE_NAME="${FILENAME_PREFIX}${DATA_IMAGE_SUFFIX}"
+BOOT_IMAGE_NAME="${FILENAME_PREFIX}${BOOT_IMAGE_SUFFIX}"
+VERITY_IMAGE_NAME="${FILENAME_PREFIX}${VERITY_IMAGE_SUFFIX}"
+ROOT_IMAGE_NAME="${FILENAME_PREFIX}${ROOT_IMAGE_SUFFIX}"
+
+sanity_checks() {
+  local output_fmt partition_plan ovf_template uefi_secure_boot
+  output_fmt="${1:?}"
+  partition_plan="${2:?}"
+  ovf_template="${3:?}"
+  uefi_secure_boot="${4:?}"
+  case "${output_fmt}" in
+  raw | qcow2 | vmdk) ;;
+  *)
+    echo "unexpected image output format '${output_fmt}'" >&2
+    exit 1
+    ;;
+  esac
+
+  case "${partition_plan}" in
+  split | unified) ;;
+  *)
+    echo "unexpected partition plan '${partition_plan}'" >&2
+    exit 1
+    ;;
+  esac
+
+  # Fail fast if the OVF template doesn't exist, or doesn't match the layout.
+  if [ "${output_fmt}" == "vmdk" ]; then
+    if [ ! -s "${ovf_template}" ]; then
+      echo "required OVF template not found: ${ovf_template}" >&2
+      exit 1
+    fi
+
+    if [ "${partition_plan}" == "split" ]; then
+      if ! grep -Fq '{{DATA_DISK}}' "${ovf_template}"; then
+        echo "Missing data disk in OVF template, which is required for 'split' layout." >&2
+        exit 1
+      fi
+    fi
+
+    if [ "${partition_plan}" == "unified" ]; then
+      if grep -Fq '{{DATA_DISK}}' "${ovf_template}"; then
+        echo "Data disk included in OVF template, which is not supported for 'unified' layout." >&2
+        exit 1
+      fi
+    fi
+
+    if [ "${uefi_secure_boot}" == "yes" ]; then
+      if ! grep -Fq '{{DB_CERT_DER_HEX}}' "${ovf_template}"; then
+        echo "Missing CA certificate field in OVF template, which is required for Secure Boot support." >&2
+        exit 1
+      fi
+    fi
+  fi
+}
+
+decompress_image() {
+  local ext what input_dir input_image image_name
+  ext="${1:?}"
+  what="${2:?}"
+  input_dir="${3:?}"
+
+  input_image="${what^^}"
+  image_name="${what^^}_NAME"
+
+  case "${ext}" in
+  *lz4)
+    unlz4 -f "${input_dir}/${!image_name}${ext:+.${ext}}" "${!image_name}.img"
+    ;;
+  qcow2)
+    qemu-img convert -f "${ext}" -O raw \
+      "${input_dir}/${!image_name}${ext:+.${ext}}" "${!image_name}.img"
+    ;;
+  vmdk)
+    qemu-img convert -f "${ext}" -O raw \
+      "${input_dir}/${!image_name}${ext:+.${ext}}" "${!image_name}.img"
+    ;;
+  *)
+    echo "unexpected extension: ${ext}" >&2
+    exit 1
+    ;;
+  esac
+}
+
+compress_image() {
+  local ext what output_dir input_image image_name
+  ext="${1:?}"
+  what="${2:?}"
+  output_dir="${3:?}"
+  input_image="${what^^}"
+  image_name="${what^^}_NAME"
+
+  case "${ext}" in
+  *lz4)
+    lz4 -9vc "${!input_image}" >"${output_dir}/${!image_name}${ext:+.${ext}}"
+    ;;
+  qcow2)
+    qemu-img convert -f raw -O "${ext}" \
+      "${!input_image}" "${output_dir}/${!image_name}${ext:+.${ext}}"
+    ;;
+  # stream optimization is required for creating Open Virtual Appliances (OVAs)
+  vmdk)
+    qemu-img convert -f raw -O "${ext}" -o subformat=streamOptimized \
+      "${!input_image}" "${output_dir}/${!image_name}${ext:+.${ext}}"
+    ;;
+  *)
+    echo "unexpected extension: ${ext}" >&2
+    exit 1
+    ;;
+  esac
+}
+
 symlink_image() {
-  local ext what target symlink_prefix version_id output_dir symlink_suffix
+  local ext what target output_dir symlink_prefix version_id symlink_suffix
   ext="$1"
   what="${2:?}"
-  symlink_prefix="${3:?}"
-  version_id="${4:?}"
-  output_dir="${5:?}"
+  output_dir="${3:?}"
+
+  symlink_prefix="${SYMLINK_PREFIX}"
+  version_id="${VERSION_ID:?}"
 
   ext="${ext:+.$ext}"
   target="${what^^}_NAME"
 
   case "${what}" in
   os_image) symlink_suffix="" ;;
-  data_image) symlink_suffix="-data" ;;
-  boot_image) symlink_suffix="-boot.ext4.lz4" ;;
-  verity_image) symlink_suffix="-root.verity.lz4" ;;
-  root_image) symlink_suffix="-root.ext4.lz4" ;;
+  data_image) symlink_suffix="${DATA_IMAGE_SUFFIX}" ;;
+  boot_image) symlink_suffix="${BOOT_IMAGE_SUFFIX}" ;;
+  verity_image) symlink_suffix="${VERITY_IMAGE_SUFFIX}" ;;
+  root_image) symlink_suffix="${ROOT_IMAGE_SUFFIX}" ;;
   *)
     echo "unknown image '${what}'" >&2
     exit 1
