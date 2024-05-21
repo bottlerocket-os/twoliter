@@ -1,0 +1,16 @@
+{
+  "name": "bottlerocket-test-kit",
+  "version": "1.1.0",
+  "bottlerocket_sdk": {
+    "name": "bottlerocket-sdk",
+    "version": "0.41.0",
+    "vendor": "bottlerocket"
+  },
+  "dependencies": [
+    {
+      "name": "bottlerocket-core-kit",
+      "version": "1.0.0",
+      "vendor": "bottlerocket"
+    }
+  ]
+}
