@@ -479,6 +479,31 @@ provide_certs() {
   mcopy -i "${efi_image}" "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
 }
 
+sign_vmlinuz() {
+  local vmlinuz
+  vmlinuz="${1:?}"
+
+  undo_sign "${vmlinuz}"
+  do_sign "${vmlinuz}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+generate_hmac() {
+  local vmlinuz
+  vmlinuz="${1:?}"
+  openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" |
+    awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
+      >"${vmlinuz%/*}.${vmlinuz##*/}.hmac"
+}
+
+sign_grubcfg() {
+  local grub_cfg grub_cfg_sig
+  grub_cfg="${1:?}"
+  grub_cfg_sig="${grub_cfg}.sig"
+  [[ -f "${grub_cfg_sig}" ]] && rm "${grub_cfg_sig}"
+  gpg --batch --no-tty --detach-sign "${grub_cfg}"
+  gpg --batch --no-tty --verify "${grub_cfg_sig}" "${grub_cfg}"
+}
+
 generate_ova() {
   local os_vmdk data_vmdk
   os_vmdk="${1:?}"

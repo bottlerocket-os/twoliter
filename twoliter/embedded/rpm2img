@@ -229,21 +229,12 @@ mkdir -p "${ROOT_MOUNT}/boot/grub"
 # Now that we're done messing with /, move /boot out of it
 mv "${ROOT_MOUNT}/boot"/* "${BOOT_MOUNT}"
 
-pushd "${BOOT_MOUNT}" >/dev/null
-
-vmlinuz="vmlinuz"
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  pesign -i "${vmlinuz}" -o "${vmlinuz}.signed" -s "${CODE_SIGN_KEY[@]}"
-  mv "${vmlinuz}.signed" "${vmlinuz}"
-  pesigcheck -i "${vmlinuz}" -n 0 -c "${SBKEYS}/vendor.cer"
+  sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
 fi
 
 # Generate an HMAC for the kernel after signing.
-openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" \
-  | awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
-  > ".${vmlinuz}.hmac"
-
-popd >/dev/null
+generate_hmac "${BOOT_MOUNT}/vmlinuz"
 
 # Set the Bottlerocket variant, version, and build-id
 SYS_ROOT="${ARCH}-bottlerocket-linux-gnu/sys-root"
@@ -336,8 +327,7 @@ menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
 EOF
 
 if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-  gpg --detach-sign "${BOOT_MOUNT}/grub/grub.cfg"
-  gpg --verify "${BOOT_MOUNT}/grub/grub.cfg.sig"
+  sign_grubcfg "${BOOT_MOUNT}/grub/grub.cfg"
 fi
 
 # Combine any bootconfig snippets in /boot for later use, then clean up.
