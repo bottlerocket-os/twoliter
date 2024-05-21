@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034 # some variables are used through parameter substitution
 
+set -o pipefail
+
 # shellcheck disable=SC2154  # some variables are defined externally by the environment
 FILENAME_PREFIX="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}-${VERSION_ID:?}-${BUILD_ID:?}"
 SYMLINK_PREFIX="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}"
@@ -15,6 +17,11 @@ DATA_IMAGE_NAME="${FILENAME_PREFIX}${DATA_IMAGE_SUFFIX}"
 BOOT_IMAGE_NAME="${FILENAME_PREFIX}${BOOT_IMAGE_SUFFIX}"
 VERITY_IMAGE_NAME="${FILENAME_PREFIX}${VERITY_IMAGE_SUFFIX}"
 ROOT_IMAGE_NAME="${FILENAME_PREFIX}${ROOT_IMAGE_SUFFIX}"
+
+VERITY_VERSION=1
+VERITY_HASH_ALGORITHM=sha256
+VERITY_DATA_BLOCK_SIZE=4096
+VERITY_HASH_BLOCK_SIZE=4096
 
 sanity_checks() {
   local output_fmt partition_plan ovf_template uefi_secure_boot
@@ -230,6 +237,63 @@ mkfs_data_xfs() {
   # Create a file to write the filesystem to first
   dd if=/dev/zero of="${bottlerocket_data}" bs=1M count="${size%?}"
   dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
+}
+
+generate_verity_root() {
+  local root_image verity_image veritypart_mib
+  local -n dm_verity_root
+  root_image="${1:?}"
+  verity_image="${2:?}"
+  veritypart_mib="${3:?}"
+  dm_verity_root="${4:?}"
+
+  truncate -s "${veritypart_mib}M" "${verity_image}"
+
+  local veritysetup_output
+  veritysetup_output="$(veritysetup format \
+    --format "${VERITY_VERSION}" \
+    --hash "${VERITY_HASH_ALGORITHM}" \
+    --data-block-size "${VERITY_DATA_BLOCK_SIZE}" \
+    --hash-block-size "${VERITY_HASH_BLOCK_SIZE}" \
+    "${root_image}" "${verity_image}" |
+    tee /dev/stderr)"
+
+  local verityimage_size veritypart_bytes
+  verityimage_size="$(stat -c %s "${verity_image}")"
+  veritypart_bytes="$((veritypart_mib * 1024 * 1024))"
+  if [ "${verityimage_size}" -gt "${veritypart_bytes}" ]; then
+    echo "verity content is larger than partition (${veritypart_mib}M)" >&2
+    exit 1
+  fi
+
+  local verity_data_4k_blocks verity_data_512b_blocks
+  verity_data_4k_blocks="$(grep '^Data blocks:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
+  verity_data_512b_blocks="$((verity_data_4k_blocks * 8))"
+
+  local verity_root_hash verity_salt
+  verity_root_hash="$(grep '^Root hash:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
+  verity_salt="$(grep '^Salt:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
+
+  veritysetup verify "${root_image}" "${verity_image}" "${verity_root_hash}"
+
+  dm_verity_root=(
+    "root,,,ro,0"
+    "${verity_data_512b_blocks}"
+    "verity"
+    "${VERITY_VERSION}"
+    "PARTUUID=\$boot_uuid/PARTNROFF=1"
+    "PARTUUID=\$boot_uuid/PARTNROFF=2"
+    "${VERITY_DATA_BLOCK_SIZE}"
+    "${VERITY_HASH_BLOCK_SIZE}"
+    "${verity_data_4k_blocks}"
+    "1"
+    "${VERITY_HASH_ALGORITHM}"
+    "${verity_root_hash}"
+    "${verity_salt}"
+    "2"
+    "restart_on_corruption"
+    "ignore_zero_blocks"
+  )
 }
 
 generate_ova() {
