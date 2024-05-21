@@ -17,19 +17,21 @@ mod spec;
 
 use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs};
 use crate::builder::DockerBuild;
-use buildsys::manifest::{BundleModule, Manifest, ManifestInfo, SupportedArch};
+use buildsys::manifest::{BundleModule, ImageFeature, Manifest, ManifestInfo, SupportedArch};
 use cache::LookasideCache;
 use clap::Parser;
 use gomod::GoMod;
 use project::ProjectInfo;
 use snafu::{ensure, ResultExt};
 use spec::SpecInfo;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process;
 
 mod error {
     use buildsys::manifest::SupportedArch;
     use snafu::Snafu;
+    use std::path::PathBuf;
 
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
@@ -70,6 +72,26 @@ mod error {
             arch: SupportedArch,
             supported_arches: Vec<String>,
         },
+
+        #[snafu(display(
+        "The manifest for package {} has a package.metadata.build-package.package-features \
+            section. This functionality has been removed from the build system. Packages are no \
+            longer allowed to be aware of what variant they are being built for. Please remove \
+            this key from {}",
+        name,
+        path.display(),
+        ))]
+        PackageFeatures { name: String, path: PathBuf },
+
+        #[snafu(display(
+        "The manifest for package {} has a package.metadata.build-package.variant-sensitive \
+            key. This functionality has been removed from the build system. Packages are no \
+            longer allowed to be aware of what variant they are being built for. Please remove \
+            this key from {}",
+        name,
+        path.display(),
+        ))]
+        VariantSensitive { name: String, path: PathBuf },
     }
 }
 
@@ -97,70 +119,24 @@ fn run(args: Buildsys) -> Result<()> {
 
 fn build_package(args: BuildPackageArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
+    let manifest_path = args.common.cargo_manifest_dir.join(manifest_file);
     println!("cargo:rerun-if-changed={}", manifest_file);
 
-    let variant_manifest_path = args
-        .common
-        .root_dir
-        .join("variants")
-        .join(&args.variant)
-        .join(manifest_file);
+    let manifest = Manifest::new(&manifest_path, &args.common.cargo_metadata_path)
+        .context(error::ManifestParseSnafu)?;
 
-    let variant_manifest =
-        ManifestInfo::new(variant_manifest_path).context(error::ManifestParseSnafu)?;
-    supported_arch(&variant_manifest, args.common.arch)?;
-    let mut image_features = variant_manifest.image_features();
-
-    let manifest = Manifest::new(
-        args.common.cargo_manifest_dir.join(manifest_file),
-        &args.common.cargo_metadata_path,
-    )
-    .context(error::ManifestParseSnafu)?;
-    let package_features = manifest.info().package_features();
-
-    // For any package feature specified in the package manifest, track the corresponding
-    // environment variable for changes to the ambient set of image features for the current
-    // variant.
-    if let Some(package_features) = &package_features {
-        for package_feature in package_features {
-            println!(
-                "cargo:rerun-if-env-changed=BUILDSYS_VARIANT_IMAGE_FEATURE_{}",
-                package_feature
-            );
-        }
-    }
-
-    // Keep only the image features that the package has indicated that it tracks, if any.
-    if let Some(image_features) = &mut image_features {
-        match package_features {
-            Some(package_features) => image_features.retain(|k| package_features.contains(k)),
-            None => image_features.clear(),
-        }
-    }
-
-    // If manifest has package.metadata.build-package.variant-sensitive set, then track the
-    // appropriate environment variable for changes.
-    if let Some(sensitivity) = manifest.info().variant_sensitive() {
-        use buildsys::manifest::{SensitivityType::*, VariantSensitivity::*};
-        fn emit_variant_env(suffix: Option<&str>) {
-            if let Some(suffix) = suffix {
-                println!(
-                    "cargo:rerun-if-env-changed=BUILDSYS_VARIANT_{}",
-                    suffix.to_uppercase()
-                );
-            } else {
-                println!("cargo:rerun-if-env-changed=BUILDSYS_VARIANT");
-            }
-        }
-        match sensitivity {
-            Any(false) => (),
-            Any(true) => emit_variant_env(None),
-            Specific(Platform) => emit_variant_env(Some("platform")),
-            Specific(Runtime) => emit_variant_env(Some("runtime")),
-            Specific(Family) => emit_variant_env(Some("family")),
-            Specific(Flavor) => emit_variant_env(Some("flavor")),
-        }
-    }
+    let image_features = if std::env::var("BUILDSYS_DEPRECATED_FEATURE_VARIANT_SENSITIVITY").is_ok()
+    {
+        get_package_features_and_emit_cargo_watches_for_variant_sensitivity(
+            &manifest,
+            &args.common.root_dir,
+            &args.variant,
+            args.common.arch,
+        )?
+    } else {
+        ensure_package_is_not_variant_sensitive(&manifest, &manifest_path)?;
+        HashSet::default()
+    };
 
     if let Some(files) = manifest.info().external_files() {
         let lookaside_cache = LookasideCache::new(
@@ -217,7 +193,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         println!("cargo:rerun-if-changed={}", f.display());
     }
 
-    DockerBuild::new_package(args, &manifest, image_features.unwrap_or_default())
+    DockerBuild::new_package(args, &manifest, image_features)
         .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)
@@ -272,5 +248,95 @@ fn supported_arch(manifest: &ManifestInfo, arch: SupportedArch) -> Result<()> {
             }
         )
     }
+    Ok(())
+}
+
+fn get_package_features_and_emit_cargo_watches_for_variant_sensitivity(
+    manifest: &Manifest,
+    root_dir: &Path,
+    variant: &str,
+    arch: SupportedArch,
+) -> Result<HashSet<ImageFeature>> {
+    let package_features = manifest.info().package_features();
+
+    // Load the Variant manifest to find image features that may affect the package build.
+    let variant_manifest_path = root_dir.join("variants").join(variant).join("Cargo.toml");
+
+    let variant_manifest =
+        ManifestInfo::new(variant_manifest_path).context(error::ManifestParseSnafu)?;
+    supported_arch(&variant_manifest, arch)?;
+    let mut image_features = variant_manifest.image_features();
+
+    // For any package feature specified in the package manifest, track the corresponding
+    // environment variable for changes to the ambient set of image features for the current
+    // variant.
+    if let Some(package_features) = &package_features {
+        for package_feature in package_features {
+            println!(
+                "cargo:rerun-if-env-changed=BUILDSYS_VARIANT_IMAGE_FEATURE_{}",
+                package_feature
+            );
+        }
+    }
+
+    // Keep only the image features that the package has indicated that it tracks, if any.
+    if let Some(image_features) = &mut image_features {
+        match package_features {
+            Some(package_features) => image_features.retain(|k| package_features.contains(k)),
+            None => image_features.clear(),
+        }
+    }
+
+    // If manifest has package.metadata.build-package.variant-sensitive set, then track the
+    // appropriate environment variable for changes.
+    if let Some(sensitivity) = manifest.info().variant_sensitive() {
+        use buildsys::manifest::{SensitivityType::*, VariantSensitivity::*};
+        fn emit_variant_env(suffix: Option<&str>) {
+            if let Some(suffix) = suffix {
+                println!(
+                    "cargo:rerun-if-env-changed=BUILDSYS_VARIANT_{}",
+                    suffix.to_uppercase()
+                );
+            } else {
+                println!("cargo:rerun-if-env-changed=BUILDSYS_VARIANT");
+            }
+        }
+        match sensitivity {
+            Any(false) => (),
+            Any(true) => emit_variant_env(None),
+            Specific(Platform) => emit_variant_env(Some("platform")),
+            Specific(Runtime) => emit_variant_env(Some("runtime")),
+            Specific(Family) => emit_variant_env(Some("family")),
+            Specific(Flavor) => emit_variant_env(Some("flavor")),
+        }
+    }
+
+    Ok(image_features.unwrap_or_default())
+}
+
+/// Prior to the release of Kits as a build feature, packages could, and did, declare themselves
+/// sensitive to various Variant features so that they could be conditionally compiled based on
+/// what variant was being built. This is no longer the case, so we enforce that these keys are no
+/// longer supported in package Cargo.toml files.
+fn ensure_package_is_not_variant_sensitive(
+    manifest: &Manifest,
+    manifest_path: &Path,
+) -> Result<()> {
+    ensure!(
+        manifest.info().package_features().is_none(),
+        error::PackageFeaturesSnafu {
+            name: manifest.info().manifest_name(),
+            path: manifest_path
+        }
+    );
+
+    ensure!(
+        manifest.info().variant_sensitive().is_none(),
+        error::VariantSensitiveSnafu {
+            name: manifest.info().manifest_name(),
+            path: manifest_path
+        }
+    );
+
     Ok(())
 }
