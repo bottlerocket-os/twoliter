@@ -82,3 +82,7 @@ datastore = "WorkloadDatastore" # GOVC_DATASTORE
 network = "sddc-cgw-network-1" # GOVC_NETWORK
 folder = "my_folder" # GOVC_FOLDER
 resource_pool = "/SDDC-Datacenter/host/Cluster/Resources/Compute-ResourcePool" # GOVC_RESOURCE_POOL
+
+# Container vendor specific configuration
+[vendor.bottlerocket]
+registry = "my.vendor/path"

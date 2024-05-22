@@ -64,13 +64,10 @@ impl BuildVariant {
 
         let sdk_container = DockerContainer::new(
             format!("sdk-{}", token),
-            project
-                .sdk()
-                .context(format!(
-                    "No SDK defined in {}",
-                    project.filepath().display(),
-                ))?
-                .uri(),
+            project.sdk()?.context(format!(
+                "No SDK defined in {}",
+                project.filepath().display(),
+            ))?,
         )
         .await?;
         sdk_container

@@ -6,13 +6,13 @@ mod cargo_make;
 mod cmd;
 mod common;
 mod docker;
+mod lock;
 mod project;
 mod schema_version;
-mod tools;
-
 /// Test code that should only be compiled when running tests.
 #[cfg(test)]
 mod test;
+mod tools;
 
 /// `anyhow` prints a nicely formatted error message with `Debug`, so we can return a result from
 /// the `main` function.
