@@ -15,7 +15,9 @@ mod gomod;
 mod project;
 mod spec;
 
-use crate::args::{BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs};
+use crate::args::{
+    BuildKitArgs, BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs,
+};
 use crate::builder::DockerBuild;
 use buildsys::manifest::{BundleModule, ImageFeature, Manifest, ManifestInfo, SupportedArch};
 use cache::LookasideCache;
@@ -112,6 +114,7 @@ fn run(args: Buildsys) -> Result<()> {
     args::rerun_for_envs(args.command.build_type());
     match args.command {
         Command::BuildPackage(args) => build_package(*args),
+        Command::BuildKit(args) => build_kit(*args),
         Command::BuildVariant(args) => build_variant(*args),
         Command::RepackVariant(args) => repack_variant(*args),
     }
@@ -194,6 +197,22 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
     }
 
     DockerBuild::new_package(args, &manifest, image_features)
+        .context(error::BuilderInstantiationSnafu)?
+        .build()
+        .context(error::BuildAttemptSnafu)
+}
+
+fn build_kit(args: BuildKitArgs) -> Result<()> {
+    let manifest_file = "Cargo.toml";
+    println!("cargo:rerun-if-changed={}", manifest_file);
+
+    let manifest = Manifest::new(
+        args.common.cargo_manifest_dir.join(manifest_file),
+        &args.common.cargo_metadata_path,
+    )
+    .context(error::ManifestParseSnafu)?;
+
+    DockerBuild::new_kit(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)

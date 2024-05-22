@@ -369,6 +369,15 @@ impl ManifestInfo {
             .unwrap_or_else(|| self.manifest_name())
     }
 
+    /// Convenience method to return the kit name. If the manifest has an override in the
+    /// `package.metadata.build-kit.kit-name` key, it is returned, otherwise the Cargo manifest name
+    /// is returned from `package.name`.
+    pub fn kit_name(&self) -> &str {
+        self.build_kit()
+            .and_then(|b| b.kit_name.as_deref())
+            .unwrap_or_else(|| self.manifest_name())
+    }
+
     /// Convenience method to find whether the package is sensitive to variant changes.
     pub fn variant_sensitive(&self) -> Option<&VariantSensitivity> {
         self.build_package()
@@ -542,7 +551,7 @@ pub struct BuildPackage {
 #[serde(rename_all = "kebab-case")]
 #[allow(dead_code)]
 pub struct BuildKit {
-    pub included_packages: Option<Vec<String>>,
+    pub kit_name: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
