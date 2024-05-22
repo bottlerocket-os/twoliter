@@ -11,4 +11,4 @@ build = "../build.rs"
 path = "../kit.rs"
 
 [build-dependencies]
-pkg-a = { path = "../../packages/pkg-a" }
+pkg-a-1_27 = { path = "../../packages/pkg-a-1.27" }

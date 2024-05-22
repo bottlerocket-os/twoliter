@@ -6,7 +6,7 @@ version = 3
 name = "core-kit"
 version = "0.1.0"
 dependencies = [
- "pkg-a",
+ "pkg-a-1_27",
 ]
 
 [[package]]
@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pkg-a"
+name = "pkg-a-1_27"
 version = "0.1.0"
 
 [[package]]

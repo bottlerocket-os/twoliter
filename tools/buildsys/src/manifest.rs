@@ -821,7 +821,7 @@ mod test {
         let cargo_metadata_path = cargo_metadata_path(&temp_dir);
         let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
         let package_list = manifest.package_dependencies().unwrap();
-        let expected = vec!["pkg-a-renamed".to_string()];
+        let expected = vec!["pkg-a-1.27".to_string()];
         assert_eq!(package_list, expected);
     }
 
