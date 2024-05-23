@@ -207,6 +207,33 @@ stage_images() {
   sgdisk -v "${os_image}"
 }
 
+install_ca_certs() {
+  local root_mount
+  root_mount="${1:?}"
+
+  local ca_certs_default_bundle="/usr/share/bottlerocket/ca-certificates/ca-bundle.crt"
+
+  local ca_certs_bundle="${HOME}/certs/ca-bundle.crt"
+  local ca_certs_installdir="/usr/share/factory/etc/pki/tls/certs"
+
+  install -d "${root_mount}${ca_certs_installdir}"
+  if [[ -f "${ca_certs_bundle}" ]]; then
+    install -p -m 0644 \
+      "${ca_certs_bundle}" \
+      "${root_mount}${ca_certs_installdir}"
+  elif [[ -f "${ca_certs_default_bundle}" ]]; then
+    install -p -m 0644 \
+      "${ca_certs_default_bundle}" \
+      "${root_mount}${ca_certs_installdir}"
+  else
+    echo "no CA certificates found" >&2
+    exit 1
+  fi
+
+  openssl verify \
+    "${root_mount}${ca_certs_installdir}/ca-bundle.crt" >/dev/null
+}
+
 install_root_json() {
   local root_mount
   root_mount="${1:?}"
