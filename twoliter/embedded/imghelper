@@ -169,6 +169,44 @@ symlink_image() {
   done
 }
 
+stage_images() {
+  local input_dir output_fmt
+  local -n os_image data_image
+  input_dir="${1:?}"
+  output_fmt="${2:?}"
+  os_image="${3:?}"
+  data_image="${4:?}"
+
+  local friendly_prefix
+  friendly_prefix="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}-v${VERSION_ID:?}"
+
+  os_image="$(pwd)/${OS_IMAGE_NAME}.img"
+  case "${output_fmt}" in
+  raw)
+    decompress_image "img.lz4" "os_image" "${input_dir}"
+    data_image="${input_dir}/${DATA_IMAGE_NAME}.img.lz4"
+    ;;
+  qcow2)
+    decompress_image "qcow2" "os_image" "${input_dir}"
+    data_image="${input_dir}/${DATA_IMAGE_NAME}.qcow2"
+    ;;
+  vmdk)
+    tar xvf \
+      "${input_dir}/${friendly_prefix}.ova" \
+      "*.vmdk"
+    decompress_image "vmdk" "os_image" "$(pwd)"
+    mv "${OS_IMAGE_NAME}.vmdk" "${OS_IMAGE_NAME}.vmdk.orig"
+    data_image="${input_dir}/${DATA_IMAGE_NAME}.vmdk"
+    ;;
+  *)
+    echo "unexpected output format: ${output_fmt}" >&2
+    exit 1
+    ;;
+  esac
+
+  sgdisk -v "${os_image}"
+}
+
 # shim expects the following data structure in `.vendor_cert`:
 #
 # struct {
@@ -244,6 +282,18 @@ mkfs_data_xfs() {
   dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
 }
 
+check_image_size() {
+  local image part_mib image_size part_bytes
+  image="${1:?}"
+  part_mib="${2:?}"
+  image_size="$(stat -c %s "${image}")"
+  part_bytes="$((part_mib * 1024 * 1024))"
+  if [[ "${image_size}" -gt "${part_bytes}" ]]; then
+    echo "${image##*/} content is larger than partition (${part_mib}M)" >&2
+    exit 1
+  fi
+}
+
 generate_verity_root() {
   local root_image verity_image veritypart_mib
   local -n dm_verity_root
@@ -263,13 +313,7 @@ generate_verity_root() {
     "${root_image}" "${verity_image}" |
     tee /dev/stderr)"
 
-  local verityimage_size veritypart_bytes
-  verityimage_size="$(stat -c %s "${verity_image}")"
-  veritypart_bytes="$((veritypart_mib * 1024 * 1024))"
-  if [ "${verityimage_size}" -gt "${veritypart_bytes}" ]; then
-    echo "verity content is larger than partition (${veritypart_mib}M)" >&2
-    exit 1
-  fi
+  check_image_size "${verity_image}" "${veritypart_mib}"
 
   local verity_data_4k_blocks verity_data_512b_blocks
   verity_data_4k_blocks="$(grep '^Data blocks:' <<<"${veritysetup_output}" | awk '{ print $NF }')"
@@ -476,7 +520,7 @@ unembed_grub() {
 provide_certs() {
   local efi_image
   efi_image="${1:?}"
-  mcopy -i "${efi_image}" "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
+  mcopy -i "${efi_image}" -ov "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
 }
 
 sign_vmlinuz() {
