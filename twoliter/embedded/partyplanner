@@ -118,6 +118,94 @@ PRIVATE_SCALE_FACTOR="24"
 ##############################################################################
 # Section 5: library functions
 
+# Populate the caller's tables with sizes and offsets for known partitions of
+# existing images.
+get_partition_sizes() {
+  local os_image data_image partition_plan
+  local -n pt_size pt_offset
+  os_image="$1"
+  data_image="$2"
+
+  # Whether we're building a layout for a "split" image, where OS and data
+  # volumes are on separate disks, or a "unified" image, where they share the
+  # same disk.
+  partition_plan="${3:?}"
+
+  # Table for partition sizes, in MiB.
+  pt_size="${4:?}"
+
+  # Table for partition offsets from start of disk, in MiB.
+  pt_offset="${5:?}"
+
+  local os_image_table=""
+  if [[ -n "${os_image}" ]]; then
+    os_image_table="$(sgdisk --print "${os_image}")"
+  fi
+
+  local data_image_table=""
+  if [[ "${partition_plan}" == "split" ]] && [[ -n "${data_image}" ]]; then
+    data_image_table="$(sgdisk --print "${data_image}")"
+  else
+    data_image_table="${os_image_table}"
+  fi
+
+  local offset sectors
+  for part in \
+    BIOS \
+    EFI-A BOOT-A ROOT-A HASH-A RESERVED-A \
+    EFI-B BOOT-B ROOT-B HASH-B RESERVED-B \
+    PRIVATE DATA-A DATA-B; do
+    case "${part}" in
+      BIOS)
+        offset="$(awk /BIOS-BOOT/'{print $2}' <<<"${os_image_table}")"
+        sectors="$(awk /BIOS-BOOT/'{print $4}' <<<"${os_image_table}")"
+        ;;
+      EFI-A)
+        offset="$(awk /EFI-SYSTEM/'{print $2}' <<<"${os_image_table}")"
+        sectors="$(awk /EFI-SYSTEM/'{print $4}' <<<"${os_image_table}")"
+        ;;
+      EFI-B)
+        offset="$(awk /EFI-BACKUP/'{print $2}' <<<"${os_image_table}")"
+        sectors="$(awk /EFI-BACKUP/'{print $4}' <<<"${os_image_table}")"
+        ;;
+      RESERVED-A)
+        offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
+        <<<"${os_image_table}" | head -1 || true)"
+        sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
+        <<<"${os_image_table}" | head -1 || true)"
+        ;;
+      RESERVED-B)
+        offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
+        <<<"${os_image_table}" | tail -1 || true)"
+        sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
+        <<<"${os_image_table}" | tail -1 || true)"
+        ;;
+      DATA)
+        offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
+          <<<"${data_image_table}")"
+        sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
+          <<<"${data_image_table}")"
+        ;;
+      *)
+        offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
+          <<<"${os_image_table}")"
+        sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
+          <<<"${os_image_table}")"
+        ;;
+    esac
+
+    if [[ -n "${offset}" ]]; then
+      # 1 MiB contains 2048 512-byte sectors.
+      offset_mib="$((offset / 2048))"
+      pt_offset["${part}"]="${offset_mib}"
+    fi
+
+    if [[ -n "${sectors}" ]]; then
+      pt_size["${part}"]="${sectors%.0}"
+    fi
+  done
+}
+
 # Populate the caller's tables with sizes and offsets for known partitions.
 set_partition_sizes() {
   local os_image_gib data_image_gib partition_plan
