@@ -1,3 +1,320 @@
 #!/usr/bin/env bash
 
-echo "img2img not yet implemented" >&2 ; exit 1
+set -eux -o pipefail
+shopt -qs failglob
+
+OUTPUT_FMT="raw"
+OVF_TEMPLATE=""
+
+UEFI_SECURE_BOOT="no"
+
+for opt in "$@"; do
+  optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
+  case "${opt}" in
+  --input-dir=*) INPUT_DIR="${optarg}" ;;
+  --output-dir=*) OUTPUT_DIR="${optarg}" ;;
+  --output-fmt=*) OUTPUT_FMT="${optarg}" ;;
+  --os-image-size-gib=*) OS_IMAGE_SIZE_GIB="${optarg}" ;;
+  --data-image-size-gib=*) DATA_IMAGE_SIZE_GIB="${optarg}" ;;
+  --os-image-publish-size-gib=*) OS_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
+  --data-image-publish-size-gib=*) DATA_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
+  --partition-plan=*) PARTITION_PLAN="${optarg}" ;;
+  --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
+  --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
+  *)
+    echo "unexpected arg: ${opt}" >&2
+    exit 1
+    ;;
+  esac
+done
+
+WORKDIR="$(mktemp -d)"
+pushd "${WORKDIR}" >/dev/null
+
+# Clean up working directory to reduce size of layer.
+cleanup() {
+  [[ -d "${WORKDIR}" ]] && rm -rf "${WORKDIR}"
+}
+trap 'cleanup' EXIT
+
+# Since debugfs doesn't pass return codes, extrapolate failures from STDERR.
+check_debugfs_errors() {
+  local stderr
+  stderr="$1"
+
+  # debugfs prints it's version info to STDERR, so we need to filter it out.
+  # shellcheck disable=SC2312  # grep returns an error code if no match.
+  if [[ "$(grep -vc '^debugfs ' "${stderr}")" -ne 0 ]]; then
+    grep -v '^debugfs ' "${stderr}" >&2
+    exit 1
+  fi
+}
+
+# Import the partition helper functions.
+# shellcheck source=partyplanner
+. "${0%/*}/partyplanner"
+
+# Import the image helper functions.
+# shellcheck source=imghelper
+. "${0%/*}/imghelper"
+
+# Validate that the values for the args are sane.
+sanity_checks \
+  "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
+
+###############################################################################
+# Section 1: prepare working environment
+
+# Store output artifacts in a versioned directory.
+OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
+mkdir -p "${OUTPUT_DIR}"
+
+BOOT_IMAGE="${WORKDIR}/boot.ext4"
+VERITY_IMAGE="${WORKDIR}/root.verity"
+ROOT_IMAGE="${WORKDIR}/root.ext4"
+EFI_IMAGE="${WORKDIR}/efi.vfat"
+
+ROOT_MOUNT="$(mktemp -p "${WORKDIR}" -d root.XXXXXXXXXX)"
+BOOT_MOUNT="$(mktemp -p "${WORKDIR}" -d boot.XXXXXXXXXX)"
+EFI_MOUNT="$(mktemp -p "${WORKDIR}" -d efi.XXXXXXXXXX)"
+
+# Collect partition sizes and offsets from the partition plan.
+declare -A partsize partoff
+set_partition_sizes \
+  "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" "${PARTITION_PLAN}" \
+  partsize partoff
+
+# Process and stage the input images to the working directory.
+declare OS_IMAGE DATA_IMAGE
+stage_images "${INPUT_DIR}" "${OUTPUT_FMT}" OS_IMAGE DATA_IMAGE
+
+# Collect partition sizes and offsets from the OS image.
+declare -A imgsize imgoff
+get_partition_sizes \
+  "${OS_IMAGE}" "" "${PARTITION_PLAN}" imgsize imgoff
+
+# Compare the offsets between the partition plan and the input image.
+for part in "${!imgoff[@]}"; do
+  if [[ "${partoff["${part}"]}" -ne "${imgoff["${part}"]}" ]]; then
+    echo "start mismatch between partition plan and disk: '${part}'" >&2
+    exit 1
+  fi
+done
+
+# Compare the sizes between the partition plan and the input image.
+for part in "${!imgsize[@]}"; do
+  if [[ "${partsize["${part}"]}" -ne "${imgsize["${part}"]}" ]]; then
+    echo "size mismatch between partition plan and disk: '${part}'" >&2
+    exit 1
+  fi
+done
+
+###############################################################################
+# Section 2: extract needed partitions from the OS image
+
+# Extract the root image from the OS image.
+dd if="${OS_IMAGE}" of="${ROOT_IMAGE}" \
+  count="${partsize["ROOT-A"]}" bs=1M skip="${partoff["ROOT-A"]}"
+
+# Extract the boot partition from the OS image, and dump the contents.
+dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" \
+  count="${partsize["BOOT-A"]}" bs=1M skip="${partoff["BOOT-A"]}"
+debugfs -R "rdump / ${BOOT_MOUNT}" "${BOOT_IMAGE}"
+
+# Extract the EFI partition from the OS image and dump the contents, if needed.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  dd if="${OS_IMAGE}" of="${EFI_IMAGE}" \
+    count="${partsize["EFI-A"]}" bs=1M skip="${partoff["EFI-A"]}"
+  mkdir -p "${EFI_MOUNT}/EFI/BOOT"
+  mcopy -i "${EFI_IMAGE}" -sv ::/EFI/BOOT "${EFI_MOUNT}/EFI/"
+  # Remove the original signing certificates to avoid confusion.
+  rm -f "${EFI_MOUNT}/EFI/BOOT/db.cer" "${EFI_MOUNT}/EFI/BOOT/db.crt"
+fi
+
+###############################################################################
+# Section 3: replace needed artifacts
+
+# TODO - CA bundle code goes here
+
+###############################################################################
+# Section 4: update root partition and root verity
+
+# shellcheck disable=SC2312  # mapfile is validated elsewhere
+mapfile -t new_root_artifacts <<<"$(find "${ROOT_MOUNT}" -type f)"
+
+# TODO - Error if no artifacts since there will always at least the CA bundle.
+if [[ -z "${new_root_artifacts[0]}" ]]; then
+  echo "Nothing to write, skipping..."
+else
+  # Write files from the root mount to the root image.
+  ROOT_DEBUGFS_STDERR="${WORKDIR}/root.err"
+  for artifact in "${new_root_artifacts[@]}"; do
+    cat <<EOF | debugfs -w -f - "${ROOT_IMAGE}" 2>>"${ROOT_DEBUGFS_STDERR}"
+rm ${artifact#"${ROOT_MOUNT}"}
+write ${artifact} ${artifact#"${ROOT_MOUNT}"}
+ea_set ${artifact#"${ROOT_MOUNT}"} security.selinux system_u:object_r:os_t:s0
+EOF
+  done
+  check_debugfs_errors "${ROOT_DEBUGFS_STDERR}"
+fi
+
+# Validate and write root image back to the OS image.
+check_image_size "${ROOT_IMAGE}" "${partsize["ROOT-A"]}"
+dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" \
+  iflag=fullblock conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
+
+# Generate a new root verity.
+declare -a DM_VERITY_ROOT
+generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
+  "${partsize["HASH-A"]}" DM_VERITY_ROOT
+
+# Validate and write root verity back to the OS image. The image size check
+# isn't needed here as it's already done in `generate_verity_root`.
+dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" \
+  iflag=fullblock conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
+
+###############################################################################
+# Section 5: maybe secure boot
+
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
+  shims=(boot*.efi)
+  shim="${shims[0]}"
+  grubs=(grub*.efi)
+  grub="${grubs[0]}"
+  mokms=(mm*.efi)
+  mokm="${mokms[0]}"
+
+  # Do the setup required for `pesign` and `gpg` signing and
+  # verification to "just work", regardless of which type of
+  # signing profile we have.
+  sbsetup_signing_profile
+
+  # Resign the EFI artifacts.
+  sign_shim "${shim}"
+  sign_mokm "${mokm}"
+  sign_grub "${grub}"
+
+  # Write the resigned artifacts back to the EFI image.
+  mcopy -i "${EFI_IMAGE}" -ov "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
+
+  # Make the signing certificate available on the EFI system partition so it
+  # can be imported through the firmware setup UI on bare metal systems.
+  provide_certs "${EFI_IMAGE}"
+  popd >/dev/null
+
+  # Write the EFI image back to the OS image.
+  check_image_size "${EFI_IMAGE}" "${partsize["EFI-A"]}"
+  dd if="${EFI_IMAGE}" of="${OS_IMAGE}" \
+    iflag=fullblock conv=notrunc bs=1M seek="${partoff["EFI-A"]}"
+
+  # Resign the kernel and write to boot image.
+  sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
+  KERNEL_DEBUGFS_STDERR="${WORKDIR}/vmlinuz.err"
+  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${KERNEL_DEBUGFS_STDERR}"
+rm vmlinuz
+write ${BOOT_MOUNT}/vmlinuz vmlinuz
+ea_set vmlinuz security.selinux system_u:object_r:os_t:s0
+EOF
+
+  # Generate a new HMAC for the kernel after signing and write to boot image.
+  generate_hmac "${BOOT_MOUNT}/vmlinuz"
+  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${KERNEL_DEBUGFS_STDERR}"
+rm .vmlinuz.hmac
+write ${BOOT_MOUNT}/.vmlinuz.hmac .vmlinuz.hmac
+ea_set .vmlinuz.hmac security.selinux system_u:object_r:os_t:s0
+EOF
+  check_debugfs_errors "${KERNEL_DEBUGFS_STDERR}"
+fi
+
+###############################################################################
+# Section 6: update boot partition
+
+GRUB_CONFIG="${BOOT_MOUNT}/grub/grub.cfg"
+
+# Replace the dm-verity root with the new verity.
+sed -i \
+  "s:^set dm_verity_root=.*:set dm_verity_root=\"${DM_VERITY_ROOT[*]}\":g" \
+  "${GRUB_CONFIG}"
+
+# Replace grub.cfg on the boot image.
+GRUB_DEBUGFS_STDERR="${WORKDIR}/grub.err"
+cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${GRUB_DEBUGFS_STDERR}"
+rm /grub/grub.cfg
+write ${GRUB_CONFIG} /grub/grub.cfg
+ea_set /grub/grub.cfg security.selinux system_u:object_r:os_t:s0
+EOF
+
+# Sign the grub.cfg and replace the signature on the boot image, if needed.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  sign_grubcfg "${GRUB_CONFIG}"
+  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${GRUB_DEBUGFS_STDERR}"
+rm /grub/grub.cfg.sig
+write ${GRUB_CONFIG}.sig /grub/grub.cfg.sig
+ea_set /grub/grub.cfg.sig security.selinux system_u:object_r:os_t:s0
+EOF
+fi
+check_debugfs_errors "${GRUB_DEBUGFS_STDERR}"
+
+# Write the boot image back to the OS image.
+check_image_size "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
+dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" \
+  iflag=fullblock conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+
+###############################################################################
+# Section 7: generate final artifacts and copy to output dir
+
+# Panic even for warnings, such as when the main and backup tables differ.
+if OS_IMAGE_VALIDATION=$(sgdisk -v "${OS_IMAGE}"); then
+  [[ "${OS_IMAGE_VALIDATION}" =~ "Warning!" ]] && exit 1
+else
+  exit 1
+fi
+
+# Re-compress the OS image and generate OS/DATA symlinks.
+if [[ "${OUTPUT_FMT}" == "raw" ]]; then
+  compress_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  symlink_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  if [[ -s "${DATA_IMAGE}" ]]; then
+    symlink_image "img.lz4" "data_image" "${OUTPUT_DIR}"
+  fi
+elif [[ "${OUTPUT_FMT}" == "qcow2" ]]; then
+  compress_image "qcow2" "os_image" "${OUTPUT_DIR}"
+  symlink_image "qcow2" "os_image" "${OUTPUT_DIR}"
+  if [[ -s "${DATA_IMAGE}" ]]; then
+    symlink_image "qcow2" "data_image" "${OUTPUT_DIR}"
+  fi
+elif [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
+  compress_image "vmdk" "os_image" "${OUTPUT_DIR}"
+  symlink_image "vmdk" "os_image" "${OUTPUT_DIR}"
+  if [[ -s "${DATA_IMAGE}" ]]; then
+    symlink_image "vmdk" "data_image" "${OUTPUT_DIR}"
+  fi
+fi
+
+# Create the OVA if needed.
+if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
+  generate_ova \
+    "${OS_IMAGE_NAME}.vmdk" \
+    "${DATA_IMAGE_NAME}.vmdk" \
+    "${OS_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
+    "${OVF_TEMPLATE}" \
+    "${UEFI_SECURE_BOOT}" \
+    "${OUTPUT_DIR}"
+  symlink_image "ova" "os_image" "${OUTPUT_DIR}"
+fi
+
+# Compress and symlink the rest.
+compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+compress_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
+compress_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
+
+symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
+symlink_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
+
+popd >/dev/null
+
+# Ensure proper ownership of the final artifacts.
+find "${OUTPUT_DIR}" -type f -print -exec chown 1000:1000 {} \;
