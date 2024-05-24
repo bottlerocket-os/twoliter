@@ -14,6 +14,7 @@ BUILDSYS_PACKAGES_DIR = "${BUILDSYS_BUILD_DIR}/rpms"
 BUILDSYS_KITS_DIR = "${BUILDSYS_BUILD_DIR}/kits"
 BUILDSYS_STATE_DIR = "${BUILDSYS_BUILD_DIR}/state"
 BUILDSYS_IMAGES_DIR = "${BUILDSYS_BUILD_DIR}/images"
+BUILDSYS_LOGS_DIR = "${BUILDSYS_BUILD_DIR}/logs"
 BUILDSYS_TOOLS_DIR = "${BUILDSYS_ROOT_DIR}/tools"
 BUILDSYS_SOURCES_DIR = "${BUILDSYS_ROOT_DIR}/sources"
 BUILDSYS_SBKEYS_DIR = "${BUILDSYS_ROOT_DIR}/sbkeys"
@@ -850,8 +851,19 @@ export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 # Parse the variant into its components and set additional variables.
 eval "$(bottlerocket-variant)"
 
-buildsys repack-variant \
-  --cargo-manifest-dir variants/${BUILDSYS_VARIANT}
+OUTPUT_LOGS_DIR="${BUILDSYS_LOGS_DIR}/${BUILDSYS_ARCH}-${BUILDSYS_VARIANT}"
+REPACK_OUTPUT_LOG="${OUTPUT_LOGS_DIR}/${BUILDSYS_VERSION_FULL}/repack.out"
+
+rm -rf "${OUTPUT_LOGS_DIR:?}"
+mkdir -p "${OUTPUT_LOGS_DIR}/${BUILDSYS_VERSION_FULL}"
+if ! buildsys repack-variant \
+  --cargo-manifest-dir "variants/${BUILDSYS_VARIANT}" \
+  >"${REPACK_OUTPUT_LOG}"; then
+  printf '\n'
+  cat "${REPACK_OUTPUT_LOG}"
+  exit 1
+fi
+ln -snf "${BUILDSYS_VERSION_FULL}" "${OUTPUT_LOGS_DIR}/latest"
 '''
 ]
 
@@ -1535,6 +1547,7 @@ dependencies = [
   "clean-packages",
   "clean-kits",
   "clean-images",
+  "clean-logs",
   "clean-repos",
   "clean-state",
   "clean-tools",
@@ -1584,6 +1597,14 @@ script_runner = "bash"
 script = [
 '''
 rm -rf ${BUILDSYS_IMAGES_DIR}
+'''
+]
+
+[tasks.clean-logs]
+script_runner = "bash"
+script = [
+'''
+rm -rf ${BUILDSYS_LOGS_DIR}
 '''
 ]
 
