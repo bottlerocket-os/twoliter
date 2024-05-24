@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034  # Variables are used externally by rpm2img
+# shellcheck disable=SC2034 # Variables are used externally by rpm2img/img2img.
 
 ###############################################################################
 # Section 1: partition type GUIDs and partition GUIDs
@@ -156,42 +156,42 @@ get_partition_sizes() {
     EFI-B BOOT-B ROOT-B HASH-B RESERVED-B \
     PRIVATE DATA-A DATA-B; do
     case "${part}" in
-      BIOS)
-        offset="$(awk /BIOS-BOOT/'{print $2}' <<<"${os_image_table}")"
-        sectors="$(awk /BIOS-BOOT/'{print $4}' <<<"${os_image_table}")"
-        ;;
-      EFI-A)
-        offset="$(awk /EFI-SYSTEM/'{print $2}' <<<"${os_image_table}")"
-        sectors="$(awk /EFI-SYSTEM/'{print $4}' <<<"${os_image_table}")"
-        ;;
-      EFI-B)
-        offset="$(awk /EFI-BACKUP/'{print $2}' <<<"${os_image_table}")"
-        sectors="$(awk /EFI-BACKUP/'{print $4}' <<<"${os_image_table}")"
-        ;;
-      RESERVED-A)
-        offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
+    BIOS)
+      offset="$(awk /BIOS-BOOT/'{print $2}' <<<"${os_image_table}")"
+      sectors="$(awk /BIOS-BOOT/'{print $4}' <<<"${os_image_table}")"
+      ;;
+    EFI-A)
+      offset="$(awk /EFI-SYSTEM/'{print $2}' <<<"${os_image_table}")"
+      sectors="$(awk /EFI-SYSTEM/'{print $4}' <<<"${os_image_table}")"
+      ;;
+    EFI-B)
+      offset="$(awk /EFI-BACKUP/'{print $2}' <<<"${os_image_table}")"
+      sectors="$(awk /EFI-BACKUP/'{print $4}' <<<"${os_image_table}")"
+      ;;
+    RESERVED-A)
+      offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
         <<<"${os_image_table}" | head -1 || true)"
-        sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
+      sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
         <<<"${os_image_table}" | head -1 || true)"
-        ;;
-      RESERVED-B)
-        offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
+      ;;
+    RESERVED-B)
+      offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
         <<<"${os_image_table}" | tail -1 || true)"
-        sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
+      sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
         <<<"${os_image_table}" | tail -1 || true)"
-        ;;
-      DATA)
-        offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
-          <<<"${data_image_table}")"
-        sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
-          <<<"${data_image_table}")"
-        ;;
-      *)
-        offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
-          <<<"${os_image_table}")"
-        sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
-          <<<"${os_image_table}")"
-        ;;
+      ;;
+    DATA)
+      offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
+        <<<"${data_image_table}")"
+      sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
+        <<<"${data_image_table}")"
+      ;;
+    *)
+      offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
+        <<<"${os_image_table}")"
+      sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
+        <<<"${os_image_table}")"
+      ;;
     esac
 
     if [[ -n "${offset}" ]]; then
@@ -247,7 +247,7 @@ set_partition_sizes() {
   pp_size["BIOS"]="${BIOS_MIB}"
   ((offset += BIOS_MIB))
 
-  for bank in A B ; do
+  for bank in A B; do
     pp_offset["EFI-${bank}"]="${offset}"
     pp_size["EFI-${bank}"]="${EFI_MIB}"
     ((offset += EFI_MIB))
@@ -274,28 +274,28 @@ set_partition_sizes() {
   ((offset += private_mib))
 
   case "${partition_plan}" in
-    split)
-      # For data partition A that lives on the OS image
-      pp_offset["DATA-A"]="${offset}"
-      pp_size["DATA-A"]="${DATA_A_MIB}"
-      ((offset += DATA_A_MIB))
+  split)
+    # For data partition A that lives on the OS image
+    pp_offset["DATA-A"]="${offset}"
+    pp_size["DATA-A"]="${DATA_A_MIB}"
+    ((offset += DATA_A_MIB))
 
-      # For a split data image, the first and last MiB are reserved for the GPT
-      # labels, and the rest is for data partition B.
-      pp_size["DATA-B"]="$((data_image_gib * 1024 - GPT_MIB * 2))"
-      pp_offset["DATA-B"]="1"
-      ;;
-    unified)
-      # For a unified image, we've already accounted for the GPT label space in
-      # the earlier calculations, so all the space is for the data partition.
-      pp_size["DATA-A"]="$((data_image_gib * 1024))"
-      pp_offset["DATA-A"]="${offset}"
-      ((offset += data_image_gib * 1024))
-      ;;
-    *)
-      echo "unknown partition plan '${partition_plan}'" >&2
-      exit 1
-      ;;
+    # For a split data image, the first and last MiB are reserved for the GPT
+    # labels, and the rest is for data partition B.
+    pp_size["DATA-B"]="$((data_image_gib * 1024 - GPT_MIB * 2))"
+    pp_offset["DATA-B"]="1"
+    ;;
+  unified)
+    # For a unified image, we've already accounted for the GPT label space in
+    # the earlier calculations, so all the space is for the data partition.
+    pp_size["DATA-A"]="$((data_image_gib * 1024))"
+    pp_offset["DATA-A"]="${offset}"
+    ((offset += data_image_gib * 1024))
+    ;;
+  *)
+    echo "unknown partition plan '${partition_plan}'" >&2
+    exit 1
+    ;;
   esac
 }
 
@@ -311,8 +311,8 @@ set_partition_labels() {
   pp_label["DATA-A"]=""
   pp_label["DATA-B"]=""
   pp_label["PRIVATE"]="BOTTLEROCKET-PRIVATE"
-  for part in BOOT ROOT HASH RESERVED ; do
-    for bank in A B ; do
+  for part in BOOT ROOT HASH RESERVED; do
+    for bank in A B; do
       pp_label["${part}-${bank}"]="BOTTLEROCKET-${part}-${bank}"
     done
   done
@@ -329,8 +329,8 @@ set_partition_types() {
   pp_type["EFI-B"]="${EFI_BACKUP_TYPECODE}"
   pp_type["PRIVATE"]="${BOTTLEROCKET_PRIVATE_TYPECODE}"
   local typecode
-  for part in BOOT ROOT HASH RESERVED ; do
-    for bank in A B ; do
+  for part in BOOT ROOT HASH RESERVED; do
+    for bank in A B; do
       typecode="BOTTLEROCKET_${part}_TYPECODE"
       typecode="${!typecode}"
       pp_type["${part}-${bank}"]="${typecode}"
@@ -348,17 +348,17 @@ set_partition_uuids() {
   # same disk.
   partition_plan="${2:?}"
   case "${partition_plan}" in
-    split)
-      pp_uuid["DATA-A"]="${BOTTLEROCKET_DATA_FALLBACK_PARTGUID}"
-      pp_uuid["DATA-B"]="${BOTTLEROCKET_DATA_PREFERRED_PARTGUID}"
-      ;;
-    unified)
-      pp_uuid["DATA-A"]="${BOTTLEROCKET_DATA_PREFERRED_PARTGUID}"
-      pp_uuid["DATA-B"]="${BOTTLEROCKET_DATA_FALLBACK_PARTGUID}"
-      ;;
-    *)
-      echo "unknown partition plan '${partition_plan}'" >&2
-      exit 1
-      ;;
+  split)
+    pp_uuid["DATA-A"]="${BOTTLEROCKET_DATA_FALLBACK_PARTGUID}"
+    pp_uuid["DATA-B"]="${BOTTLEROCKET_DATA_PREFERRED_PARTGUID}"
+    ;;
+  unified)
+    pp_uuid["DATA-A"]="${BOTTLEROCKET_DATA_PREFERRED_PARTGUID}"
+    pp_uuid["DATA-B"]="${BOTTLEROCKET_DATA_FALLBACK_PARTGUID}"
+    ;;
+  *)
+    echo "unknown partition plan '${partition_plan}'" >&2
+    exit 1
+    ;;
   esac
 }
