@@ -134,7 +134,8 @@ fi
 ###############################################################################
 # Section 3: replace needed artifacts
 
-# TODO - CA bundle code goes here
+# Install 'root.json'.
+install_root_json "${ROOT_MOUNT}"
 
 ###############################################################################
 # Section 4: update root partition and root verity
@@ -142,9 +143,11 @@ fi
 # shellcheck disable=SC2312  # mapfile is validated elsewhere
 mapfile -t new_root_artifacts <<<"$(find "${ROOT_MOUNT}" -type f)"
 
-# TODO - Error if no artifacts since there will always at least the CA bundle.
+# The reason we check index 0 rather than the mapfile length is if `find` fails
+# to find an artifact the heredoc to mapfile will assign empty output to 0.
 if [[ -z "${new_root_artifacts[0]}" ]]; then
-  echo "Nothing to write, skipping..."
+  echo "no new root artifacts found" >&2
+  exit 1
 else
   # Write files from the root mount to the root image.
   ROOT_DEBUGFS_STDERR="${WORKDIR}/root.err"

@@ -113,9 +113,6 @@ pub(crate) struct BuildPackageArgs {
     #[arg(long, env = "BUILDSYS_VARIANT_FLAVOR")]
     pub(crate) variant_flavor: String,
 
-    #[arg(long, env = "PUBLISH_REPO")]
-    pub(crate) publish_repo: String,
-
     #[arg(long, env = "BUILDSYS_SOURCES_DIR")]
     pub(crate) sources_dir: PathBuf,
 

@@ -78,7 +78,6 @@ RUN \
    && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> "${RPM_MACROS}" \
    && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> "${RPM_MACROS}" \
    && echo "%_cross_variant_flavor ${VARIANT_FLAVOR:-none}" >> "${RPM_MACROS}" \
-   && echo "%_cross_repo_root_json %{_builddir}/root.json" >> "${RPM_MACROS}" \
    && echo "%_topdir /home/builder/rpmbuild" >> "${RPM_MACROS}" \
    && echo "%bcond_without $(V=${VARIANT_PLATFORM,,}; echo ${V//-/_})_platform" > "${RPM_BCONDS}" \
    && echo "%bcond_without $(V=${VARIANT_RUNTIME,,}; echo ${V//-/_})_runtime" >> "${RPM_BCONDS}" \
@@ -100,7 +99,6 @@ ARG KIT_DEPENDENCIES
 ARG ARCH
 ARG NOCACHE
 ARG VARIANT
-ARG REPO
 ARG SYSTEMD_NETWORKD
 ENV SYSTEMD_NETWORKD=${SYSTEMD_NETWORKD}
 ENV VARIANT=${VARIANT}
@@ -108,7 +106,6 @@ WORKDIR /home/builder
 
 USER builder
 ENV PACKAGE=${PACKAGE} ARCH=${ARCH}
-COPY --chown=builder roles/${REPO}.root.json ./rpmbuild/BUILD/root.json
 # We attempt to copy `Licenses.toml` and `licenses` for the current build, otherwise
 # an empty file and a directory are created so that `bottlerocket-license-tool` will
 # fail with a more descriptive error message.
@@ -299,6 +296,7 @@ WORKDIR /root
 
 USER root
 RUN --mount=target=/host \
+    --mount=type=secret,id=root.json,target=/root/roles/root.json \
     --mount=type=secret,id=PK.crt,target=/root/sbkeys/PK.crt \
     --mount=type=secret,id=KEK.crt,target=/root/sbkeys/KEK.crt \
     --mount=type=secret,id=db.crt,target=/root/sbkeys/db.crt \

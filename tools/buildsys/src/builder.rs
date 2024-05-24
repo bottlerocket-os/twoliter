@@ -134,7 +134,6 @@ struct PackageBuildArgs {
     package: String,
     package_dependencies: Vec<String>,
     kit_dependencies: Vec<String>,
-    publish_repo: String,
     variant: String,
     variant_family: String,
     variant_flavor: String,
@@ -166,7 +165,6 @@ impl crate::builder::PackageBuildArgs {
         args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
         args.build_arg("PACKAGE", &self.package);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
-        args.build_arg("REPO", &self.publish_repo);
         args.build_arg("VARIANT", &self.variant);
         args.build_arg("VARIANT_FAMILY", &self.variant_family);
         args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
@@ -350,7 +348,6 @@ impl DockerBuild {
                 package: package.to_string(),
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
-                publish_repo: args.publish_repo,
                 variant: args.variant,
                 variant_family: args.variant_family,
                 variant_flavor: args.variant_flavor,
@@ -698,6 +695,18 @@ fn secrets_args() -> Result<Vec<String>> {
             &s.file_name().to_string_lossy(),
             &s.path().to_string_lossy(),
         );
+    }
+
+    let root_json_var = "PUBLISH_REPO_ROOT_JSON";
+    let root_json_value =
+        env::var(root_json_var).context(error::EnvironmentSnafu { var: root_json_var })?;
+
+    if !root_json_value.is_empty() {
+        let root_json_path = PathBuf::from(&root_json_value);
+        if !root_json_path.exists() {
+            return error::BadRootJsonSnafu { root_json_path }.fail();
+        }
+        args.build_secret("file", "root.json", &root_json_path.to_string_lossy());
     }
 
     for var in [

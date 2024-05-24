@@ -4,6 +4,9 @@ use std::path::PathBuf;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(super)))]
 pub(crate) enum Error {
+    #[snafu(display("Failed to read repo root '{}'", root_json_path.display()))]
+    BadRootJson { root_json_path: PathBuf },
+
     #[snafu(display("Failed to start command: {}", source))]
     CommandStart { source: std::io::Error },
 

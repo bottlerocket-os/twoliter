@@ -207,6 +207,19 @@ stage_images() {
   sgdisk -v "${os_image}"
 }
 
+install_root_json() {
+  local root_mount
+  root_mount="${1:?}"
+
+  local root_json_install_dir="/usr/share/updog"
+  install -d "${root_mount}${root_json_install_dir}"
+  install -p -m 0644 \
+    "${HOME}/roles/root.json" \
+    "${root_mount}${root_json_install_dir}"
+
+  jq -e . "${root_mount}${root_json_install_dir}/root.json" >/dev/null
+}
+
 # shim expects the following data structure in `.vendor_cert`:
 #
 # struct {
