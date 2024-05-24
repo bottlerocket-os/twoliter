@@ -1,6 +1,7 @@
 //! The repo module owns the 'repo' subcommand and controls the process of building a repository.
 
 pub(crate) mod check_expirations;
+pub(crate) mod fetch_variant;
 pub(crate) mod refresh_repo;
 pub(crate) mod validate_repo;
 
