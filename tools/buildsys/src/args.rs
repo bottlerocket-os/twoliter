@@ -15,8 +15,9 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 14] = [
+const REBUILD_VARS: [(&str, u8); 15] = [
     ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
+    ("BUILDSYS_CACERTS_BUNDLE_OVERRIDE", VARIANT),
     ("BUILDSYS_KITS_DIR", KIT),
     ("BUILDSYS_NAME", VARIANT),
     ("BUILDSYS_OUTPUT_DIR", VARIANT),

@@ -4,6 +4,9 @@ use std::path::PathBuf;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(super)))]
 pub(crate) enum Error {
+    #[snafu(display("Failed to read CA certificates bundle '{}'", ca_bundle_path.display()))]
+    BadCaBundle { ca_bundle_path: PathBuf },
+
     #[snafu(display("Failed to read repo root '{}'", root_json_path.display()))]
     BadRootJson { root_json_path: PathBuf },
 
