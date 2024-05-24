@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2154  # variables are defined externally by the environment
 
 set -eu -o pipefail
 shopt -qs failglob
-
-# import the partition helper functions
-# shellcheck source=partyplanner
-. "${0%/*}/partyplanner"
 
 OUTPUT_FMT="raw"
 OVF_TEMPLATE=""
@@ -16,24 +11,32 @@ XFS_DATA_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 
 for opt in "$@"; do
-   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
-   case "${opt}" in
-      --package-dir=*) PACKAGE_DIR="${optarg}" ;;
-      --output-dir=*) OUTPUT_DIR="${optarg}" ;;
-      --output-fmt=*) OUTPUT_FMT="${optarg}" ;;
-      --os-image-size-gib=*) OS_IMAGE_SIZE_GIB="${optarg}" ;;
-      --data-image-size-gib=*) DATA_IMAGE_SIZE_GIB="${optarg}" ;;
-      --os-image-publish-size-gib=*) OS_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
-      --data-image-publish-size-gib=*) DATA_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
-      --partition-plan=*) PARTITION_PLAN="${optarg}" ;;
-      --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
-      --with-grub-set-private-var=*) GRUB_SET_PRIVATE_VAR="${optarg}" ;;
-      --xfs-data-partition=*) XFS_DATA_PARTITION="${optarg}" ;;
-      --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
-   esac
+  optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
+  case "${opt}" in
+  --package-dir=*) PACKAGE_DIR="${optarg}" ;;
+  --output-dir=*) OUTPUT_DIR="${optarg}" ;;
+  --output-fmt=*) OUTPUT_FMT="${optarg}" ;;
+  --os-image-size-gib=*) OS_IMAGE_SIZE_GIB="${optarg}" ;;
+  --data-image-size-gib=*) DATA_IMAGE_SIZE_GIB="${optarg}" ;;
+  --os-image-publish-size-gib=*) OS_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
+  --data-image-publish-size-gib=*) DATA_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
+  --partition-plan=*) PARTITION_PLAN="${optarg}" ;;
+  --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
+  --with-grub-set-private-var=*) GRUB_SET_PRIVATE_VAR="${optarg}" ;;
+  --xfs-data-partition=*) XFS_DATA_PARTITION="${optarg}" ;;
+  --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
+  *)
+    echo "unexpected arg: ${opt}" >&2
+    exit 1
+    ;;
+  esac
 done
 
-# import the image helper functions
+# Import the partition helper functions.
+# shellcheck source=partyplanner
+. "${0%/*}/partyplanner"
+
+# Import the image helper functions.
 # shellcheck source=imghelper
 . "${0%/*}/imghelper"
 
@@ -43,6 +46,13 @@ sanity_checks \
 # Store output artifacts in a versioned directory.
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
 mkdir -p "${OUTPUT_DIR}"
+
+# Clean up working directory to reduce size of layer.
+cleanup() {
+  rm -f "${PACKAGE_DIR}"/*.rpm
+  rm -rf /tmp/*
+}
+trap 'cleanup' EXIT
 
 OS_IMAGE="$(mktemp)"
 BOOT_IMAGE="$(mktemp)"
@@ -66,19 +76,24 @@ SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/
 BOOTCONFIG_DIR="$(mktemp -d)"
 BOOTCONFIG_INPUT="${BOOTCONFIG_DIR}/bootconfig.in"
 
-# Bottlerocket has been experimentally shown to boot faster on EBS volumes when striping the root filesystem into 4MiB stripes.
-# We use 4kb ext4 blocks. The stride and stripe should both be $STRIPE_SIZE / $EXT4_BLOCK_SIZE
+# Bottlerocket has been experimentally shown to boot faster on EBS volumes when
+# striping the root filesystem into 4MiB stripes. We use 4kb ext4 blocks. The
+# stride and stripe should both be $STRIPE_SIZE / $EXT4_BLOCK_SIZE
 ROOT_STRIDE=1024
 ROOT_STRIPE_WIDTH=1024
 
 case "${PARTITION_PLAN}" in
-  split)
-    truncate -s "${OS_IMAGE_SIZE_GIB}G" "${OS_IMAGE}"
-    truncate -s "${DATA_IMAGE_SIZE_GIB}G" "${DATA_IMAGE}"
-    ;;
-  unified)
-    truncate -s "$((OS_IMAGE_SIZE_GIB + DATA_IMAGE_SIZE_GIB))G" "${OS_IMAGE}"
-    ;;
+split)
+  truncate -s "${OS_IMAGE_SIZE_GIB}G" "${OS_IMAGE}"
+  truncate -s "${DATA_IMAGE_SIZE_GIB}G" "${DATA_IMAGE}"
+  ;;
+unified)
+  truncate -s "$((OS_IMAGE_SIZE_GIB + DATA_IMAGE_SIZE_GIB))G" "${OS_IMAGE}"
+  ;;
+*)
+  echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
+  exit 1
+  ;;
 esac
 
 declare -A partlabel parttype partguid partsize partoff
@@ -94,10 +109,9 @@ for part in \
   BIOS \
   EFI-A BOOT-A ROOT-A HASH-A RESERVED-A \
   EFI-B BOOT-B ROOT-B HASH-B RESERVED-B \
-  PRIVATE DATA-A DATA-B ;
-do
+  PRIVATE DATA-A DATA-B; do
   # We create the DATA-B partition separately if we're using the split layout
-  if [ "${part}" == "DATA-B" ] ; then
+  if [[ "${part}" == "DATA-B" ]]; then
     continue
   fi
 
@@ -118,30 +132,31 @@ do
   #  48 = gptprio priority bit
   #  56 = gptprio successful bit
   case "${part}" in
-    BOOT-A) partargs+=(-A 0:"set":48 -A 0:"set":56) ;;
-    BOOT-B) partargs+=(-A 0:"clear":48 -A 0:"clear":56) ;;
+  BOOT-A) partargs+=(-A 0:"set":48 -A 0:"set":56) ;;
+  BOOT-B) partargs+=(-A 0:"clear":48 -A 0:"clear":56) ;;
+  *) continue ;;
   esac
 done
 
 sgdisk --clear "${partargs[@]}" --sort --print "${OS_IMAGE}"
 
 # Partition the separate data disk, if we're using the split layout.
-if [ "${PARTITION_PLAN}" == "split" ] ; then
-  data_start="${partoff[DATA-B]}"
-  data_end=$((data_start + partsize[DATA-B]))
+if [[ "${PARTITION_PLAN}" == "split" ]]; then
+  data_start="${partoff["DATA-B"]}"
+  data_end=$((data_start + partsize["DATA-A"]))
   data_end=$((data_end * 2048 - 1))
   sgdisk --clear \
     -n "0:${data_start}M:${data_end}" \
-    -c "0:${partlabel[DATA-B]}" \
-    -t "0:${parttype[DATA-B]}" \
-    -u "0:${partguid[DATA-B]}" \
+    -c "0:${partlabel["DATA-B"]}" \
+    -t "0:${parttype["DATA-B"]}" \
+    -u "0:${partguid["DATA-B"]}" \
     --sort --print "${DATA_IMAGE}"
 fi
 
 INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
-# inventory installed packages
+# Inventory installed packages.
 INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"Publisher\":\"Bottlerocket\"\
 ,\"Version\":\"${VERSION_ID}\"\
@@ -152,26 +167,36 @@ INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"Url\":\"%{URL}\"\
 ,\"Summary\":\"%{Summary}\"\}\n"
 
-mapfile -t installed_rpms <<< "$(rpm -qa --root "${ROOT_MOUNT}" \
+# shellcheck disable=SC2312 # Array is validated elsewhere.
+mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
   --queryformat "${INVENTORY_QUERY}")"
 
-# wrap installed_rpms mapfile into json
-INVENTORY_DATA="$(jq --raw-output . <<<  "${installed_rpms[@]}")"
-# remove the 'bottlerocket-' prefix from package names
+# Verify we successfully inventoried some RPMs.
+RPM_COUNT="$(ls -c "${PACKAGE_DIR}"/*.rpm)"
+if [[ "${#installed_rpms[@]}" -lt "${RPM_COUNT}" ]]; then
+  echo "Inventory of RPMs, smaller than expected: '${#installed_rpms[@]}'" >&2
+  exit 1
+fi
+
+# Wrap installed_rpms mapfile into json.
+INVENTORY_DATA="$(jq --raw-output . <<<"${installed_rpms[@]}")"
+# Remove the 'bottlerocket-' prefix from package names.
 INVENTORY_DATA="$(jq --arg PKG_PREFIX "bottlerocket-" \
-                '(.Name) |= sub($PKG_PREFIX; "")' <<< "${INVENTORY_DATA}")"
-# sort by package name and add 'Content' as top-level
-INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<< "${INVENTORY_DATA}" | jq '{"Content": .}')"
-printf "%s\n" "${INVENTORY_DATA}" > "${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
+  '(.Name) |= sub($PKG_PREFIX; "")' <<<"${INVENTORY_DATA}")"
+# Sort by package name and add 'Content' as top-level.
+INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<<"${INVENTORY_DATA}" | jq '{"Content": .}')"
+printf "%s\n" "${INVENTORY_DATA}" >"${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
 # Regenerate module dependencies, if possible.
 KMOD_DIR="${ROOT_MOUNT}/lib/modules"
-for kver in "$(find "${KMOD_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%P\n')" ; do
+# shellcheck disable=SC2066
+# Quotes are fine here because we only expect one directory to be found.
+for kver in "$(find "${KMOD_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%P\n')"; do
   system_map="${KMOD_DIR}/${kver}/System.map"
-  [ -s "${system_map}" ] || continue
+  [[ -s "${system_map}" ]] || continue
   depmod_out="$(mktemp)"
   depmod -a -e -b "${ROOT_MOUNT}" -F "${system_map}" "${kver}" >"${depmod_out}" 2>&1
-  if grep -E '(WARNING|ERROR|FATAL)' "${depmod_out}" ; then
+  if grep -E '(WARNING|ERROR|FATAL)' "${depmod_out}"; then
     echo "Failed to run depmod" >&2
     exit 1
   fi
@@ -181,7 +206,7 @@ done
 # Install 'root.json'.
 install_root_json "${ROOT_MOUNT}"
 
-# install licenses
+# Install licenses.
 mksquashfs \
   "${ROOT_MOUNT}"/usr/share/licenses \
   "${ROOT_MOUNT}"/usr/share/bottlerocket/licenses.squashfs \
@@ -190,13 +215,13 @@ rm -rf "${ROOT_MOUNT}"/var/lib "${ROOT_MOUNT}"/usr/share/licenses/*
 
 if [[ "${ARCH}" == "x86_64" ]]; then
   # MBR and BIOS-BOOT
-  echo "(hd0) ${OS_IMAGE}" > "${ROOT_MOUNT}/boot/grub/device.map"
+  echo "(hd0) ${OS_IMAGE}" >"${ROOT_MOUNT}/boot/grub/device.map"
   "${ROOT_MOUNT}/sbin/grub-bios-setup" \
-     --directory="${ROOT_MOUNT}/boot/grub" \
-     --device-map="${ROOT_MOUNT}/boot/grub/device.map" \
-     --root="hd0" \
-     --skip-fs-probe \
-     "${OS_IMAGE}"
+    --directory="${ROOT_MOUNT}/boot/grub" \
+    --device-map="${ROOT_MOUNT}/boot/grub/device.map" \
+    --root="hd0" \
+    --skip-fs-probe \
+    "${OS_IMAGE}"
 
   rm -vf "${ROOT_MOUNT}"/boot/grub/* "${ROOT_MOUNT}"/sbin/grub*
 fi
@@ -213,7 +238,7 @@ grubs=(grub*.efi)
 grub="${grubs[0]}"
 mokms=(mm*.efi)
 mokm="${mokms[0]}"
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   # Do the setup required for `pesign` and `gpg` signing and
   # verification to "just work", regardless of which type of
   # signing profile we have.
@@ -228,17 +253,17 @@ else
 fi
 popd >/dev/null
 
-dd if=/dev/zero of="${EFI_IMAGE}" bs=1M count="${partsize[EFI-A]}"
-mkfs.vfat -I -S 512 "${EFI_IMAGE}" $((partsize[EFI-A] * 1024))
+dd if=/dev/zero of="${EFI_IMAGE}" bs=1M count="${partsize["EFI-A"]}"
+mkfs.vfat -I -S 512 "${EFI_IMAGE}" $((partsize["EFI-A"] * 1024))
 mmd -i "${EFI_IMAGE}" ::/EFI
 mmd -i "${EFI_IMAGE}" ::/EFI/BOOT
 mcopy -i "${EFI_IMAGE}" "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   # Make the signing certificate available on the EFI system partition so it
   # can be imported through the firmware setup UI on bare metal systems.
   provide_certs "${EFI_IMAGE}"
 fi
-dd if="${EFI_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[EFI-A]}"
+dd if="${EFI_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["EFI-A"]}"
 
 # Ensure that the grub directory exists.
 mkdir -p "${ROOT_MOUNT}/boot/grub"
@@ -246,7 +271,7 @@ mkdir -p "${ROOT_MOUNT}/boot/grub"
 # Now that we're done messing with /, move /boot out of it
 mv "${ROOT_MOUNT}/boot"/* "${BOOT_MOUNT}"
 
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
 fi
 
@@ -256,7 +281,9 @@ generate_hmac "${BOOT_MOUNT}/vmlinuz"
 # Set the Bottlerocket variant, version, and build-id
 SYS_ROOT="${ARCH}-bottlerocket-linux-gnu/sys-root"
 VERSION="${VERSION_ID} (${VARIANT})"
-cat <<EOF >> "${ROOT_MOUNT}/${SYS_ROOT}/usr/lib/os-release"
+
+# shellcheck disable=SC2154 # Some variables are defined by the environment.
+cat <<EOF >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/lib/os-release"
 VERSION="${VERSION}"
 PRETTY_NAME="${PRETTY_NAME} ${VERSION}"
 VARIANT_ID=${VARIANT}
@@ -269,37 +296,37 @@ DOCUMENTATION_URL="https://bottlerocket.dev"
 EOF
 
 # Set the BOTTLEROCKET-DATA Filesystem for creating/mounting
-if [ "${XFS_DATA_PARTITION}" == "yes" ] ; then
-  printf "%s\n" "DATA_PARTITION_FILESYSTEM=xfs" >> "${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
+  printf "%s\n" "DATA_PARTITION_FILESYSTEM=xfs" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 else
-  printf "%s\n" "DATA_PARTITION_FILESYSTEM=ext4" >> "${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+  printf "%s\n" "DATA_PARTITION_FILESYSTEM=ext4" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
 # BOTTLEROCKET-ROOT-A
 mkdir -p "${ROOT_MOUNT}/lost+found"
 ROOT_LABELS=$(setfiles -n -d -F -m -r "${ROOT_MOUNT}" \
-    "${SELINUX_FILE_CONTEXTS}" "${ROOT_MOUNT}" \
-    | awk -v root="${ROOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
+  "${SELINUX_FILE_CONTEXTS}" "${ROOT_MOUNT}" |
+  awk -v root="${ROOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
 mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH}" \
-  -O ^has_journal -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize[ROOT-A]}M"
+  -O ^has_journal -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
 echo "${ROOT_LABELS}" | debugfs -w -f - "${ROOT_IMAGE}"
 resize2fs -M "${ROOT_IMAGE}"
-dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[ROOT-A]}"
+dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
 
 # BOTTLEROCKET-VERITY-A
 declare -a DM_VERITY_ROOT
-generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize[HASH-A]}" \
+generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize["HASH-A"]}" \
   DM_VERITY_ROOT
-dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[HASH-A]}"
+dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
 
 # write GRUB config
 # If GRUB_SET_PRIVATE_VAR is set, include the parameters that support Boot Config
-if [ "${GRUB_SET_PRIVATE_VAR}" == "yes" ] ; then
-   BOOTCONFIG='bootconfig'
-   INITRD="initrd (\$private)/bootconfig.data"
+if [[ "${GRUB_SET_PRIVATE_VAR}" == "yes" ]]; then
+  BOOTCONFIG='bootconfig'
+  INITRD="initrd (\$private)/bootconfig.data"
 else
-   BOOTCONFIG=""
-   INITRD=""
+  BOOTCONFIG=""
+  INITRD=""
 fi
 
 # If UEFI_SECURE_BOOT is set, disable interactive edits. Otherwise the intended
@@ -309,20 +336,21 @@ fi
 # be signed with a trusted key, so continuing to check signatures would prevent
 # it from being read. If boot fails, trigger an automatic reboot, since nothing
 # can be changed for troubleshooting purposes.
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
-   echo 'set superusers=""' > "${BOOT_MOUNT}/grub/grub.cfg"
-   echo 'set check_signatures="no"' >> "${BOOT_MOUNT}/grub/grub.cfg"
-   FALLBACK=$'   echo "rebooting in 30 seconds..."\n'
-   FALLBACK+=$'   sleep 30\n'
-   FALLBACK+=$'   reboot\n'
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  echo 'set superusers=""' >"${BOOT_MOUNT}/grub/grub.cfg"
+  echo 'set check_signatures="no"' >>"${BOOT_MOUNT}/grub/grub.cfg"
+  FALLBACK=$'   echo "rebooting in 30 seconds..."\n'
+  FALLBACK+=$'   sleep 30\n'
+  FALLBACK+=$'   reboot\n'
 else
-   FALLBACK=""
+  FALLBACK=""
 fi
 
-cat <<EOF >> "${BOOT_MOUNT}/grub/grub.cfg"
+# shellcheck disable=SC2154 # Some variables are defined by the environment.
+cat <<EOF >>"${BOOT_MOUNT}/grub/grub.cfg"
 set default="0"
 set timeout="0"
-set dm_verity_root="${DM_VERITY_ROOT[@]}"
+set dm_verity_root="${DM_VERITY_ROOT[*]}"
 
 menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
    linux (\$root)/vmlinuz \\
@@ -343,45 +371,45 @@ menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
 }
 EOF
 
-if [ "${UEFI_SECURE_BOOT}" == "yes" ] ; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   sign_grubcfg "${BOOT_MOUNT}/grub/grub.cfg"
 fi
 
 # Combine any bootconfig snippets in /boot for later use, then clean up.
-if [ -d "${BOOT_MOUNT}/boot-config.d" ] ; then
-  find "${BOOT_MOUNT}/boot-config.d" -type f -mindepth 1 -maxdepth 1 -print0 \
-    | sort -Vz | xargs -0 cat > "${BOOTCONFIG_INPUT}"
+if [[ -d "${BOOT_MOUNT}/boot-config.d" ]]; then
+  find "${BOOT_MOUNT}/boot-config.d" -type f -mindepth 1 -maxdepth 1 -print0 |
+    sort -Vz | xargs -0 cat >"${BOOTCONFIG_INPUT}"
   rm -rf "${BOOT_MOUNT}/boot-config.d"
 fi
 
 # This should never happen, but if the image isn't using "grub-set-private-var"
 # and we have some bootconfig input to render, then bail out because otherwise
 # the kernel command line may not be configured as expected.
-if [ -s "${BOOTCONFIG_INPUT}" ] && [ "${GRUB_SET_PRIVATE_VAR}" == "no" ] ; then
-cat <<EOF >&2
+if [[ -s "${BOOTCONFIG_INPUT}" ]] && [[ "${GRUB_SET_PRIVATE_VAR}" == "no" ]]; then
+  cat <<EOF >&2
 Found bootconfig snippets but 'grub-set-private-var' isn't enabled for the variant.
 To fix this, add the following to the variant's Cargo.toml:"
   [package.metadata.build-variant.image-features]
   grub-set-private-var = true
 EOF
-exit 1
+  exit 1
 fi
 
 # Generate a no-op bootconfig if there weren't any snippets.
-if [ ! -s  "${BOOTCONFIG_INPUT}" ] ; then
-  echo -e "kernel {}\ninit {}" > "${BOOTCONFIG_INPUT}"
+if [[ ! -s "${BOOTCONFIG_INPUT}" ]]; then
+  echo -e "kernel {}\ninit {}" >"${BOOTCONFIG_INPUT}"
 fi
 
 # BOTTLEROCKET-BOOT-A
 mkdir -p "${BOOT_MOUNT}/lost+found"
 chmod -R go-rwx "${BOOT_MOUNT}"
 BOOT_LABELS=$(setfiles -n -d -F -m -r "${BOOT_MOUNT}" \
-    "${SELINUX_FILE_CONTEXTS}" "${BOOT_MOUNT}" \
-  | awk -v root="${BOOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
-mkfs.ext4 -O ^has_journal -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize[BOOT-A]}M"
+  "${SELINUX_FILE_CONTEXTS}" "${BOOT_MOUNT}" |
+  awk -v root="${BOOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
+mkfs.ext4 -O ^has_journal -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}M"
 echo "${BOOT_LABELS}" | debugfs -w -f - "${BOOT_IMAGE}"
 resize2fs -M "${BOOT_IMAGE}"
-dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[BOOT-A]}"
+dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
 
 # BOTTLEROCKET-PRIVATE
 
@@ -403,9 +431,8 @@ dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRI
 # do not match our policy. Since we allow replacing the data volume at runtime,
 # we can't count on these labels being correct in any case, and it's better to
 # remove them all.
-UNLABELED=$(find "${DATA_MOUNT}" \
-    | awk -v root="${DATA_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_rm", $1, "security.selinux"}')
-
+UNLABELED=$(find "${DATA_MOUNT}" |
+  awk -v root="${DATA_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_rm", $1, "security.selinux"}')
 
 # Decide which data filesystem to create at build time based on layout.
 #
@@ -418,51 +445,55 @@ UNLABELED=$(find "${DATA_MOUNT}" \
 #
 # If the other partition is available at runtime, the filesystem will be created
 # during first boot instead, providing flexibility at the cost of a minor delay.
-if [ "${XFS_DATA_PARTITION}" == "yes" ]; then
+if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
   mkfs_data_fn="mkfs_data_xfs"
 else
   mkfs_data_fn="mkfs_data_ext4"
 fi
 
 case "${PARTITION_PLAN}" in
-  unified)
-    "${mkfs_data_fn}" "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}" \
-      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
-    ;;
-  split)
-    "${mkfs_data_fn}" "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}" \
-      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
-    ;;
+unified)
+  "${mkfs_data_fn}" "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}" \
+    "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
+  ;;
+split)
+  "${mkfs_data_fn}" "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}" \
+    "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
+  ;;
+*)
+  echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
+  exit 1
+  ;;
 esac
 
 sgdisk -v "${OS_IMAGE}"
-[ -s "${DATA_IMAGE}" ] && sgdisk -v "${DATA_IMAGE}"
-if [[ ${OUTPUT_FMT} == "raw" ]]; then
+[[ -s "${DATA_IMAGE}" ]] && sgdisk -v "${DATA_IMAGE}"
+if [[ "${OUTPUT_FMT}" == "raw" ]]; then
   compress_image "img.lz4" "os_image" "${OUTPUT_DIR}"
   symlink_image "img.lz4" "os_image" "${OUTPUT_DIR}"
-  if [ -s "${DATA_IMAGE}" ] ; then
+  if [[ -s "${DATA_IMAGE}" ]]; then
     compress_image "img.lz4" "data_image" "${OUTPUT_DIR}"
     symlink_image "img.lz4" "data_image" "${OUTPUT_DIR}"
   fi
-elif [[ ${OUTPUT_FMT} == "qcow2" ]]; then
+elif [[ "${OUTPUT_FMT}" == "qcow2" ]]; then
   compress_image "qcow2" "os_image" "${OUTPUT_DIR}"
   symlink_image "qcow2" "os_image" "${OUTPUT_DIR}"
-  if [ -s "${DATA_IMAGE}" ] ; then
+  if [[ -s "${DATA_IMAGE}" ]]; then
     compress_image "qcow2" "data_image" "${OUTPUT_DIR}"
     symlink_image "qcow2" "data_image" "${OUTPUT_DIR}"
   fi
-elif [[ ${OUTPUT_FMT} == "vmdk" ]]; then
+elif [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
   # Stream optimization is required for creating an Open Virtual Appliance (OVA)
   compress_image "vmdk" "os_image" "${OUTPUT_DIR}"
   symlink_image "vmdk" "os_image" "${OUTPUT_DIR}"
-  if [ -s "${DATA_IMAGE}" ] ; then
+  if [[ -s "${DATA_IMAGE}" ]]; then
     compress_image "vmdk" "data_image" "${OUTPUT_DIR}"
     symlink_image "vmdk" "data_image" "${OUTPUT_DIR}"
   fi
 fi
 
 # Now create the OVA if needed.
-if [ "${OUTPUT_FMT}" == "vmdk" ] ; then
+if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
   generate_ova \
     "${OS_IMAGE_NAME}.vmdk" \
     "${DATA_IMAGE_NAME}.vmdk" \
@@ -483,7 +514,3 @@ symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 symlink_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
 find "${OUTPUT_DIR}" -type f -print -exec chown 1000:1000 {} \;
-
-# Clean up temporary files to reduce size of layer.
-rm -f "${PACKAGE_DIR}"/*.rpm
-rm -rf /tmp/*
