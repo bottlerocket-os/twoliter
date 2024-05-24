@@ -697,6 +697,18 @@ fn secrets_args() -> Result<Vec<String>> {
         );
     }
 
+    let ca_bundle_var = "BUILDSYS_CACERTS_BUNDLE_OVERRIDE";
+    let ca_bundle_value =
+        env::var(ca_bundle_var).context(error::EnvironmentSnafu { var: ca_bundle_var })?;
+
+    if !ca_bundle_value.is_empty() {
+        let ca_bundle_path = PathBuf::from(&ca_bundle_value);
+        if !ca_bundle_path.exists() {
+            return error::BadCaBundleSnafu { ca_bundle_path }.fail();
+        }
+        args.build_secret("file", "ca-bundle.crt", &ca_bundle_path.to_string_lossy());
+    }
+
     let root_json_var = "PUBLISH_REPO_ROOT_JSON";
     let root_json_value =
         env::var(root_json_var).context(error::EnvironmentSnafu { var: root_json_var })?;

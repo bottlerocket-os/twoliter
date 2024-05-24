@@ -178,6 +178,9 @@ for kver in "$(find "${KMOD_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%P\n'
   rm -f "${system_map}"
 done
 
+# Install CA bundle.
+install_ca_certs "${ROOT_MOUNT}"
+
 # Install 'root.json'.
 install_root_json "${ROOT_MOUNT}"
 

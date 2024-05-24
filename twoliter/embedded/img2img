@@ -134,6 +134,9 @@ fi
 ###############################################################################
 # Section 3: replace needed artifacts
 
+# Install CA bundle.
+install_ca_certs "${ROOT_MOUNT}"
+
 # Install 'root.json'.
 install_root_json "${ROOT_MOUNT}"
 
