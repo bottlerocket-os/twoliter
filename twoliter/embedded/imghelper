@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034 # some variables are used through parameter substitution
+# shellcheck disable=SC2034
+# Some variables are used through parameter substitution or reference.
+# shellcheck disable=SC2312 # pipefail should be set by the caller.
 
-set -o pipefail
-
-# shellcheck disable=SC2154  # some variables are defined externally by the environment
 FILENAME_PREFIX="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}-${VERSION_ID:?}-${BUILD_ID:?}"
 SYMLINK_PREFIX="${IMAGE_NAME:?}-${VARIANT:?}-${ARCH:?}"
 
@@ -240,7 +239,7 @@ cert_table() {
   for n in "${size}" 0 "${offset}" "$((size + offset))"; do
     printf -v uint32_t '\\x%02x\\x%02x\\x%02x\\x%02x' \
       $((n & 255)) $((n >> 8 & 255)) $((n >> 16 & 255)) $((n >> 24 & 255))
-    # shellcheck disable=SC2059  # Variable contains a pattern
+    # shellcheck disable=SC2059 # Variable contains a pattern.
     printf "${uint32_t}" >>"${output}"
   done
   cat "${input}" >>"${output}"
@@ -633,9 +632,9 @@ generate_ova() {
 
   # According to the OVF spec:
   # https://www.dmtf.org/sites/default/files/standards/documents/DSP0243_2.1.1.pdf,
-  # the OVF must be first in the tar bundle.  Manifest is next, and then the
-  # files must fall in the same order as listed in the References section of the
-  # OVF file
+  # the OVF must be first in the tar bundle. Manifest is next, and then the
+  # files must fall in the same order as listed in the References section of
+  # the OVF file
   local ova="${file_prefix}.ova"
   tar -cf "${output_dir}/${ova}" -C "${ova_dir}" "${ovf}" "${manifest}"
   tar -rf "${output_dir}/${ova}" -C "${output_dir}" "${os_vmdk}"
