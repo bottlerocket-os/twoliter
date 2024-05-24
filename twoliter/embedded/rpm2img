@@ -178,6 +178,9 @@ for kver in "$(find "${KMOD_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%P\n'
   rm -f "${system_map}"
 done
 
+# Install 'root.json'.
+install_root_json "${ROOT_MOUNT}"
+
 # install licenses
 mksquashfs \
   "${ROOT_MOUNT}"/usr/share/licenses \

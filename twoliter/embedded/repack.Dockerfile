@@ -25,6 +25,7 @@ WORKDIR /root
 
 USER root
 RUN --mount=target=/host \
+    --mount=type=secret,id=root.json,target=/root/roles/root.json \
     --mount=type=secret,id=PK.crt,target=/root/sbkeys/PK.crt \
     --mount=type=secret,id=KEK.crt,target=/root/sbkeys/KEK.crt \
     --mount=type=secret,id=db.crt,target=/root/sbkeys/db.crt \
