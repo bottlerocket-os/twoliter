@@ -478,7 +478,7 @@ sbsetup_signing_profile() {
 undo_sign() {
   local what
   what="${1:?}"
-  if [[ "$(pesign -i "${what}" -l)" != "No signatures found." ]]; then
+  if [[ ! "$(pesign -i "${what}" -l)" =~ 'No signatures found.' ]]; then
     mv "${what}" "${what}.orig"
     pesign -i "${what}.orig" -o "${what}" -u 0 -r
     rm "${what}.orig"
