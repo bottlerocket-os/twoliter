@@ -171,7 +171,7 @@ do
     --tag "${tag}" \
     --build-arg "SDK=${sdk}" \
     --build-arg "HOST_GOARCH=${host_arch}" \
-    --file "${script_dir}/alpha-sdk.dockerfile" \
+    --file "${script_dir}/alpha-sdk.Dockerfile" \
     "${bottlerocket_dir}"
   docker push "${tag}"
 done
