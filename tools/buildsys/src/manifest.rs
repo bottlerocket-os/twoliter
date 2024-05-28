@@ -437,7 +437,11 @@ impl ManifestInfo {
         } else if self.build_variant().is_some() {
             Ok(BuildType::Variant)
         } else {
-            Err(Error(error::UnknownManifestTypeSnafu {}.build()))
+            println!(
+                "cargo::warning=Expected to find one of 'build-package', 'build-kit', or \
+                'build-variant' in package.metadata. Assuming 'build-package'."
+            );
+            Ok(BuildType::Package)
         }
     }
 
@@ -476,8 +480,12 @@ fn is_valid_dep(top_manifest_name: &str, link: &PackageLink<'_>) -> bool {
 
 fn is_manifest_type(pkg_metadata: &PackageMetadata, manifest_type: BuildType) -> bool {
     let metadata_table = pkg_metadata.metadata_table();
+    let has_metadata = metadata_table.get("build-package").is_some()
+        || metadata_table.get("build-kit").is_some()
+        || metadata_table.get("build-variant").is_some();
+
     match manifest_type {
-        BuildType::Package => metadata_table.get("build-package").is_some(),
+        BuildType::Package => metadata_table.get("build-package").is_some() || !has_metadata,
         BuildType::Kit => metadata_table.get("build-kit").is_some(),
         BuildType::Variant => metadata_table.get("build-variant").is_some(),
         BuildType::Repack => unreachable!("Repacking is not defined in manifests"),
