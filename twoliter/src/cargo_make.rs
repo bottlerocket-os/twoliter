@@ -140,7 +140,7 @@ impl CargoMake {
 }
 
 fn require_sdk(project: &Project) -> Result<ImageUri> {
-    match project.sdk() {
+    match project.sdk()? {
         Some(s) => Ok(s),
         _ => bail!(
             "When using twoliter make, it is required that the SDK be specified in Twoliter.toml"

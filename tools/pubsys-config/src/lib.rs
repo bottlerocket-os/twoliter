@@ -26,6 +26,9 @@ pub struct InfraConfig {
 
     // Config for VMware specific subcommands
     pub vmware: Option<VmwareConfig>,
+
+    // Config for container registries
+    pub vendor: Option<HashMap<String, Vendor>>,
 }
 
 impl InfraConfig {
@@ -102,6 +105,12 @@ impl InfraConfig {
             })?
             .join("Infra.lock"))
     }
+}
+
+/// Container registry vendor
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub struct Vendor {
+    pub registry: String,
 }
 
 /// S3-specific TUF infrastructure configuration

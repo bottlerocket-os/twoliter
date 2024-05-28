@@ -6,8 +6,10 @@ use async_recursion::async_recursion;
 use async_walkdir::WalkDir;
 use futures::stream::StreamExt;
 use log::{debug, info, trace, warn};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use toml::Table;
@@ -43,7 +45,13 @@ pub(crate) struct Project {
     release_version: String,
 
     /// The Bottlerocket SDK container image.
-    sdk: Option<ImageUri>,
+    sdk: Option<Image>,
+
+    /// Set of vendors
+    vendor: BTreeMap<String, Vendor>,
+
+    /// Set of kit dependencies
+    kit: Vec<Image>,
 }
 
 impl Project {
@@ -98,8 +106,37 @@ impl Project {
         self.release_version.as_str()
     }
 
-    pub(crate) fn sdk(&self) -> Option<ImageUri> {
-        self.sdk.clone()
+    pub(crate) fn sdk(&self) -> Result<Option<ImageUri>> {
+        if let Some(sdk) = self.sdk.as_ref() {
+            let vendor = self.vendor.get(&sdk.vendor).context(format!(
+                "vendor '{}' was not specified in Twoliter.toml",
+                sdk.vendor
+            ))?;
+            Ok(Some(ImageUri::new(
+                Some(vendor.registry.clone()),
+                sdk.name.clone(),
+                format!("v{}", sdk.version),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn kit(&self, name: &str) -> Result<Option<ImageUri>> {
+        if let Some(kit) = self.kit.iter().find(|y| y.name == name) {
+            let vendor = self.vendor.get(&kit.vendor).context(format!(
+                "vendor '{}' was not specified in Twoliter.toml",
+                kit.vendor
+            ))?;
+            Ok(Some(ImageUri::new(
+                Some(vendor.registry.clone()),
+                kit.name.clone(),
+                format!("v{}", kit.version),
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn token(&self) -> String {
@@ -156,6 +193,23 @@ impl Project {
     }
 }
 
+/// This represents a container registry vendor that is used in resolving the kits and also
+/// now the bottlerocket sdk
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct Vendor {
+    pub registry: String,
+}
+
+/// This represents a dependency on a container, primarily used for kits
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct Image {
+    pub name: String,
+    pub version: Version,
+    pub vendor: String,
+}
+
 /// This is used to `Deserialize` a project, then run validation code before returning a valid
 /// [`Project`]. This is necessary both because there is no post-deserialization serde hook for
 /// validation and, even if there was, we need to know the project directory path in order to check
@@ -165,7 +219,9 @@ impl Project {
 struct UnvalidatedProject {
     schema_version: SchemaVersion<1>,
     release_version: String,
-    sdk: Option<ImageUri>,
+    sdk: Option<Image>,
+    vendor: Option<BTreeMap<String, Vendor>>,
+    kit: Option<Vec<Image>>,
 }
 
 impl UnvalidatedProject {
@@ -180,6 +236,7 @@ impl UnvalidatedProject {
             ))?
             .to_path_buf();
 
+        self.check_vendor_availability().await?;
         self.check_release_toml(&project_dir).await?;
 
         Ok(Project {
@@ -188,7 +245,30 @@ impl UnvalidatedProject {
             schema_version: self.schema_version,
             release_version: self.release_version,
             sdk: self.sdk,
+            vendor: self.vendor.unwrap_or_default(),
+            kit: self.kit.unwrap_or_default(),
         })
+    }
+
+    /// Errors if the user has defined a sdk and/or kit dependency without specifying the associated
+    /// vendor
+    async fn check_vendor_availability(&self) -> Result<()> {
+        let mut dependency_list = self.kit.clone().unwrap_or_default();
+        if let Some(sdk) = self.sdk.as_ref() {
+            dependency_list.push(sdk.clone());
+        }
+        for dependency in dependency_list.iter() {
+            ensure!(
+                self.vendor.is_some()
+                    && self
+                        .vendor
+                        .as_ref()
+                        .unwrap()
+                        .contains_key(&dependency.vendor),
+                "cannot define a dependency on a vendor that is not specified in Twoliter.toml"
+            );
+        }
+        Ok(())
     }
 
     /// Issues a warning if `Release.toml` is found and, if so, ensures that it contains the same
@@ -252,13 +332,22 @@ mod test {
 
         // Add checks here as desired to validate deserialization.
         assert_eq!(SchemaVersion::<1>, deserialized.schema_version);
-        let sdk = deserialized.sdk().unwrap();
-        assert_eq!("a.com/b", sdk.registry.as_ref().unwrap().as_str());
+        assert_eq!(1, deserialized.vendor.len());
+        assert!(deserialized.vendor.contains_key("my-vendor"));
         assert_eq!(
-            "my-bottlerocket-sdk",
-            deserialized.sdk().unwrap().repo.as_str()
+            "a.com/b",
+            deserialized.vendor.get("my-vendor").unwrap().registry
         );
-        assert_eq!("v1.2.3", deserialized.sdk().unwrap().tag.as_str());
+
+        let sdk = deserialized.sdk.unwrap();
+        assert_eq!("my-bottlerocket-sdk", sdk.name.as_str());
+        assert_eq!(Version::new(1, 2, 3), sdk.version);
+        assert_eq!("my-vendor", sdk.vendor.as_str());
+
+        assert_eq!(1, deserialized.kit.len());
+        assert_eq!("my-core-kit", deserialized.kit[0].name.as_str());
+        assert_eq!(Version::new(1, 2, 3), deserialized.kit[0].version);
+        assert_eq!("my-vendor", deserialized.kit[0].vendor.as_str());
     }
 
     /// Ensure that a `Twoliter.toml` cannot be serialized if the `schema_version` is incorrect.
@@ -297,16 +386,23 @@ mod test {
             project_dir: Default::default(),
             schema_version: Default::default(),
             release_version: String::from("1.0.0"),
-            sdk: Some(ImageUri {
-                registry: Some("example.com".into()),
-                repo: "foo-abc".into(),
-                tag: "version1".into(),
+            sdk: Some(Image {
+                name: "foo-abc".into(),
+                version: Version::new(1, 2, 3),
+                vendor: "example".into(),
             }),
+            vendor: BTreeMap::from([(
+                "example".into(),
+                Vendor {
+                    registry: "example.com".into(),
+                },
+            )]),
+            kit: Vec::new(),
         };
 
         assert_eq!(
-            "example.com/foo-abc:version1",
-            project.sdk().unwrap().to_string()
+            "example.com/foo-abc:v1.2.3",
+            project.sdk().unwrap().unwrap().to_string()
         );
     }
 
@@ -331,6 +427,31 @@ mod test {
             "Expected the loading of the project to fail because of a mismatched version in \
             Release.toml, but the project loaded without an error."
         );
+    }
+
+    #[tokio::test]
+    async fn test_vendor_specifications() {
+        let project = UnvalidatedProject {
+            schema_version: SchemaVersion::default(),
+            release_version: "1.0.0".into(),
+            sdk: Some(Image {
+                name: "bottlerocket-sdk".into(),
+                version: Version::new(1, 41, 1),
+                vendor: "bottlerocket".into(),
+            }),
+            vendor: Some(BTreeMap::from([(
+                "not-bottlerocket".into(),
+                Vendor {
+                    registry: "public.ecr.aws/not-bottlerocket".into(),
+                },
+            )])),
+            kit: Some(vec![Image {
+                name: "bottlerocket-core-kit".into(),
+                version: Version::new(1, 20, 0),
+                vendor: "not-bottlerocket".into(),
+            }]),
+        };
+        assert!(project.check_vendor_availability().await.is_err());
     }
 
     #[tokio::test]
