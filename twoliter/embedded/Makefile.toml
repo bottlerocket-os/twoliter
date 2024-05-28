@@ -820,9 +820,20 @@ export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
 export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
 export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
 
+# Relocate an existing target directory to the new location, to avoid breaking
+# compatibility on upgrade. On downgrade, the missing directory will trigger a
+# full rebuild, which is good because the new layout of RPM artifacts is not
+# compatible with previous versions.
+if [ -d "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" ]; then
+  mkdir -p "${BUILDSYS_ROOT_DIR}/target"
+  mv \
+    "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" \
+    "${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
+fi
+
 # Save built artifacts for each architecture.  We don't set this everywhere
 # because we build host tools with cargo as well, like buildsys and pubsys.
-export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}
+export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
 cargo build \
   ${CARGO_BUILD_ARGS} \
@@ -844,6 +855,17 @@ export BUILDSYS_VARIANT_PLATFORM="${BUILDSYS_VARIANT_PLATFORM:?}"
 export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
 export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
 export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
+
+# Relocate an existing target directory to the new location, to avoid breaking
+# compatibility on upgrade. On downgrade, the missing directory will trigger a
+# full rebuild, which is good because the new layout of RPM artifacts is not
+# compatible with previous versions.
+if [ -d "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" ]; then
+  mkdir -p "${BUILDSYS_ROOT_DIR}/target"
+  mv \
+    "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" \
+    "${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
+fi
 
 # Save built artifacts for each architecture.  We don't set this everywhere
 # because we build host tools with cargo as well, like buildsys and pubsys.
