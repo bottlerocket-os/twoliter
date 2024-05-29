@@ -4,13 +4,16 @@ use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
 use async_walkdir::WalkDir;
+use base64::Engine;
 use futures::stream::StreamExt;
 use log::{debug, info, trace, warn};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::hash::Hash;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use toml::Table;
 
@@ -102,8 +105,24 @@ impl Project {
         self.project_dir.clone()
     }
 
+    pub(crate) fn schema_version(&self) -> SchemaVersion<1> {
+        self.schema_version
+    }
+
     pub(crate) fn release_version(&self) -> &str {
         self.release_version.as_str()
+    }
+
+    pub(crate) fn vendor(&self) -> &BTreeMap<String, Vendor> {
+        &self.vendor
+    }
+
+    pub(crate) fn kits(&self) -> Vec<Image> {
+        self.kit.clone()
+    }
+
+    pub(crate) fn sdk_image(&self) -> Option<Image> {
+        self.sdk.clone()
     }
 
     pub(crate) fn sdk(&self) -> Result<Option<ImageUri>> {
@@ -191,6 +210,38 @@ impl Project {
         modules.sort();
         Ok(modules)
     }
+
+    /// Returns a base64 encoded sha256 hash of the contents of the Project structure.
+    /// Used for verifying if a change would occure in Twoliter.lock
+    pub(crate) fn digest(&self) -> Result<String> {
+        let mut hash = Sha256::default();
+        hash.write(self.release_version.as_bytes())
+            .context("failed to encode release version in hash")?;
+        for (key, value) in self.vendor.iter() {
+            hash.write(key.as_bytes())
+                .context("failed to encode vendor name in hash")?;
+            hash.write(value.registry.as_bytes())
+                .context("failed to encode vendor registry in hash")?;
+        }
+        if let Some(sdk) = self.sdk.as_ref() {
+            hash.write(sdk.name.as_bytes())
+                .context("failed to encode sdk name in hash")?;
+            hash.write(sdk.version.to_string().as_bytes())
+                .context("failed to encode sdk version in hash")?;
+            hash.write(sdk.vendor.as_bytes())
+                .context("failed to encode sdk vendor in hash")?;
+        }
+        for kit in self.kit.iter() {
+            hash.write(kit.name.as_bytes())
+                .context("failed to encode kit name in hash")?;
+            hash.write(kit.version.to_string().as_bytes())
+                .context("failed to encode kit version in hash")?;
+            hash.write(kit.vendor.as_bytes())
+                .context("failed to encode kit vendor in hash")?;
+        }
+        let project_hash = hash.finalize();
+        Ok(base64::engine::general_purpose::STANDARD.encode(project_hash.as_slice()))
+    }
 }
 
 /// This represents a container registry vendor that is used in resolving the kits and also
@@ -202,7 +253,7 @@ pub(crate) struct Vendor {
 }
 
 /// This represents a dependency on a container, primarily used for kits
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Image {
     pub name: String,

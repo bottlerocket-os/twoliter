@@ -3780,6 +3780,7 @@ dependencies = [
  "anyhow",
  "async-recursion",
  "async-walkdir",
+ "base64 0.22.0",
  "buildsys",
  "bytes",
  "clap",
