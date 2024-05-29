@@ -129,8 +129,11 @@ RUN \
 
 USER root
 RUN --mount=target=/host \
+    find /host/build/rpms/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+      ln -snft ./rpmbuild/RPMS {} \+ && \
     for pkg in ${PACKAGE_DEPENDENCIES} ; do \
-      ln -s /host/build/rpms/${pkg}/*.rpm ./rpmbuild/RPMS ; \
+      find /host/build/rpms/${pkg}/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+        ln -snft ./rpmbuild/RPMS {} \+ ; \
     done && \
     createrepo_c \
         -o ./rpmbuild/RPMS \
@@ -239,10 +242,13 @@ WORKDIR /root
 USER root
 RUN --mount=target=/host \
     mkdir -p ./rpmbuild/RPMS && \
+    find /host/build/rpms/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+      ln -snft ./rpmbuild/RPMS {} \+ && \
     for pkg in ${PACKAGE_DEPENDENCIES} ; do \
-      ln -s /host/build/rpms/${pkg}/*.rpm ./rpmbuild/RPMS ; \
+      find /host/build/rpms/${pkg}/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+        ln -snft ./rpmbuild/RPMS {} \+ ; \
     done && \
-    ln -s /home/builder/rpmbuild/RPMS/*/*.rpm ./rpmbuild/RPMS && \
+    ln -snf /home/builder/rpmbuild/RPMS/*/*.rpm ./rpmbuild/RPMS && \
     createrepo_c \
         -o ./rpmbuild/RPMS \
         -x '*-debuginfo-*.rpm' \
