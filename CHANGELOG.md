@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2024-05-29
+
+### Added
+
+- Add support to repack a variant ([#214], [#211], [#217], [#219], [#221], [#222], [#228], [#231], [#235], [#243])
+- Added the buildsys build-kit command to create kits ([#198], [#227])
+- Add support to install CA certificates during image build ([#232])
+
+[#198]: https://github.com/bottlerocket-os/twoliter/pull/198
+[#211]: https://github.com/bottlerocket-os/twoliter/pull/211
+[#214]: https://github.com/bottlerocket-os/twoliter/pull/214
+[#217]: https://github.com/bottlerocket-os/twoliter/pull/217
+[#219]: https://github.com/bottlerocket-os/twoliter/pull/219
+[#221]: https://github.com/bottlerocket-os/twoliter/pull/221
+[#222]: https://github.com/bottlerocket-os/twoliter/pull/222
+[#227]: https://github.com/bottlerocket-os/twoliter/pull/227
+[#228]: https://github.com/bottlerocket-os/twoliter/pull/228
+[#231]: https://github.com/bottlerocket-os/twoliter/pull/231
+[#232]: https://github.com/bottlerocket-os/twoliter/pull/232
+[#243]: https://github.com/bottlerocket-os/twoliter/pull/243
+
+### Changed
+
+- Regenerate kernel module if possible in rpm2img ([#205])
+- Changes and fixes to better support kits ([#210], [#216], [#218], [#223], [#224], [#226], [#234], [#238])
+- Deprecate variant sensitivity for packages in buildsys ([#220])
+- Install 'root.json' during image build ([#239])
+- Backward compatibility for existing projects ([#244])
+
+[#205]: https://github.com/bottlerocket-os/twoliter/pull/205
+[#210]: https://github.com/bottlerocket-os/twoliter/pull/210
+[#216]: https://github.com/bottlerocket-os/twoliter/pull/216
+[#218]: https://github.com/bottlerocket-os/twoliter/pull/218
+[#220]: https://github.com/bottlerocket-os/twoliter/pull/220
+[#223]: https://github.com/bottlerocket-os/twoliter/pull/223
+[#224]: https://github.com/bottlerocket-os/twoliter/pull/224
+[#226]: https://github.com/bottlerocket-os/twoliter/pull/226
+[#234]: https://github.com/bottlerocket-os/twoliter/pull/234
+[#235]: https://github.com/bottlerocket-os/twoliter/pull/235
+[#238]: https://github.com/bottlerocket-os/twoliter/pull/238
+[#239]: https://github.com/bottlerocket-os/twoliter/pull/239
+[#244]: https://github.com/bottlerocket-os/twoliter/pull/244
+
 ## [0.1.1] - 2024-04-17
 
 ### Added
@@ -33,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Gomod.rs bug ([#178])
 - Use Twoliter.toml for cache layers ([#179])
 - Update readme ([#182, #184])
-- Generate HMAC for kernel on build ([#187]) 
+- Generate HMAC for kernel on build ([#187])
 
 [#166]: https://github.com/bottlerocket-os/twoliter/pull/166
 [#178]: https://github.com/bottlerocket-os/twoliter/pull/178
@@ -131,7 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Testsys: add image_id label to fix metal cluster conflicts ([#81])
 - Testsys: change update cluster shared security group name ([#67])
 - Testsys: Update version to v0.10.0 ([#93])
-- Remove Infrasys, an unused system, from the codebase ([#53]) 
+- Remove Infrasys, an unused system, from the codebase ([#53])
 
 [#53]: https://github.com/bottlerocket-os/twoliter/pull/53
 [#67]: https://github.com/bottlerocket-os/twoliter/pull/67
