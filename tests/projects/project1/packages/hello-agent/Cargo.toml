@@ -6,7 +6,6 @@ publish = false
 build = "../build.rs"
 
 [package.metadata.build-package]
-variant-sensitive = false
 source-groups = ["hello-agent"]
 
 [lib]
