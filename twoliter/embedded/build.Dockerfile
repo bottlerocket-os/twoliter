@@ -346,7 +346,7 @@ WORKDIR /root
 USER root
 RUN --mount=target=/host \
     mkdir -p /local/migrations \
-    && find /host/build/rpms/os/ -maxdepth 1 -type f \
+    && find /host/build/rpms/ -maxdepth 2 -type f \
         -name "bottlerocket-migrations-*.rpm" \
         -not -iname '*debuginfo*' \
         -exec cp '{}' '/local/migrations/' ';' \
@@ -373,7 +373,7 @@ WORKDIR /tmp
 RUN --mount=target=/host \
     mkdir -p /local/archives \
     && KERNEL="$(printf "%s\n" ${PACKAGES} | awk '/^kernel-/{print $1}')" \
-    && find /host/build/rpms/${KERNEL}/ -maxdepth 1 -type f \
+    && find /host/build/rpms/ -maxdepth 2 -type f \
         -name "bottlerocket-${KERNEL}-archive-*.rpm" \
         -exec cp '{}' '/local/archives/' ';' \
     && /host/build/tools/rpm2kmodkit \
