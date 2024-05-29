@@ -4,7 +4,8 @@ ARG HOST_GOARCH
 FROM $SDK
 FROM --platform=linux/${HOST_GOARCH} $SDK
 
-COPY build/rpms/ /twoliter/alpha/build/rpms/
+COPY build/rpms/*.rpm /twoliter/alpha/build/rpms/
+COPY build/rpms/*/*.rpm /twoliter/alpha/build/rpms/
 
 # These may need to be moved to Twoliter, but for now we will access them from the Alpha SDK.
 # They have been moved into the .cargo directory because they are otherwise .dockerignored.
