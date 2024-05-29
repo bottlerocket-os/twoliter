@@ -329,11 +329,10 @@ dependencies = ["setup"]
 script_runner = "bash"
 script = [
 '''
-if [ -f "${BUILDSYS_SOURCES_DIR}/Cargo.toml" ]; then
-  cargo fetch --locked --manifest-path "${BUILDSYS_SOURCES_DIR}/Cargo.toml"
-fi
-
-cargo fetch --locked --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml"
+for ws in sources variants .; do
+  [ -s "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml" ] || continue
+  cargo fetch --locked --manifest-path "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml"
+done
 
 chmod -R o+r ${CARGO_HOME}
 '''
@@ -744,41 +743,30 @@ dependencies = ["setup"]
 script_runner = "bash"
 script = [
 '''
+OLD_WS_MANIFEST="${BUILDSYS_ROOT_DIR}/variants/Cargo.toml"
+NEW_WS_MANIFEST="${BUILDSYS_ROOT_DIR}/Cargo.toml"
+if [ -s "${OLD_WS_MANIFEST}" ] && [ -s "${NEW_WS_MANIFEST}" ]; then
+  echo "Found two project workspaces: ${OLD_WS_MANIFEST} and ${NEW_WS_MANIFEST}.">&2
+  echo "This configuration is not supported.">&2
+  exit 1
+elif [ -s "${NEW_WS_MANIFEST}" ]; then
+  PROJECT_MANIFEST="${NEW_WS_MANIFEST}"
+elif [ -s "${OLD_WS_MANIFEST}" ]; then
+  echo "Found deprecated project workspace ${OLD_WS_MANIFEST}.">&2
+  echo "Please relocate it to ${NEW_WS_MANIFEST}.">&2
+  PROJECT_MANIFEST="${OLD_WS_MANIFEST}"
+else
+  echo "Could not find project workspace at ${NEW_WS_MANIFEST}. Please create it." >&2
+  exit 1
+fi
+
 rm -f "${BUILDSYS_CARGO_METADATA_PATH}"
 cargo metadata \
   --format-version 1 \
-  --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml" \
+  --manifest-path "${PROJECT_MANIFEST}" \
   --offline \
   --all-features \
   > "${BUILDSYS_CARGO_METADATA_PATH}"
-'''
-]
-
-# This task is temporarily necessary due to changes in Twoliter that occurred in June 2024. A new
-# directory structure was introduced for build/rpms. Attempts to do an incremental build when the
-# build output was in the old directory structure would fail, so we needed a way to inform users
-# that they need to run a cargo make clean.
-#
-# Once the changed build/rpms structure has been around long enough (in, say, August 2024), this
-# task can be removed as we can assume that no lingering old incremental builds exist in the wild.
-#
-# TODO - remove this task sometime around, or after, August 2024.
-[tasks.check-rpm-structure]
-script_runner = "bash"
-script = [
-'''
-if [ ! -d "${BUILDSYS_PACKAGES_DIR}" ]; then
-  exit 0
-fi
-
-count=$(find "${BUILDSYS_PACKAGES_DIR}" -maxdepth 1 -name "*.rpm" | wc -l)
-
-if [ "${count}" != "0" ]; then
-    echo "ERROR: You have rpms in a flat structure in ${BUILDSYS_PACKAGES_DIR}"
-    echo "Twoliter and Buildsys have been updated to use a different RPM directory structure"
-    echo "PLEASE RUN: cargo make clean"
-    exit 1
-fi
 '''
 ]
 
@@ -804,9 +792,20 @@ export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
 export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
 export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
 
+# Relocate an existing target directory to the new location, to avoid breaking
+# compatibility on upgrade. On downgrade, the missing directory will trigger a
+# full rebuild, which is good because the new layout of RPM artifacts is not
+# compatible with previous versions.
+if [ -d "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" ]; then
+  mkdir -p "${BUILDSYS_ROOT_DIR}/target"
+  mv \
+    "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" \
+    "${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
+fi
+
 # Save built artifacts for each architecture.  We don't set this everywhere
 # because we build host tools with cargo as well, like buildsys and pubsys.
-export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}
+export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
 cargo build \
   ${CARGO_BUILD_ARGS} \
@@ -828,6 +827,17 @@ export BUILDSYS_VARIANT_PLATFORM="${BUILDSYS_VARIANT_PLATFORM:?}"
 export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
 export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
 export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
+
+# Relocate an existing target directory to the new location, to avoid breaking
+# compatibility on upgrade. On downgrade, the missing directory will trigger a
+# full rebuild, which is good because the new layout of RPM artifacts is not
+# compatible with previous versions.
+if [ -d "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" ]; then
+  mkdir -p "${BUILDSYS_ROOT_DIR}/target"
+  mv \
+    "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" \
+    "${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
+fi
 
 # Save built artifacts for each architecture.  We don't set this everywhere
 # because we build host tools with cargo as well, like buildsys and pubsys.
@@ -1573,7 +1583,19 @@ rm -f ${BUILDSYS_TOOLS_DIR}/bin/*
 script_runner = "bash"
 script = [
 '''
-cargo clean --manifest-path "${BUILDSYS_ROOT_DIR}/Cargo.toml"
+# The workspace manifest could be the old one under variants, or the new one at
+# the project root.
+for ws in variants .; do
+  manifest="${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml"
+  [ -s "${manifest}" ] || continue
+  # The targets directory could be under variants, or at the root, for either of
+  # the possible workspace manifest locations.
+  for td in target variants/target ; do
+    targets="${BUILDSYS_ROOT_DIR}/${td}/${BUILDSYS_ARCH}"
+    [ -d "${targets}" ] || continue
+    CARGO_TARGET_DIR="${targets}" cargo clean --manifest-path "${manifest}"
+  done
+done
 '''
 ]
 

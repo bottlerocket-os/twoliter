@@ -34,9 +34,4 @@ pub(super) enum Error {
         "The cargo package we are building, '{name}', could not be found in the graph"
     ))]
     RootDependencyMissing { name: String },
-
-    #[snafu(display(
-        "Expected to find one of build-package, build-kit, or build-variant in package.metadata."
-    ))]
-    UnknownManifestType {},
 }

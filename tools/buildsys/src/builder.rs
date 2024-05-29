@@ -303,7 +303,7 @@ pub(crate) struct DockerBuild {
     target: String,
     tag: String,
     root_dir: PathBuf,
-    artifacts_dir: PathBuf,
+    artifacts_dirs: Vec<PathBuf>,
     state_dir: PathBuf,
     artifact_name: String,
     common_build_args: CommonBuildArgs,
@@ -320,6 +320,7 @@ impl DockerBuild {
     ) -> Result<Self> {
         let package = manifest.info().package_name();
         let per_package_dir = format!("{}/{}", args.packages_dir.display(), package).into();
+        let old_package_dir = format!("{}", args.packages_dir.display()).into();
 
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
@@ -334,7 +335,7 @@ impl DockerBuild {
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dir: per_package_dir,
+            artifacts_dirs: vec![per_package_dir, old_package_dir],
             state_dir: args.common.state_dir,
             artifact_name: package.to_string(),
             common_build_args: CommonBuildArgs::new(
@@ -375,7 +376,7 @@ impl DockerBuild {
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dir: per_kit_dir,
+            artifacts_dirs: vec![per_kit_dir],
             state_dir: args.common.state_dir,
             artifact_name: kit.to_string(),
             common_build_args: CommonBuildArgs::new(
@@ -418,7 +419,7 @@ impl DockerBuild {
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dir: args.common.image_arch_variant_dir,
+            artifacts_dirs: vec![args.common.image_arch_variant_dir],
             state_dir: args.common.state_dir,
             artifact_name: args.variant.clone(),
             common_build_args: CommonBuildArgs::new(
@@ -498,7 +499,7 @@ impl DockerBuild {
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dir: args.common.image_arch_variant_dir,
+            artifacts_dirs: vec![args.common.image_arch_variant_dir],
             state_dir: args.common.state_dir,
             artifact_name: args.variant.clone(),
             common_build_args: CommonBuildArgs::new(
@@ -549,7 +550,7 @@ impl DockerBuild {
         // Clean up any previous outputs we have tracked.
         match self.common_build_args.cleanup {
             OutputCleanup::BeforeBuild => {
-                clean_build_files(&marker_dir, &self.artifacts_dir)?;
+                clean_build_files(&marker_dir, &self.artifacts_dirs)?;
             }
             OutputCleanup::None => (),
         }
@@ -608,7 +609,7 @@ impl DockerBuild {
         docker(&rmi, Retry::No)?;
 
         // Copy artifacts to the expected directory and write markers to track them.
-        copy_build_files(&marker_dir, &self.artifacts_dir)?;
+        copy_build_files(&marker_dir, &self.artifacts_dirs[0])?;
 
         Ok(())
     }
@@ -807,17 +808,16 @@ where
     Ok(())
 }
 
-/// Remove build artifacts from the output directory.
+/// Remove build artifacts from any of the known output directories.
 /// Any marker file we find could have a corresponding file that should be cleaned up.
 /// We also clean up the marker files so they do not accumulate across builds.
 /// For the same reason, if a directory is empty after build artifacts, marker files, and other
 /// empty directories have been removed, then that directory will also be removed.
-fn clean_build_files<P>(build_dir: P, output_dir: P) -> Result<()>
+fn clean_build_files<P>(build_dir: P, output_dirs: &[PathBuf]) -> Result<()>
 where
     P: AsRef<Path>,
 {
     let build_dir = build_dir.as_ref();
-    let output_dir = output_dir.as_ref();
 
     fn has_markers(entry: &DirEntry) -> bool {
         let is_dir = entry.path().is_dir();
@@ -859,15 +859,17 @@ where
     let mut clean_dirs: HashSet<PathBuf> = HashSet::new();
 
     for marker_file in find_files(&build_dir, has_markers) {
-        let mut output_file: PathBuf = output_dir.into();
-        output_file.push(marker_file.strip_prefix(build_dir).context(
-            error::StripPathPrefixSnafu {
-                path: &marker_file,
-                prefix: build_dir,
-            },
-        )?);
-        output_file.set_extension("");
-        cleanup(&output_file, output_dir, &mut clean_dirs)?;
+        for output_dir in output_dirs {
+            let mut output_file: PathBuf = output_dir.into();
+            output_file.push(marker_file.strip_prefix(build_dir).context(
+                error::StripPathPrefixSnafu {
+                    path: &marker_file,
+                    prefix: build_dir,
+                },
+            )?);
+            output_file.set_extension("");
+            cleanup(&output_file, output_dir, &mut clean_dirs)?;
+        }
         cleanup(&marker_file, build_dir, &mut clean_dirs)?;
     }
 

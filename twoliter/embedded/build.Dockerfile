@@ -129,8 +129,11 @@ RUN \
 
 USER root
 RUN --mount=target=/host \
+    find /host/build/rpms/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+      ln -snft ./rpmbuild/RPMS {} \+ && \
     for pkg in ${PACKAGE_DEPENDENCIES} ; do \
-      ln -s /host/build/rpms/${pkg}/*.rpm ./rpmbuild/RPMS ; \
+      find /host/build/rpms/${pkg}/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+        ln -snft ./rpmbuild/RPMS {} \+ ; \
     done && \
     createrepo_c \
         -o ./rpmbuild/RPMS \
@@ -239,10 +242,13 @@ WORKDIR /root
 USER root
 RUN --mount=target=/host \
     mkdir -p ./rpmbuild/RPMS && \
+    find /host/build/rpms/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+      ln -snft ./rpmbuild/RPMS {} \+ && \
     for pkg in ${PACKAGE_DEPENDENCIES} ; do \
-      ln -s /host/build/rpms/${pkg}/*.rpm ./rpmbuild/RPMS ; \
+      find /host/build/rpms/${pkg}/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
+        ln -snft ./rpmbuild/RPMS {} \+ ; \
     done && \
-    ln -s /home/builder/rpmbuild/RPMS/*/*.rpm ./rpmbuild/RPMS && \
+    ln -snf /home/builder/rpmbuild/RPMS/*/*.rpm ./rpmbuild/RPMS && \
     createrepo_c \
         -o ./rpmbuild/RPMS \
         -x '*-debuginfo-*.rpm' \
@@ -340,7 +346,7 @@ WORKDIR /root
 USER root
 RUN --mount=target=/host \
     mkdir -p /local/migrations \
-    && find /host/build/rpms/os/ -maxdepth 1 -type f \
+    && find /host/build/rpms/ -maxdepth 2 -type f \
         -name "bottlerocket-migrations-*.rpm" \
         -not -iname '*debuginfo*' \
         -exec cp '{}' '/local/migrations/' ';' \
@@ -367,7 +373,7 @@ WORKDIR /tmp
 RUN --mount=target=/host \
     mkdir -p /local/archives \
     && KERNEL="$(printf "%s\n" ${PACKAGES} | awk '/^kernel-/{print $1}')" \
-    && find /host/build/rpms/${KERNEL}/ -maxdepth 1 -type f \
+    && find /host/build/rpms/ -maxdepth 2 -type f \
         -name "bottlerocket-${KERNEL}-archive-*.rpm" \
         -exec cp '{}' '/local/archives/' ';' \
     && /host/build/tools/rpm2kmodkit \
