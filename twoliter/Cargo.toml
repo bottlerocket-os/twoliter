@@ -1,6 +1,6 @@
 [package]
 name = "twoliter"
-version = "0.1.1"
+version = "0.2.0-rc2"
 edition = "2021"
 description = "A command line tool for creating custom builds of Bottlerocket"
 authors = ["Matthew James Briggs <brigmatt@amazon.com>"]
