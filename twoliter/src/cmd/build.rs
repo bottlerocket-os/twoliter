@@ -218,3 +218,124 @@ impl BuildVariant {
         res
     }
 }
+
+#[cfg(feature = "integ-tests")]
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::path::Path;
+
+    const PROJECT: &str = "local-kit";
+
+    fn expect_kit(project_dir: &Path, name: &str, arch: &str, packages: &[&str]) {
+        let build = project_dir.join("build");
+        let kit_output_dir = build.join("kits").join(name).join(arch).join("Packages");
+        assert!(
+            kit_output_dir.is_dir(),
+            "Expected to find output dir for {} at {}",
+            name,
+            kit_output_dir.display()
+        );
+
+        for package in packages {
+            let rpm = kit_output_dir.join(&format!("bottlerocket-{package}-0.0-0.{arch}.rpm"));
+            assert!(
+                rpm.is_file(),
+                "Expected to find RPM for {}, for {} at {}",
+                package,
+                name,
+                rpm.display()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn build_core_kit() {
+        let kit_name = "core-kit";
+        let arch = "aarch64";
+        let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
+        let project_dir = temp_dir.path();
+        let project_path = project_dir.join("Twoliter.toml");
+
+        let command = BuildKit {
+            project_path: Some(project_path),
+            arch: arch.to_string(),
+            kit: kit_name.to_string(),
+            lookaside_cache: None,
+            upstream_source_fallback: false,
+        };
+
+        command.run().await.unwrap();
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
+    }
+
+    #[tokio::test]
+    async fn build_extra_1_kit() {
+        let kit_name = "extra-1-kit";
+        let arch = "x86_64";
+        let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
+        let project_dir = temp_dir.path();
+        let project_path = project_dir.join("Twoliter.toml");
+
+        let command = BuildKit {
+            project_path: Some(project_path),
+            arch: arch.to_string(),
+            kit: kit_name.to_string(),
+            lookaside_cache: None,
+            upstream_source_fallback: false,
+        };
+
+        command.run().await.unwrap();
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
+        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]);
+    }
+
+    #[tokio::test]
+    async fn build_extra_2_kit() {
+        let kit_name = "extra-2-kit";
+        let arch = "aarch64";
+        let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
+        let project_dir = temp_dir.path();
+        let project_path = project_dir.join("Twoliter.toml");
+
+        let command = BuildKit {
+            project_path: Some(project_path),
+            arch: arch.to_string(),
+            kit: kit_name.to_string(),
+            lookaside_cache: None,
+            upstream_source_fallback: false,
+        };
+
+        command.run().await.unwrap();
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
+        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]);
+    }
+
+    #[tokio::test]
+    async fn build_extra_3_kit() {
+        let kit_name = "extra-3-kit";
+        let arch = "x86_64";
+        let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
+        let project_dir = temp_dir.path();
+        let project_path = project_dir.join("Twoliter.toml");
+
+        let command = BuildKit {
+            project_path: Some(project_path),
+            arch: arch.to_string(),
+            kit: kit_name.to_string(),
+            lookaside_cache: None,
+            upstream_source_fallback: false,
+        };
+
+        command.run().await.unwrap();
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
+        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]);
+        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]);
+        expect_kit(
+            &project_dir,
+            "extra-3-kit",
+            arch,
+            &["pkg-e", "pkg-f", "pkg-g"],
+        );
+    }
+}
