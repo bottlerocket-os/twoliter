@@ -38,7 +38,14 @@ pubsys-setup = { version = "0.1.0", artifact = [ "bin:pubsys-setup" ], path = ".
 testsys = { version = "0.1.0", artifact = [ "bin:testsys" ], path = "../tools/testsys" }
 tuftool = { version = "0.10", artifact = [ "bin:tuftool" ] }
 
+[dev-dependencies]
+assert_cmd = "2"
+
 [build-dependencies]
 bytes = "1"
 flate2 = "1"
 tar = "0.4"
+
+[features]
+default = ["integ-tests"]
+integ-tests = []
