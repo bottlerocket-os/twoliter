@@ -19,7 +19,7 @@ fmt:
 
 .PHONY: test
 test:
-	cargo test --release --locked
+	cargo test --locked
 
 .PHONY: check
 check: fmt clippy deny test
