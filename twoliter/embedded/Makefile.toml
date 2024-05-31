@@ -813,7 +813,7 @@ cargo build \
 
 # Builds a kit including its dependency packages.
 [tasks.build-kit]
-dependencies = ["check-cargo-version", "fetch", "publish-setup", "fetch-licenses", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "cargo-metadata"]
 script_runner = "bash"
 script = [
 '''
