@@ -884,7 +884,7 @@ ln -snf "${BUILDSYS_VERSION_FULL}" "${BUILDSYS_OUTPUT_DIR}/latest"
 ]
 
 [tasks.repack-variant]
-dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup"]
+dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup", "cargo-metadata"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
