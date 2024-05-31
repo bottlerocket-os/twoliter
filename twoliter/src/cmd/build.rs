@@ -13,6 +13,7 @@ use tempfile::TempDir;
 #[derive(Debug, Parser)]
 pub(crate) enum BuildCommand {
     Clean(BuildClean),
+    Kit(BuildKit),
     Variant(BuildVariant),
 }
 
@@ -20,8 +21,73 @@ impl BuildCommand {
     pub(crate) async fn run(self) -> Result<()> {
         match self {
             BuildCommand::Clean(command) => command.run().await,
+            BuildCommand::Kit(command) => command.run().await,
             BuildCommand::Variant(command) => command.run().await,
         }
+    }
+}
+
+/// Build a Bottlerocket variant image.
+#[derive(Debug, Parser)]
+pub(crate) struct BuildKit {
+    /// Path to Twoliter.toml. Will search for Twoliter.toml when absent.
+    #[clap(long = "project-path")]
+    project_path: Option<PathBuf>,
+
+    /// The architecture to build for.
+    #[clap(long = "arch", default_value = "x86_64")]
+    arch: String,
+
+    /// The name of the kit to build.
+    kit: String,
+
+    /// The URL to the lookaside cache where sources are stored to avoid pulling them from upstream.
+    /// Defaults to https://cache.bottlerocket.aws
+    lookaside_cache: Option<String>,
+
+    /// If sources are not found in the lookaside cache, this flag will cause buildsys to pull them
+    /// from the upstream URL found in a package's `Cargo.toml`.
+    #[clap(long = "upstream-source-fallback")]
+    upstream_source_fallback: bool,
+}
+
+impl BuildKit {
+    pub(super) async fn run(&self) -> Result<()> {
+        let project = project::load_or_find_project(self.project_path.clone()).await?;
+        let toolsdir = project.project_dir().join("build/tools");
+        install_tools(&toolsdir).await?;
+        let makefile_path = toolsdir.join("Makefile.toml");
+
+        // TODO: Remove once models is no longer conditionally compiled.
+        // Create the models directory because it is mounted in build.Dockerfile
+        let models_dir = project.project_dir().join("sources/models/src/variant");
+        if !models_dir.is_dir() {
+            fs::create_dir_all(&models_dir)
+                .await
+                .context("Unable to create models source directory")?;
+        }
+
+        let mut optional_envs = Vec::new();
+
+        if let Some(lookaside_cache) = &self.lookaside_cache {
+            optional_envs.push(("BUILDSYS_LOOKASIDE_CACHE", lookaside_cache))
+        }
+
+        CargoMake::new(&project)?
+            .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
+            .env("BUILDSYS_ARCH", &self.arch)
+            .env("BUILDSYS_KIT", &self.kit)
+            .env("BUILDSYS_VERSION_IMAGE", project.release_version())
+            .env("GO_MODULES", project.find_go_modules().await?.join(" "))
+            .env(
+                "BUILDSYS_UPSTREAM_SOURCE_FALLBACK",
+                self.upstream_source_fallback.to_string(),
+            )
+            .envs(optional_envs.into_iter())
+            .makefile(makefile_path)
+            .project_dir(project.project_dir())
+            .exec("build-kit")
+            .await
     }
 }
 

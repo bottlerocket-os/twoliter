@@ -815,6 +815,40 @@ cargo build \
 '''
 ]
 
+# Builds a kit including its dependency packages.
+[tasks.build-kit]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "fetch-licenses", "cargo-metadata"]
+script_runner = "bash"
+script = [
+'''
+set -e
+if [ -z "${BUILDSYS_KIT}" ]; then
+    echo "The BUILDSYS_KIT environment variable must be set. For example:"
+    echo "cargo make -e BUILDSYS_KIT=core-kit build-kit"
+    exit 1
+fi
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+# TODO - remove this once package builds no longer require variant variables.
+# Parse the variant into its components and set additional variables.
+eval "$(bottlerocket-variant)"
+export BUILDSYS_VARIANT_PLATFORM="${BUILDSYS_VARIANT_PLATFORM:?}"
+export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
+export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
+export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
+
+# Save built artifacts for each architecture.  We don't set this everywhere
+# because we build host tools with cargo as well, like buildsys and pubsys.
+export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}
+
+cargo build \
+  ${CARGO_BUILD_ARGS} \
+  ${CARGO_MAKE_CARGO_ARGS} \
+  ${CARGO_MAKE_CARGO_LIMIT_JOBS} \
+  --manifest-path "${BUILDSYS_ROOT_DIR}/kits/${BUILDSYS_KIT}/Cargo.toml"
+'''
+]
+
 [tasks.build-variant]
 dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
 script = [
