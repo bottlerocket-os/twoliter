@@ -56,10 +56,6 @@ PUBLISH_LOG_LEVEL = "info"
 # tools/pubsys/policies/ssm/README.md for more information.
 PUBLISH_SSM_TEMPLATES_PATH = "${BUILDSYS_ROOT_DIR}/tools/pubsys/policies/ssm/defaults.toml"
 
-# This can be overridden with -e to change the source path
-# for the Licenses.toml file
-BUILDSYS_LICENSES_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Licenses.toml"
-
 # Specifies whether to validate all targets when validating TUF repositories
 REPO_VALIDATE_TARGETS = "true"
 # Specifies the timeframe to look for upcoming repository metadata expirations
@@ -772,7 +768,7 @@ cargo metadata \
 
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
-dependencies = ["check-cargo-version", "fetch", "publish-setup", "fetch-licenses", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "cargo-metadata"]
 script_runner = "bash"
 script = [
 '''
@@ -933,47 +929,9 @@ docker run --rm \
 '''
 ]
 
-[tasks.fetch-licenses]
-dependencies = ["fetch"]
-script = [
-'''
-if [ "${BUILDSYS_UPSTREAM_LICENSE_FETCH}" = "false" ]; then
-  echo "Skipping fetching licenses"
-  exit 0
-fi
-
-# Attempt copy Licenses.toml
-cp "${BUILDSYS_LICENSES_CONFIG_PATH}" "${BUILDSYS_ROOT_DIR}/Licenses.toml" 2>/dev/null \
-  || echo "Skipping copying file from ${BUILDSYS_LICENSES_CONFIG_PATH}"
-
-if [ ! -s "${BUILDSYS_ROOT_DIR}"/Licenses.toml ] ; then
-  echo "Not fetching licenses since 'Licenses.toml' doesn't exist"
-  exit 0
-fi
-
-mkdir -p "${BUILDSYS_ROOT_DIR}"/licenses
-
-run_fetch_licenses="
-bottlerocket-license-tool -l /tmp/Licenses.toml fetch /tmp/licenses
-"
-set +e
-
-docker run --rm \
-  --user "$(id -u):$(id -g)" \
-  --security-opt="label=disable" \
-  -e CARGO_HOME="/tmp/.cargo" \
-  -v "${CARGO_HOME}":/tmp/.cargo \
-  -v "${BUILDSYS_ROOT_DIR}/licenses:/tmp/licenses" \
-  -v "${BUILDSYS_ROOT_DIR}/Licenses.toml:/tmp/Licenses.toml" \
-  "${TLPRIVATE_SDK_IMAGE}" \
-  bash -c "${run_fetch_licenses}"
-'''
-]
-
 [tasks.build]
 dependencies = [
     "check-licenses",
-    "fetch-licenses",
     "build-variant",
 ]
 
