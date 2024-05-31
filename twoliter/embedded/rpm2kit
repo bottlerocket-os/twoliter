@@ -14,7 +14,12 @@ for opt in "$@"; do
    esac
 done
 
+# import the oci helper functions
+# shellcheck source=ocihelper
+. "${0%/*}/ocihelper"
+
 KIT_DIR="${OUTPUT_DIR}/${ARCH}"
+
 rm -rf "${KIT_DIR}"
 
 mkdir -p "${KIT_DIR}/Packages"
@@ -30,3 +35,92 @@ done
 
 createrepo_c "${KIT_DIR}"
 dnf --disablerepo '*' --repofrompath "kit,file:///${KIT_DIR}" repoquery --all
+
+WORK_DIR="$(mktemp -d)"
+TIMESTAMP="$(date +"%FT%T.%NZ")"
+FILENAME_PREFIX="${KIT_NAME:?}-${ARCH:?}-${VERSION_ID:?}-${BUILD_ID:?}"
+
+# Create the content layer
+mkdir -p "${WORK_DIR}/blobs/sha256"
+tar -cf "${WORK_DIR}/content-layer.tar" -C "${KIT_DIR}" .
+DIFF_ID="$(digest_from_file "${WORK_DIR}/content-layer.tar")"
+gzip "${WORK_DIR}/content-layer.tar"
+CONTENT_DIGEST="$(digest_from_file "${WORK_DIR}/content-layer.tar.gz")"
+mv "${WORK_DIR}/content-layer.tar.gz" "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}"
+
+# Create the OCI config
+METADATA="$(base64 -w0 < "${FILENAME_PREFIX}.json")"
+CONFIG=<<EOF
+{
+  "architecture": "${ARCH}",
+  "config": {
+    "Env": [],
+    "WorkingDir": "/",
+    "OnBuild": null,
+    "Labels": {
+      "dev.bottlerocket.kit.v1": "${METADATA}"
+    }
+  },
+  "created": "${TIMESTAMP}",
+  "history": [],
+  "os": "linux",
+  "rootfs": {
+    "type": "layers",
+    "diff_ids": [
+      "sha256:${DIFF_ID}"
+    ]
+  }
+}
+EOF
+CONFIG_DIGEST="$(digest_from_blob "${CONFIG}")"
+echo "${CONFIG}" > "${WORK_DIR}/blobs/sha256/${CONFIG_DIGEST}"
+
+# Create the OCI Manifest
+CONFIG_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${CONFIG_DIGEST}")"
+CONTENT_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}")"
+MANIFEST=<<EOF
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:${CONFIG_DIGEST}",
+    "size": ${CONFIG_SIZE}
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:${CONTENT_DIGEST}",
+      "size": ${CONTENT_SIZE}
+    }
+  ]
+}
+EOF
+MANIFEST_DIGEST="$(digest_from_blob "${MANIFEST}")"
+echo "${MANIFEST}" > "${WORK_DIR}/blobs/sha256/${MANIFEST_DIGEST}"
+MANIFEST_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${MANIFEST_DIGEST}")"
+
+# Create the OCI index
+cat <<EOF >> "${WORK_DIR}/index.json"
+{
+  "schemaVersion": 2,
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:${MANIFEST_DIGEST}",
+      "size": ${MANIFEST_SIZE},
+      "annotations": {
+        "org.opencontainers.image.created": "${TIMESTAMP}"
+      },
+      "platform": {
+        "architecture": "${ARCH}",
+        "os": "linux"
+      }
+    }
+  ]
+}
+EOF
+
+# Create the layout file and create the oci tarball
+echo '{"imageLayoutVersion": "1.0.0"}' > "${WORK_DIR}/oci-layout"
+tar -cf "${OUTPUT_DIR}/${FILENAME_PREFIX}.tar" -C "${WORK_DIR}"
