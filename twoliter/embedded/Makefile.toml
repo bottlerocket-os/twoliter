@@ -1098,6 +1098,44 @@ pubsys \
 '''
 ]
 
+[tasks.fetch-variant]
+dependencies = ["publish-setup-without-key"]
+script_runner = "bash"
+script = [
+'''
+set -e
+
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+mkdir -p "${BUILDSYS_VARIANT_DIR}"
+
+pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
+   --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
+   \
+   fetch-variant \
+   \
+   --repo "${PUBLISH_REPO}" \
+   --arch "${BUILDSYS_ARCH}" \
+   --variant "${BUILDSYS_VARIANT}" \
+   --version "${BUILDSYS_VERSION_IMAGE}" \
+   --build "${BUILDSYS_VERSION_BUILD}" \
+   \
+   --variant-manifest "${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/Cargo.toml" \
+   --filename-prefix "${FILENAME_PREFIX:-"${BUILDSYS_NAME_FULL}"}" \
+   --root-role-path "${PUBLISH_REPO_ROOT_JSON}" \
+   \
+   --outdir "${BUILDSYS_OUTPUT_DIR}"\
+'''
+]
+
+[tasks.fetch-friendly-variant]
+env = { "FILENAME_PREFIX" = "${BUILDSYS_NAME_FRIENDLY}" }
+run_task = "fetch-variant"
+
+[tasks.fetch-ova]
+run_task = "fetch-friendly-variant"
+
 [tasks.check-repo-expirations]
 dependencies = ["publish-setup-without-key", "fetch-sources"]
 script_runner = "bash"

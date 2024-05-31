@@ -94,6 +94,11 @@ async fn run() -> Result<()> {
                 .await
                 .context(error::RefreshRepoSnafu)
         }
+        SubCommands::FetchVariant(ref fetch_variant_args) => {
+            repo::fetch_variant::run(&args, fetch_variant_args)
+                .await
+                .context(error::FetchVariantSnafu)
+        }
         SubCommands::Ami(ref ami_args) => aws::ami::run(&args, ami_args)
             .await
             .context(error::AmiSnafu),
@@ -153,7 +158,7 @@ enum SubCommands {
     ValidateRepo(repo::validate_repo::ValidateRepoArgs),
     CheckRepoExpirations(repo::check_expirations::CheckExpirationsArgs),
     RefreshRepo(repo::refresh_repo::RefreshRepoArgs),
-
+    FetchVariant(repo::fetch_variant::FetchVariantArgs),
     Ami(aws::ami::AmiArgs),
     PublishAmi(aws::publish_ami::Who),
     ValidateAmi(aws::validate_ami::ValidateAmiArgs),
@@ -197,6 +202,11 @@ mod error {
     pub(super) enum Error {
         #[snafu(display("Failed to build AMI: {}", source))]
         Ami { source: crate::aws::ami::Error },
+
+        #[snafu(display("Failed to fetch variant: {}", source))]
+        FetchVariant {
+            source: crate::repo::fetch_variant::Error,
+        },
 
         #[snafu(display("Logger setup error: {}", source))]
         Logger { source: log::SetLoggerError },
