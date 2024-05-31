@@ -1,6 +1,10 @@
 [workspace]
 resolver = "1"
-members = ["hello-ootb"]
+members = [
+    "packages/hello-agent",
+    "packages/hello-go",
+    "variants/hello-ootb"
+]
 
 [profile.dev]
 debug = false
