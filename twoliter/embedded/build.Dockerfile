@@ -137,12 +137,18 @@ RUN --mount=target=/host \
     for kit in ${KIT_DEPENDENCIES} ; do \
       KIT_REPOS+=("--repofrompath=${kit},/host/build/kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
     done && \
+    declare -a EXTERNAL_KIT_REPOS && \
+    readarray EXTERNAL_KIT_DEPENDENCIES < <(find . -maxdepth 1 -type d -printf '%P\n') && \
+    for kit in ${EXTERNAL_KIT_DEPENDENCIES} ; do \
+      EXTERNAL_KIT_REPOS+=("--repofrompath=${kit},/host/build/external-kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
+    done && \
     echo "${KIT_REPOS[@]}" && \
     dnf -y \
         --disablerepo '*' \
         --repofrompath repo,./rpmbuild/RPMS \
         --enablerepo 'repo' \
         "${KIT_REPOS[@]}" \
+        "${EXTERNAL_KIT_REPOS[@]}" \
         --nogpgcheck \
         --forcearch "${ARCH}" \
         builddep rpmbuild/SPECS/${PACKAGE}.spec
@@ -252,11 +258,17 @@ RUN --mount=target=/host \
     for kit in ${KIT_DEPENDENCIES} ; do \
       KIT_REPOS+=("--repofrompath=${kit},/host/build/kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
     done && \
+    declare -a EXTERNAL_KIT_REPOS && \
+    readarray EXTERNAL_KIT_DEPENDENCIES < <(find . -maxdepth 1 -type d -printf '%P\n') && \
+    for kit in ${EXTERNAL_KIT_DEPENDENCIES} ; do \
+      EXTERNAL_KIT_REPOS+=("--repofrompath=${kit},/host/build/external-kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
+    done && \
     dnf -y \
         --disablerepo '*' \
         --repofrompath repo,./rpmbuild/RPMS \
         --enablerepo 'repo' \
         "${KIT_REPOS[@]}" \
+        "${EXTERNAL_KIT_REPOS[@]}" \
         --nogpgcheck \
         --downloadonly \
         --downloaddir . \
