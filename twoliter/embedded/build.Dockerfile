@@ -122,6 +122,7 @@ RUN --mount=target=/host \
     find /host/build/rpms/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
       ln -snft ./rpmbuild/RPMS {} \+ && \
     for pkg in ${PACKAGE_DEPENDENCIES} ; do \
+      [ -d "/host/build/rpms/${pkg}" ] || continue ; \
       find /host/build/rpms/${pkg}/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
         ln -snft ./rpmbuild/RPMS {} \+ ; \
     done && \
@@ -235,6 +236,7 @@ RUN --mount=target=/host \
     find /host/build/rpms/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
       ln -snft ./rpmbuild/RPMS {} \+ && \
     for pkg in ${PACKAGE_DEPENDENCIES} ; do \
+      [ -d "/host/build/rpms/${pkg}" ] || continue ; \
       find /host/build/rpms/${pkg}/ -mindepth 1 -maxdepth 1 -name '*.rpm' -size +0c -print -exec \
         ln -snft ./rpmbuild/RPMS {} \+ ; \
     done && \
