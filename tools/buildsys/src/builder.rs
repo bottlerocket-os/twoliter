@@ -139,6 +139,9 @@ struct PackageBuildArgs {
     variant_flavor: String,
     variant_platform: String,
     variant_runtime: String,
+    version_build: String,
+    version_build_epoch: String,
+    version_build_timestamp: String,
 }
 
 impl KitBuildArgs {
@@ -170,6 +173,9 @@ impl crate::builder::PackageBuildArgs {
         args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
+        args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("BUILD_EPOCH", &self.version_build_epoch);
+        args.build_arg("BUILD_ID_TIMESTAMP", &self.version_build_timestamp);
         for image_feature in &self.image_features {
             args.build_arg(format!("{}", image_feature), "1");
         }
@@ -354,6 +360,9 @@ impl DockerBuild {
                 variant_flavor: args.variant_flavor,
                 variant_platform: args.variant_platform,
                 variant_runtime: args.variant_runtime,
+                version_build: args.version_build,
+                version_build_epoch: args.version_build_epoch,
+                version_build_timestamp: args.version_build_timestamp,
             }),
             secrets_args: Vec::new(),
         })
