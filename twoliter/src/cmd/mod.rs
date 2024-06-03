@@ -2,10 +2,12 @@ mod build;
 mod build_clean;
 mod debug;
 mod make;
+mod update;
 
 use self::build::BuildCommand;
 use crate::cmd::debug::DebugAction;
 use crate::cmd::make::Make;
+use crate::cmd::update::Update;
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
@@ -35,6 +37,9 @@ pub(crate) enum Subcommand {
 
     Make(Make),
 
+    /// Update Twoliter.lock
+    Update(Update),
+
     /// Commands that are used for checking and troubleshooting Twoliter's internals.
     #[clap(subcommand)]
     Debug(DebugAction),
@@ -45,6 +50,7 @@ pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
         Subcommand::Build(build_command) => build_command.run().await,
         Subcommand::Make(make_args) => make_args.run().await,
+        Subcommand::Update(update_args) => update_args.run().await,
         Subcommand::Debug(debug_action) => debug_action.run().await,
     }
 }

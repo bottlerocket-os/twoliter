@@ -2,6 +2,7 @@ use super::build_clean::BuildClean;
 use crate::cargo_make::CargoMake;
 use crate::common::fs;
 use crate::docker::DockerContainer;
+use crate::lock::Lock;
 use crate::project;
 use crate::tools::install_tools;
 use anyhow::{Context, Result};
@@ -122,20 +123,15 @@ impl BuildVariant {
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
+        let lock_file = Lock::load(&project).await?;
         // A temporary directory in the `build` directory
         let build_temp_dir = TempDir::new_in(project.project_dir())
             .context("Unable to create a tempdir for Twoliter's build")?;
         let packages_dir = build_temp_dir.path().join("sdk_rpms");
         fs::create_dir_all(&packages_dir).await?;
 
-        let sdk_container = DockerContainer::new(
-            format!("sdk-{}", token),
-            project.sdk()?.context(format!(
-                "No SDK defined in {}",
-                project.filepath().display(),
-            ))?,
-        )
-        .await?;
+        let sdk_container =
+            DockerContainer::new(format!("sdk-{}", token), lock_file.sdk.source).await?;
         sdk_container
             .cp_out(Path::new("twoliter/alpha/build/rpms"), &packages_dir)
             .await?;
