@@ -20,6 +20,7 @@ use crate::args::{
 };
 use crate::builder::DockerBuild;
 use buildsys::manifest::{BundleModule, ImageFeature, Manifest, ManifestInfo, SupportedArch};
+use buildsys_config::EXTERNAL_KIT_METADATA;
 use cache::LookasideCache;
 use clap::Parser;
 use gomod::GoMod;
@@ -124,6 +125,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     let manifest_path = args.common.cargo_manifest_dir.join(manifest_file);
     println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={}", EXTERNAL_KIT_METADATA);
 
     let manifest = Manifest::new(&manifest_path, &args.common.cargo_metadata_path)
         .context(error::ManifestParseSnafu)?;
@@ -205,6 +207,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
 fn build_kit(args: BuildKitArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={}", EXTERNAL_KIT_METADATA);
 
     let manifest = Manifest::new(
         args.common.cargo_manifest_dir.join(manifest_file),
@@ -221,6 +224,7 @@ fn build_kit(args: BuildKitArgs) -> Result<()> {
 fn build_variant(args: BuildVariantArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={}", EXTERNAL_KIT_METADATA);
 
     let manifest = Manifest::new(
         args.common.cargo_manifest_dir.join(manifest_file),
