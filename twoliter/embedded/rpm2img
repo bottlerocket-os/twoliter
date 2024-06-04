@@ -157,10 +157,16 @@ INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
 # Inventory installed packages.
+# Values specified as %{field-name} are retrieved from the package's corresponding 
+# "field-name:" in the RPM. Note the "Epoch" field is retrieved - its value is set
+# in build.Dockerfile. Epoch is used to trump breaking changes that may occur when
+# the versioning scheme for a package changes between releases - for example, if a
+# newer release of a package were to have a lower "Release". 
 INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"Publisher\":\"Bottlerocket\"\
-,\"Version\":\"${VERSION_ID}\"\
-,\"Release\":\"${BUILD_ID}\"\
+,\"Version\":\"%{Version}\"\
+,\"Release\":\"%{Release}\"\
+,\"Epoch\":\"%{Epoch}\"\
 ,\"InstalledTime\":\"${INSTALL_TIME}\"\
 ,\"ApplicationType\":\"%{GROUP}\"\
 ,\"Architecture\":\"%{ARCH}\"\
