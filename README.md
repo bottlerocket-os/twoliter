@@ -18,7 +18,13 @@ We welcome ideas and requirements in the form of issues and comments!
 
 This section includes information for maintainers about testing and releasing Twoliter.
 
-## Testing
+## Unit Tests and Integration Tests
+
+If you run `cargo test` you will get the default features which includes the feature `integ-tests`.
+These will be quite slow as some of them do complete builds.
+If you don't have time for that, run `cargo test --no-default-features` to run only the fast tests.
+
+## Testing the Binary in a Project
 
 In general, if you have changes to Twoliter and want to try them out in a Twoliter project, it is as simple as building the Twoliter binary and using it in your project.
 Different projects will have different ways of making sure the correct Twoliter binary is being used.

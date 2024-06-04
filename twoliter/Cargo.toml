@@ -43,3 +43,7 @@ tuftool = { version = "0.10", artifact = [ "bin:tuftool" ] }
 bytes = "1"
 flate2 = "1"
 tar = "0.4"
+
+[features]
+default = ["integ-tests"]
+integ-tests = []
