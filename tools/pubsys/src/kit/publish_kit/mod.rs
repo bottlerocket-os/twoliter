@@ -39,17 +39,19 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
     trace!("Parsed infra config: {:?}", infra_config);
-    ensure!(infra_config.kit_vendors.is_some(), error::NoVendorsSnafu);
+    ensure!(infra_config.vendor.is_some(), error::NoVendorsSnafu);
 
     // Fetch the vendor container registry uri
     let vendor_registry_uri = infra_config
-        .kit_vendors
+        .vendor
         .as_ref()
         .unwrap()
         .get(&publish_kit_args.vendor)
         .context(error::VendorNotFoundSnafu {
             name: publish_kit_args.vendor.clone(),
-        })?;
+        })?
+        .registry
+        .clone();
     info!(
         "Found vendor container registry at uri: {}",
         vendor_registry_uri
