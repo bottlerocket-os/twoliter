@@ -68,6 +68,14 @@ pub(crate) enum Error {
     #[snafu(display("Failed to create build arguments due to a dependency error: {source}"))]
     Graph { source: buildsys::manifest::Error },
 
+    #[snafu(display(
+        "Failed to create build arguments due to an error reading external kit metadata: {source}"
+    ))]
+    ExternalMetadataRead { source: std::io::Error },
+
+    #[snafu(display("Failed to serialize kit metadata: {source}"))]
+    MetadataSerialize { source: serde_json::Error },
+
     #[snafu(display("Missing environment variable '{}'", var))]
     Environment {
         var: String,

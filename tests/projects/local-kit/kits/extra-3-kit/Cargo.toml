@@ -8,6 +8,7 @@ build = "../build.rs"
 exclude = ["README.md"]
 
 [package.metadata.build-kit]
+vendor = "bottlerocket"
 included-packages = [
     "pkg-e"
 ]

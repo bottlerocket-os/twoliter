@@ -755,6 +755,7 @@ dependencies = [
  "rand",
  "regex",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "serde_plain",

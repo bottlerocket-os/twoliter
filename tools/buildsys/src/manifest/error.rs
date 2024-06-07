@@ -15,6 +15,9 @@ pub(super) enum Error {
     #[snafu(display("Cargo package graph query failed with root '{id}': {source}"))]
     CargoPackageQuerySnafu { id: PackageId, source: guppy::Error },
 
+    #[snafu(display("Package '{id}' has no 'vendor' field in build-kit metadata"))]
+    NoKitVendor { id: String },
+
     #[snafu(display("Failed to create dependency graph from '{}': {}", path.display(), source))]
     GraphBuild { path: PathBuf, source: guppy::Error },
 

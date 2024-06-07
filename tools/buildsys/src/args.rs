@@ -15,10 +15,11 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 16] = [
+const REBUILD_VARS: [(&str, u8); 17] = [
     ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_CACERTS_BUNDLE_OVERRIDE", VARIANT),
     ("BUILDSYS_KITS_DIR", KIT),
+    ("BUILDSYS_EXTERNAL_KITS_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_NAME", VARIANT),
     ("BUILDSYS_OUTPUT_DIR", VARIANT),
     ("BUILDSYS_OUTPUT_GENERATION_ID", PACKAGE | KIT | VARIANT),
@@ -28,9 +29,9 @@ const REBUILD_VARS: [(&str, u8); 16] = [
     ("BUILDSYS_STATE_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_TIMESTAMP", VARIANT),
     ("BUILDSYS_VARIANT", VARIANT),
-    ("BUILDSYS_VERSION_BUILD", VARIANT),
+    ("BUILDSYS_VERSION_BUILD", KIT | VARIANT),
     ("BUILDSYS_VERSION_BUILD_EPOCH", PACKAGE),
-    ("BUILDSYS_VERSION_IMAGE", VARIANT),
+    ("BUILDSYS_VERSION_IMAGE", KIT | VARIANT),
     ("TLPRIVATE_SDK_IMAGE", PACKAGE | KIT | VARIANT),
 ];
 
@@ -155,6 +156,18 @@ pub(crate) struct BuildKitArgs {
     /// The directory where built kits go, e.g. build/kits
     #[arg(long, env = "BUILDSYS_KITS_DIR")]
     pub(crate) kits_dir: PathBuf,
+
+    /// The directory where external kits are fetched, e.g. build/external-kits
+    #[arg(long, env = "BUILDSYS_EXTERNAL_KITS_DIR")]
+    pub(crate) external_kits_dir: PathBuf,
+
+    /// Build id of the workspace
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
+    pub(crate) version_build: String,
+
+    /// Version number for the workspace
+    #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
+    pub(crate) version_image: String,
 
     #[command(flatten)]
     pub(crate) common: Common,

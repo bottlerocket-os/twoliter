@@ -378,6 +378,17 @@ impl ManifestInfo {
             .unwrap_or_else(|| self.manifest_name())
     }
 
+    /// Convenience method to return the kit vendor
+    pub fn kit_vendor(&self) -> Result<String> {
+        Ok(self
+            .build_kit()
+            .context(error::NoKitVendorSnafu {
+                id: self.package.name.clone(),
+            })?
+            .vendor
+            .clone())
+    }
+
     /// Convenience method to find whether the package is sensitive to variant changes.
     pub fn variant_sensitive(&self) -> Option<&VariantSensitivity> {
         self.build_package()
@@ -560,6 +571,7 @@ pub struct BuildPackage {
 #[allow(dead_code)]
 pub struct BuildKit {
     pub kit_name: Option<String>,
+    pub vendor: String,
 }
 
 #[derive(Deserialize, Debug)]

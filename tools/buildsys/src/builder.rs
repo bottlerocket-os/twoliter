@@ -11,6 +11,7 @@ use buildsys::manifest::{
     ImageFeature, ImageFormat, ImageLayout, Manifest, PartitionPlan, SupportedArch,
 };
 use buildsys::BuildType;
+use buildsys_config::EXTERNAL_KIT_METADATA;
 use duct::cmd;
 use error::Result;
 use lazy_static::lazy_static;
@@ -151,6 +152,11 @@ impl KitBuildArgs {
         args.push("none".into());
         args.build_arg("KIT", &self.kit);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
+        args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("VERSION_ID", &self.version_id);
+        args.build_arg("EXTERNAL_KIT_METADATA", &self.external_kit_metadata);
+        args.build_arg("VENDOR", &self.vendor);
+        args.build_arg("LOCAL_KIT_DEPENDENCIES", &self.local_kits.join(" "));
         args
     }
 }
@@ -158,6 +164,11 @@ impl KitBuildArgs {
 struct KitBuildArgs {
     kit: String,
     package_dependencies: Vec<String>,
+    external_kit_metadata: String,
+    local_kits: Vec<String>,
+    vendor: String,
+    version_build: String,
+    version_id: String,
 }
 
 impl crate::builder::PackageBuildArgs {
@@ -370,7 +381,7 @@ impl DockerBuild {
 
     pub(crate) fn new_kit(args: BuildKitArgs, manifest: &Manifest) -> Result<Self> {
         let kit = manifest.info().kit_name();
-        let per_kit_dir = format!("{}/{}", args.kits_dir.display(), kit).into();
+        let per_kit_dir = args.kits_dir.join(kit);
 
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
@@ -396,7 +407,12 @@ impl DockerBuild {
             ),
             target_build_args: TargetBuildArgs::Kit(KitBuildArgs {
                 kit: kit.to_string(),
+                vendor: manifest.info().kit_vendor().context(error::GraphSnafu)?,
+                local_kits: manifest.kit_dependencies().context(error::GraphSnafu)?,
+                external_kit_metadata: EXTERNAL_KIT_METADATA.into(),
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
+                version_build: args.version_build,
+                version_id: args.version_image,
             }),
             secrets_args: Vec::new(),
         })
