@@ -1623,9 +1623,12 @@ for ws in variants .; do
   # The targets directory could be under variants, or at the root, for either of
   # the possible workspace manifest locations.
   for td in target variants/target ; do
-    targets="${BUILDSYS_ROOT_DIR}/${td}/${BUILDSYS_ARCH}"
-    [ -d "${targets}" ] || continue
-    CARGO_TARGET_DIR="${targets}" cargo clean --manifest-path "${manifest}"
+    # Clean up both architectures, since other clean tasks are not arch-specific.
+    for arch in x86_64 aarch64 ; do
+      targets="${BUILDSYS_ROOT_DIR}/${td}/${arch}"
+      [ -d "${targets}" ] || continue
+      CARGO_TARGET_DIR="${targets}" cargo clean --manifest-path "${manifest}"
+    done
   done
 done
 '''
