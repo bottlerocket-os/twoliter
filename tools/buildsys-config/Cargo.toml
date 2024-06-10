@@ -1,0 +1,13 @@
+[package]
+name = "buildsys-config"
+version = "0.1.0"
+authors = ["Jarrett Tierney <jmt@amazon.com>"]
+license = "MIT OR Apache-2.0"
+edition = "2021"
+publish = false
+# Don't rebuild crate just because of changes to README.
+exclude = ["README.md"]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"]}

@@ -5,13 +5,16 @@ use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
 use async_walkdir::WalkDir;
 use base64::Engine;
+use buildsys_config::{EXTERNAL_KIT_DIRECTORY, EXTERNAL_KIT_METADATA};
 use futures::stream::StreamExt;
 use log::{debug, info, trace, warn};
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -51,7 +54,7 @@ pub(crate) struct Project {
     sdk: Option<Image>,
 
     /// Set of vendors
-    vendor: BTreeMap<String, Vendor>,
+    vendor: BTreeMap<ValidIdentifier, Vendor>,
 
     /// Set of kit dependencies
     kit: Vec<Image>,
@@ -105,6 +108,14 @@ impl Project {
         self.project_dir.clone()
     }
 
+    pub(crate) fn external_kits_dir(&self) -> PathBuf {
+        self.project_dir.join(EXTERNAL_KIT_DIRECTORY)
+    }
+
+    pub(crate) fn external_kits_metadata(&self) -> PathBuf {
+        self.project_dir.join(EXTERNAL_KIT_METADATA)
+    }
+
     pub(crate) fn schema_version(&self) -> SchemaVersion<1> {
         self.schema_version
     }
@@ -113,7 +124,7 @@ impl Project {
         self.release_version.as_str()
     }
 
-    pub(crate) fn vendor(&self) -> &BTreeMap<String, Vendor> {
+    pub(crate) fn vendor(&self) -> &BTreeMap<ValidIdentifier, Vendor> {
         &self.vendor
     }
 
@@ -133,7 +144,7 @@ impl Project {
             ))?;
             Ok(Some(ImageUri::new(
                 Some(vendor.registry.clone()),
-                sdk.name.clone(),
+                sdk.name.to_string(),
                 format!("v{}", sdk.version),
             )))
         } else {
@@ -143,14 +154,14 @@ impl Project {
 
     #[allow(unused)]
     pub(crate) fn kit(&self, name: &str) -> Result<Option<ImageUri>> {
-        if let Some(kit) = self.kit.iter().find(|y| y.name == name) {
+        if let Some(kit) = self.kit.iter().find(|y| y.name.to_string() == name) {
             let vendor = self.vendor.get(&kit.vendor).context(format!(
                 "vendor '{}' was not specified in Twoliter.toml",
                 kit.vendor
             ))?;
             Ok(Some(ImageUri::new(
                 Some(vendor.registry.clone()),
-                kit.name.clone(),
+                kit.name.to_string(),
                 format!("v{}", kit.version),
             )))
         } else {
@@ -218,25 +229,25 @@ impl Project {
         hash.write(self.release_version.as_bytes())
             .context("failed to encode release version in hash")?;
         for (key, value) in self.vendor.iter() {
-            hash.write(key.as_bytes())
+            hash.write(key.to_string().as_bytes())
                 .context("failed to encode vendor name in hash")?;
             hash.write(value.registry.as_bytes())
                 .context("failed to encode vendor registry in hash")?;
         }
         if let Some(sdk) = self.sdk.as_ref() {
-            hash.write(sdk.name.as_bytes())
+            hash.write(sdk.name.to_string().as_bytes())
                 .context("failed to encode sdk name in hash")?;
             hash.write(sdk.version.to_string().as_bytes())
                 .context("failed to encode sdk version in hash")?;
-            hash.write(sdk.vendor.as_bytes())
+            hash.write(sdk.vendor.to_string().as_bytes())
                 .context("failed to encode sdk vendor in hash")?;
         }
         for kit in self.kit.iter() {
-            hash.write(kit.name.as_bytes())
+            hash.write(kit.name.to_string().as_bytes())
                 .context("failed to encode kit name in hash")?;
             hash.write(kit.version.to_string().as_bytes())
                 .context("failed to encode kit version in hash")?;
-            hash.write(kit.vendor.as_bytes())
+            hash.write(kit.vendor.to_string().as_bytes())
                 .context("failed to encode kit vendor in hash")?;
         }
         let project_hash = hash.finalize();
@@ -252,13 +263,66 @@ pub(crate) struct Vendor {
     pub registry: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub(crate) struct ValidIdentifier(String);
+
+impl Serialize for ValidIdentifier {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.0.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ValidIdentifier {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let input = String::deserialize(deserializer)?;
+        // Check if the input is empty
+        if input.is_empty() {
+            return Err(D::Error::custom(
+                "cannot define an identifier as an empty string",
+            ));
+        }
+
+        // Check if the input contains any invalid characters
+        for c in input.chars() {
+            if !is_valid_id_char(c) {
+                return Err(D::Error::custom(format!(
+                    "invalid character '{}' found in identifier name",
+                    c
+                )));
+            }
+        }
+        Ok(Self(input.clone()))
+    }
+}
+
+impl Display for ValidIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.as_str())
+    }
+}
+
+fn is_valid_id_char(c: char) -> bool {
+    match c {
+        // Allow alphanumeric characters, underscores, and hyphens
+        'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' => true,
+        // Disallow other characters
+        _ => false,
+    }
+}
+
 /// This represents a dependency on a container, primarily used for kits
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Image {
-    pub name: String,
+    pub name: ValidIdentifier,
     pub version: Version,
-    pub vendor: String,
+    pub vendor: ValidIdentifier,
 }
 
 /// This is used to `Deserialize` a project, then run validation code before returning a valid
@@ -271,7 +335,7 @@ struct UnvalidatedProject {
     schema_version: SchemaVersion<1>,
     release_version: String,
     sdk: Option<Image>,
-    vendor: Option<BTreeMap<String, Vendor>>,
+    vendor: Option<BTreeMap<ValidIdentifier, Vendor>>,
     kit: Option<Vec<Image>>,
 }
 
@@ -384,21 +448,27 @@ mod test {
         // Add checks here as desired to validate deserialization.
         assert_eq!(SchemaVersion::<1>, deserialized.schema_version);
         assert_eq!(1, deserialized.vendor.len());
-        assert!(deserialized.vendor.contains_key("my-vendor"));
+        assert!(deserialized
+            .vendor
+            .contains_key(&ValidIdentifier("my-vendor".to_string())));
         assert_eq!(
             "a.com/b",
-            deserialized.vendor.get("my-vendor").unwrap().registry
+            deserialized
+                .vendor
+                .get(&ValidIdentifier("my-vendor".to_string()))
+                .unwrap()
+                .registry
         );
 
         let sdk = deserialized.sdk.unwrap();
-        assert_eq!("my-bottlerocket-sdk", sdk.name.as_str());
+        assert_eq!("my-bottlerocket-sdk", sdk.name.to_string());
         assert_eq!(Version::new(1, 2, 3), sdk.version);
-        assert_eq!("my-vendor", sdk.vendor.as_str());
+        assert_eq!("my-vendor", sdk.vendor.to_string());
 
         assert_eq!(1, deserialized.kit.len());
-        assert_eq!("my-core-kit", deserialized.kit[0].name.as_str());
+        assert_eq!("my-core-kit", deserialized.kit[0].name.to_string());
         assert_eq!(Version::new(1, 2, 3), deserialized.kit[0].version);
-        assert_eq!("my-vendor", deserialized.kit[0].vendor.as_str());
+        assert_eq!("my-vendor", deserialized.kit[0].vendor.to_string());
     }
 
     /// Ensure that a `Twoliter.toml` cannot be serialized if the `schema_version` is incorrect.
@@ -438,12 +508,12 @@ mod test {
             schema_version: Default::default(),
             release_version: String::from("1.0.0"),
             sdk: Some(Image {
-                name: "foo-abc".into(),
+                name: ValidIdentifier("foo-abc".to_string()),
                 version: Version::new(1, 2, 3),
-                vendor: "example".into(),
+                vendor: ValidIdentifier("example".into()),
             }),
             vendor: BTreeMap::from([(
-                "example".into(),
+                ValidIdentifier("example".into()),
                 Vendor {
                     registry: "example.com".into(),
                 },
@@ -486,20 +556,20 @@ mod test {
             schema_version: SchemaVersion::default(),
             release_version: "1.0.0".into(),
             sdk: Some(Image {
-                name: "bottlerocket-sdk".into(),
+                name: ValidIdentifier("bottlerocket-sdk".into()),
                 version: Version::new(1, 41, 1),
-                vendor: "bottlerocket".into(),
+                vendor: ValidIdentifier("bottlerocket".into()),
             }),
             vendor: Some(BTreeMap::from([(
-                "not-bottlerocket".into(),
+                ValidIdentifier("not-bottlerocket".into()),
                 Vendor {
                     registry: "public.ecr.aws/not-bottlerocket".into(),
                 },
             )])),
             kit: Some(vec![Image {
-                name: "bottlerocket-core-kit".into(),
+                name: ValidIdentifier("bottlerocket-core-kit".into()),
                 version: Version::new(1, 20, 0),
-                vendor: "not-bottlerocket".into(),
+                vendor: ValidIdentifier("not-bottlerocket".into()),
             }]),
         };
         assert!(project.check_vendor_availability().await.is_err());

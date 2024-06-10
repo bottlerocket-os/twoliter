@@ -1,11 +1,13 @@
 mod build;
 mod build_clean;
 mod debug;
+mod fetch;
 mod make;
 mod update;
 
 use self::build::BuildCommand;
 use crate::cmd::debug::DebugAction;
+use crate::cmd::fetch::Fetch;
 use crate::cmd::make::Make;
 use crate::cmd::update::Update;
 use anyhow::Result;
@@ -35,6 +37,8 @@ pub(crate) enum Subcommand {
     #[clap(subcommand)]
     Build(BuildCommand),
 
+    Fetch(Fetch),
+
     Make(Make),
 
     /// Update Twoliter.lock
@@ -49,6 +53,7 @@ pub(crate) enum Subcommand {
 pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
         Subcommand::Build(build_command) => build_command.run().await,
+        Subcommand::Fetch(fetch_args) => fetch_args.run().await,
         Subcommand::Make(make_args) => make_args.run().await,
         Subcommand::Update(update_args) => update_args.run().await,
         Subcommand::Debug(debug_action) => debug_action.run().await,

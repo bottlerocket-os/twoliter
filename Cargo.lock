@@ -745,6 +745,7 @@ name = "buildsys"
 version = "0.1.0"
 dependencies = [
  "bottlerocket-variant",
+ "buildsys-config",
  "clap",
  "duct",
  "guppy",
@@ -763,6 +764,14 @@ dependencies = [
  "toml",
  "url",
  "walkdir",
+]
+
+[[package]]
+name = "buildsys-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
 ]
 
 [[package]]
@@ -3782,6 +3791,7 @@ dependencies = [
  "async-walkdir",
  "base64 0.22.0",
  "buildsys",
+ "buildsys-config",
  "bytes",
  "clap",
  "env_logger",
@@ -3791,6 +3801,7 @@ dependencies = [
  "hex",
  "log",
  "non-empty-string",
+ "olpc-cjson",
  "pubsys",
  "pubsys-setup",
  "semver",
