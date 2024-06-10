@@ -157,7 +157,7 @@ RUN --mount=source=.cargo,target=/home/builder/.cargo \
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
     --mount=type=cache,target=/home/builder/rpmbuild/BUILD/sources/models/src/variant,from=variantcache,source=/variantcache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
-    rpmbuild -ba --clean \
+    rpmbuild -bb --clean \
       --undefine _auto_set_build_flags \
       --define "_target_cpu ${ARCH}" \
       rpmbuild/SPECS/${PACKAGE}.spec
