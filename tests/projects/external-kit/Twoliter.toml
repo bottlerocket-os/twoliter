@@ -1,7 +1,0 @@
-schema-version = 1
-release-version = "1.0.0"
-
-[sdk]
-registry = "twoliter.alpha"
-repo = "bottlerocket-sdk"
-tag = "latest"
