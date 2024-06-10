@@ -171,13 +171,6 @@ INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
   --queryformat "${INVENTORY_QUERY}")"
 
-# Verify we successfully inventoried some RPMs.
-RPM_COUNT="$(ls -c "${PACKAGE_DIR}"/*.rpm)"
-if [[ "${#installed_rpms[@]}" -lt "${RPM_COUNT}" ]]; then
-  echo "Inventory of RPMs, smaller than expected: '${#installed_rpms[@]}'" >&2
-  exit 1
-fi
-
 # Wrap installed_rpms mapfile into json.
 INVENTORY_DATA="$(jq --raw-output . <<<"${installed_rpms[@]}")"
 # Remove the 'bottlerocket-' prefix from package names.
@@ -185,6 +178,16 @@ INVENTORY_DATA="$(jq --arg PKG_PREFIX "bottlerocket-" \
   '(.Name) |= sub($PKG_PREFIX; "")' <<<"${INVENTORY_DATA}")"
 # Sort by package name and add 'Content' as top-level.
 INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<<"${INVENTORY_DATA}" | jq '{"Content": .}')"
+
+# Verify we successfully inventoried some RPMs.
+INVENTORY_COUNT="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
+RPM_COUNT="$(find "${PACKAGE_DIR}" -maxdepth 1 -type f -name '*.rpm' | wc -l)"
+if [[ "${INVENTORY_COUNT}" -ne "${RPM_COUNT}" ]]; then
+  echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/${RPM_COUNT}'" >&2
+  exit 1
+fi
+
+# Write the inventory.
 printf "%s\n" "${INVENTORY_DATA}" >"${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
 # Regenerate module dependencies, if possible.
