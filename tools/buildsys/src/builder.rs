@@ -127,21 +127,10 @@ impl CommonBuildArgs {
 }
 
 struct PackageBuildArgs {
-    /// The package might need to know what the `image_features` are going to be for the variant
-    /// it is going to be used in downstream. This is because certain packages will be built
-    /// differently based on certain image features such as cgroupsv1 vs cgroupsv2. During a
-    /// package build, these are determined by looking at the variant's Cargo.toml file based on
-    /// what was found in `BUILDSYS_VARIANT`.
-    image_features: HashSet<ImageFeature>,
     package: String,
     package_dependencies: Vec<String>,
     kit_dependencies: Vec<String>,
     external_kit_dependencies: Vec<String>,
-    variant: String,
-    variant_family: String,
-    variant_flavor: String,
-    variant_platform: String,
-    variant_runtime: String,
     version_build: String,
     version_build_epoch: String,
     version_build_timestamp: String,
@@ -185,18 +174,9 @@ impl crate::builder::PackageBuildArgs {
         );
         args.build_arg("PACKAGE", &self.package);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
-        args.build_arg("VARIANT", &self.variant);
-        args.build_arg("VARIANT_FAMILY", &self.variant_family);
-        args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
-        args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
-        args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("BUILD_EPOCH", &self.version_build_epoch);
         args.build_arg("BUILD_ID_TIMESTAMP", &self.version_build_timestamp);
-        for image_feature in &self.image_features {
-            args.build_arg(format!("{}", image_feature), "1");
-        }
-
         args
     }
 }
@@ -341,11 +321,7 @@ pub(crate) struct DockerBuild {
 
 impl DockerBuild {
     /// Create a new `DockerBuild` that can build a package.
-    pub(crate) fn new_package(
-        args: BuildPackageArgs,
-        manifest: &Manifest,
-        image_features: HashSet<ImageFeature>,
-    ) -> Result<Self> {
+    pub(crate) fn new_package(args: BuildPackageArgs, manifest: &Manifest) -> Result<Self> {
         let package = manifest.info().package_name();
         let per_package_dir = format!("{}/{}", args.packages_dir.display(), package).into();
         let old_package_dir = format!("{}", args.packages_dir.display()).into();
@@ -373,18 +349,12 @@ impl DockerBuild {
                 OutputCleanup::BeforeBuild,
             ),
             target_build_args: TargetBuildArgs::Package(PackageBuildArgs {
-                image_features,
                 package: package.to_string(),
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
                 external_kit_dependencies: ExternalKitMetadataView::load(args.common.root_dir)
                     .context(error::GraphSnafu)?
                     .list(),
-                variant: args.variant,
-                variant_family: args.variant_family,
-                variant_flavor: args.variant_flavor,
-                variant_platform: args.variant_platform,
-                variant_runtime: args.variant_runtime,
                 version_build: args.version_build,
                 version_build_epoch: args.version_build_epoch,
                 version_build_timestamp: args.version_build_timestamp,

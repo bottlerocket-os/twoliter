@@ -101,21 +101,6 @@ pub(crate) struct BuildPackageArgs {
     #[arg(long, env = "BUILDSYS_PACKAGES_DIR")]
     pub(crate) packages_dir: PathBuf,
 
-    #[arg(long, env = "BUILDSYS_VARIANT")]
-    pub(crate) variant: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_PLATFORM")]
-    pub(crate) variant_platform: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_RUNTIME")]
-    pub(crate) variant_runtime: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_FAMILY")]
-    pub(crate) variant_family: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_FLAVOR")]
-    pub(crate) variant_flavor: String,
-
     /// version_build is used along with version_build_timestamp in setting the Release of a Package. The Release is
     /// set in the form "<timestamp of latest project commit>.<latest project commit short sha>.br1" in RPMs.
     /// The value defaults to the latest commit of a project.
