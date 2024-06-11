@@ -12,10 +12,6 @@ COPY build/rpms/*/*.rpm /twoliter/alpha/build/rpms/
 COPY .cargo/sbkeys/generate-local-sbkeys /twoliter/alpha/sbkeys/generate-local-sbkeys
 COPY .cargo/sbkeys/generate-aws-sbkeys /twoliter/alpha/sbkeys/generate-aws-sbkeys
 
-# These directories are needed by the build system's Dockerfile. To be eliminated later.
-COPY sources/logdog/conf/current /twoliter/alpha/sources/logdog/conf/current
-COPY sources/models/src/variant /twoliter/alpha/sources/models/src/variant
-
 # TODO - move these to an RPM package so we don't need to copy them here.
 COPY LICENSE-APACHE /twoliter/alpha/licenses/LICENSE-APACHE
 COPY LICENSE-MIT /twoliter/alpha/licenses/LICENSE-MIT

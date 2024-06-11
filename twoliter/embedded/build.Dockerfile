@@ -33,27 +33,6 @@ COPY --chown=1000:1000 --from=sdk /tmp /cache
 COPY --chown=1000:1000 Twoliter.toml /cache/.${PACKAGE}.${ARCH}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
-# Some builds need to modify files in the source directory, for example Rust software using
-# build.rs to generate code.  The source directory is mounted in using "--mount=source"
-# which is owned by root, and we need to modify it as the builder user.  To get around this,
-# we can use a "cache" mount, which we just won't share or reuse.  We mount a cache into the
-# location we need to change, and in some cases, set up symlinks so that it looks like a
-# normal part of the source tree.  (This is like a tmpfs mount, but cache mounts have more
-# flexibility - you can specify a source to set them up beforehand, specify uid/gid, etc.)
-# This cache is also variant-specific (in addition to package and arch, like the one above)
-# for cases where we need to build differently per variant; the cache will be empty if you
-# change BUILDSYS_VARIANT.
-FROM scratch AS variantcache
-ARG PACKAGE
-ARG ARCH
-ARG VARIANT
-ARG TOKEN
-# We can't create directories via RUN in a scratch container, so take an existing one.
-COPY --chown=1000:1000 --from=sdk /tmp /variantcache
-# Ensure the ARG variables are used in the layer to prevent reuse by other builds.
-COPY --chown=1000:1000 Twoliter.toml /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
-
-# =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Generate the expected RPM macros and bconds.
 FROM sdk as rpm-macros-and-bconds
 ARG VARIANT
@@ -173,12 +152,10 @@ RUN --mount=target=/host \
 # Ensure that the target binutils that `find-debuginfo.sh` uses are present in $PATH.
 ENV PATH="/usr/${ARCH}-bottlerocket-linux-gnu/debuginfo/bin:${PATH}"
 
-# We use the "nocache" writable space to generate code where necessary, like the variant-
-# specific models.
+# We use the "nocache" writable space to generate code where necessary.
 USER builder
 RUN --mount=source=.cargo,target=/home/builder/.cargo \
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
-    --mount=type=cache,target=/home/builder/rpmbuild/BUILD/sources/models/src/variant,from=variantcache,source=/variantcache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
     # The dist tag is set as the `Release` field in Bottlerocket RPMs. Define it to be
     # in the form <timestamp of latest commit>.<latest commit short sha>.br1
