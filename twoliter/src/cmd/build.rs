@@ -114,6 +114,10 @@ pub(crate) struct BuildVariant {
     /// from the upstream URL found in a package's `Cargo.toml`.
     #[clap(long = "upstream-source-fallback")]
     upstream_source_fallback: bool,
+
+    /// Path to the Infra.toml file
+    #[clap(long)]
+    infra_toml: Option<PathBuf>,
 }
 
 impl BuildVariant {
@@ -180,7 +184,14 @@ impl BuildVariant {
         let mut optional_envs = Vec::new();
 
         if let Some(lookaside_cache) = &self.lookaside_cache {
-            optional_envs.push(("BUILDSYS_LOOKASIDE_CACHE", lookaside_cache))
+            optional_envs.push(("BUILDSYS_LOOKASIDE_CACHE", lookaside_cache.to_string()))
+        }
+
+        if let Some(infra_toml) = &self.infra_toml {
+            optional_envs.push((
+                "PUBLISH_INFRA_CONFIG_PATH",
+                infra_toml.display().to_string(),
+            ))
         }
 
         // Hold the result of the cargo make call so we can clean up the project directory first.
