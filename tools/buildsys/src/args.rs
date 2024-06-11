@@ -15,7 +15,7 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 15] = [
+const REBUILD_VARS: [(&str, u8); 16] = [
     ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_CACERTS_BUNDLE_OVERRIDE", VARIANT),
     ("BUILDSYS_KITS_DIR", KIT),
@@ -29,6 +29,7 @@ const REBUILD_VARS: [(&str, u8); 15] = [
     ("BUILDSYS_TIMESTAMP", VARIANT),
     ("BUILDSYS_VARIANT", VARIANT),
     ("BUILDSYS_VERSION_BUILD", VARIANT),
+    ("BUILDSYS_VERSION_BUILD_EPOCH", PACKAGE),
     ("BUILDSYS_VERSION_IMAGE", VARIANT),
     ("TLPRIVATE_SDK_IMAGE", PACKAGE | KIT | VARIANT),
 ];
@@ -113,6 +114,23 @@ pub(crate) struct BuildPackageArgs {
 
     #[arg(long, env = "BUILDSYS_VARIANT_FLAVOR")]
     pub(crate) variant_flavor: String,
+
+    /// version_build is used along with version_build_timestamp in setting the Release of a Package. The Release is
+    /// set in the form "<timestamp of latest project commit>.<latest project commit short sha>.br1" in RPMs.
+    /// The value defaults to the latest commit of a project.
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
+    pub(crate) version_build: String,
+
+    /// version_build_timestamp is used along with version_build in setting the Release of a Package. The Release is
+    /// set in the form "<timestamp of latest project commit>.<latest project commit short sha>.br1" in RPMs.
+    /// The value defaults to the timestamp in Unix ms of the latest commit of a project.
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD_TIMESTAMP")]
+    pub(crate) version_build_timestamp: String,
+
+    /// version_build_epoch sets the "Epoch" for a package when generating its application-inventory
+    /// entry. The value defaults to "1".
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD_EPOCH")]
+    pub(crate) version_build_epoch: String,
 
     #[arg(long, env = "BUILDSYS_SOURCES_DIR")]
     pub(crate) sources_dir: PathBuf,

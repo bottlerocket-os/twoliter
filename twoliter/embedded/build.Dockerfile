@@ -100,8 +100,14 @@ ARG ARCH
 ARG NOCACHE
 ARG VARIANT
 ARG SYSTEMD_NETWORKD
+ARG BUILD_ID
+ARG BUILD_ID_TIMESTAMP
+ARG BUILD_EPOCH
 ENV SYSTEMD_NETWORKD=${SYSTEMD_NETWORKD}
 ENV VARIANT=${VARIANT}
+ENV BUILD_ID=${BUILD_ID} 
+ENV BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP}
+ENV BUILD_EPOCH=${BUILD_EPOCH}
 WORKDIR /home/builder
 
 USER builder
@@ -110,10 +116,18 @@ COPY ./packages/${PACKAGE}/ .
 
 COPY --chown=builder --from=rpm-macros-and-bconds /home/builder/generated.* .
 
-# Merge generated bconds with the package spec, and put sources in the right place.
+# Merge generated bconds with the package spec, and put sources in the right place. Set Epoch values for the package 
+# and all of its subpackages. Additionally, for packages declaring explicit package versions requirements via 
+# "{Requires,Conflicts,Obsoletes}: = ...", ensure the epoch for the specified package is set.
+# "[Requires|Conflicts|Obsoletes]:.*[=>,>,<,<=,=]\) \(\%{version}\-\%{release}$\)" matches any line in a form like:
+# "Requires: %{name}-modules = %{version}-%{release}". The full `sed` expression below captures this match into
+# two groups and insert the Epoch value such that the result is "Requires: %{name}-modules = EPOCH:%{version}-%{release}"
 RUN \
    cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
+   && echo "Epoch: ${BUILD_EPOCH}" >> rpmbuild/SPECS/${PACKAGE}.spec \
    && cat generated.bconds ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
+   && sed -i "/^%package\s.*$/a Epoch: ${BUILD_EPOCH}" rpmbuild/SPECS/${PACKAGE}.spec \
+   && sed -i "s;\([Requires|Conflicts|Obsoletes]:.*[=>,>,<,<=,=]\) \(\%{version}\-\%{release}$\);\1 ${BUILD_EPOCH}:\2;" rpmbuild/SPECS/${PACKAGE}.spec \
    && find . -maxdepth 1 -not -path '*/\.*' -type f -exec mv {} rpmbuild/SOURCES/ \; \
    && echo ${NOCACHE}
 
@@ -157,9 +171,14 @@ RUN --mount=source=.cargo,target=/home/builder/.cargo \
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
     --mount=type=cache,target=/home/builder/rpmbuild/BUILD/sources/models/src/variant,from=variantcache,source=/variantcache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
+    # The dist tag is set as the `Release` field in Bottlerocket RPMs. Define it to be
+    # in the form <timestamp of latest commit>.<latest commit short sha>.br1
+    # Remove '-dirty' from the commit sha: '-' is an illegal character for the Release field
+    # and '-dirty' may not be accurate to the state of the actual package being built.
     rpmbuild -bb --clean \
       --undefine _auto_set_build_flags \
       --define "_target_cpu ${ARCH}" \
+      --define "dist ${BUILD_ID_TIMESTAMP}.${BUILD_ID//-dirty/}.br1" \
       rpmbuild/SPECS/${PACKAGE}.spec
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=

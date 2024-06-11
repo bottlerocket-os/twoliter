@@ -245,7 +245,9 @@ mod test {
         );
 
         for package in packages {
-            let rpm = kit_output_dir.join(&format!("bottlerocket-{package}-0.0-0.{arch}.rpm"));
+            let rpm = kit_output_dir.join(&format!(
+                "bottlerocket-{package}-0.0-00000000000.00000000.br1.{arch}.rpm"
+            ));
             assert!(
                 rpm.is_file(),
                 "Expected to find RPM for {}, for {} at {}",
