@@ -63,7 +63,7 @@ pub(crate) struct Project {
 impl Project {
     /// Load a `Twoliter.toml` file from the given file path (it can have any filename).
     pub(crate) async fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
+        let path = fs::canonicalize(path).await?;
         let data = fs::read_to_string(&path)
             .await
             .context(format!("Unable to read project file '{}'", path.display()))?;
