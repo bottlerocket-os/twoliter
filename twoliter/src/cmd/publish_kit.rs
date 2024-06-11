@@ -25,10 +25,15 @@ pub(crate) struct PublishKit {
     /// Path to Twoliter.toml. Will search for Twoliter.toml when absent
     #[clap(long = "project-path")]
     project_path: Option<PathBuf>,
+
     /// Kit name to build
     kit_name: String,
+
     /// Vendor to publish to
     vendor: String,
+
+    /// Version and build id of the kit to publish, e.g. v1.0.0-abcd123
+    version: String,
 }
 
 impl PublishKit {
@@ -41,12 +46,13 @@ impl PublishKit {
         let kit_path = project
             .project_dir()
             .join("build")
-            .join("rpms")
+            .join("kits")
             .join(self.kit_name.as_str());
 
         let infra_arg = format!("--infra-config-path={}", infra_path.display());
         let kit_arg = format!("--kit-path={}", kit_path.display());
         let vendor_arg = format!("--vendor={}", self.vendor);
+        let version_arg = format!("--version={}", self.version);
         // Now we want to offload this operation to pubsys
         let res = Command::new(pubsys_path)
             .args([
@@ -54,6 +60,7 @@ impl PublishKit {
                 "publish-kit",
                 kit_arg.as_str(),
                 vendor_arg.as_str(),
+                version_arg.as_str(),
             ])
             .spawn()
             .context("failed to spawn pubsys")?

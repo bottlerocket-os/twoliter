@@ -3,15 +3,15 @@ mod build_clean;
 mod debug;
 mod fetch;
 mod make;
-mod update;
 mod publish_kit;
+mod update;
 
 use self::build::BuildCommand;
 use crate::cmd::debug::DebugAction;
 use crate::cmd::fetch::Fetch;
 use crate::cmd::make::Make;
-use crate::cmd::update::Update;
 use crate::cmd::publish_kit::PublishCommand;
+use crate::cmd::update::Update;
 use anyhow::Result;
 use clap::Parser;
 use env_logger::Builder;
