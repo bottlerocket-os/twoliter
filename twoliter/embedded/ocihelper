@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+digest_from_blob() {
+  local bytes
+  bytes="${1:?}"
+  sha256sum <<< "${bytes}" | awk '{ print $1 };'
+}
+
+digest_from_file() {
+  local file_path
+  file_path="${1:?}"
+  sha256sum < "${file_path}" | awk '{ print $1 };'
+}

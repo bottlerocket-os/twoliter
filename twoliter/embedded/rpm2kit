@@ -14,7 +14,12 @@ for opt in "$@"; do
    esac
 done
 
+# import the oci helper functions
+# shellcheck source=ocihelper
+. "${0%/*}/ocihelper"
+
 KIT_DIR="${OUTPUT_DIR}/${ARCH}"
+
 rm -rf "${KIT_DIR}"
 
 mkdir -p "${KIT_DIR}/Packages"
@@ -30,3 +35,125 @@ done
 
 createrepo_c "${KIT_DIR}"
 dnf --disablerepo '*' --repofrompath "kit,file:///${KIT_DIR}" repoquery --all
+
+WORK_DIR="$(mktemp -d)"
+TIMESTAMP="$(date +"%FT%T.%NZ")"
+FILENAME_PREFIX="${KIT:?}-v${VERSION_ID:?}-${BUILD_ID:?}-${ARCH:?}"
+# Translate ARCH into the proper docker arch
+case "${ARCH}" in
+  "x86_64")
+  DOCKER_ARCH="amd64"
+  ;;
+  "aarch64")
+  DOCKER_ARCH="arm64"
+  ;;
+esac
+
+# Create the content layer
+mkdir -p "${WORK_DIR}/blobs/sha256"
+DIFF_ARCHIVE="${WORK_DIR}/content-layer.tar"
+tar -cf "${DIFF_ARCHIVE}" -C "${KIT_DIR}" .
+DIFF_ID="$(digest_from_file "${DIFF_ARCHIVE}")"
+gzip "${DIFF_ARCHIVE}"
+CONTENT_ARCHIVE="${DIFF_ARCHIVE}.gz"
+CONTENT_DIGEST="$(digest_from_file "${CONTENT_ARCHIVE}")"
+mv "${WORK_DIR}/content-layer.tar.gz" "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}"
+
+METADATA_TEMPLATE=$(cat <<EOF
+{
+  name: "$KIT",
+  version: "$VERSION_ID",
+  sdk: .[0].sdk,
+  kit: (
+    [ .[1] | values[] | {name: ., version: "$VERSION_ID", vendor: "$VENDOR"}]
+    + [ .[0].kit[] | {name: .name, version: .version, vendor: .vendor } ]
+ )
+}
+EOF
+)
+declare -a LOCAL_KITS
+LOCAL_KITS=("${LOCAL_KIT_DEPENDENCIES}")
+# convert local kits to a correctly-formatted JSON list
+# we disable spellcheck for the line because we want it to split elements
+# shellcheck disable=SC2068
+LOCAL_KIT_INPUT="$(jq --null-input --compact-output '$ARGS.positional // []' --args ${LOCAL_KITS[@]})"
+EXTERNAL_KIT_INPUT="$(cat "/host/${EXTERNAL_KIT_METADATA}")"
+KIT_INPUT="${EXTERNAL_KIT_INPUT} ${LOCAL_KIT_INPUT}"
+KIT_METADATA="$(jq --compact-output --sort-keys --slurp "${METADATA_TEMPLATE}" <<< "${KIT_INPUT}" )"
+METADATA="$(base64 -w0 <<< "${KIT_METADATA}")"
+CONFIG="$(jq --compact-output <<EOF
+{
+  "architecture": "${DOCKER_ARCH}",
+  "config": {
+    "Env": [],
+    "WorkingDir": "/",
+    "OnBuild": null,
+    "Labels": {
+      "dev.bottlerocket.kit.v1": "${METADATA}"
+    }
+  },
+  "created": "${TIMESTAMP}",
+  "history": [],
+  "os": "linux",
+  "rootfs": {
+    "type": "layers",
+    "diff_ids": [
+      "sha256:${DIFF_ID}"
+    ]
+  }
+}
+EOF
+)"
+CONFIG_DIGEST="$(digest_from_blob "${CONFIG}")"
+echo "${CONFIG}" > "${WORK_DIR}/blobs/sha256/${CONFIG_DIGEST}"
+
+# Create the OCI Manifest
+CONFIG_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${CONFIG_DIGEST}")"
+CONTENT_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}")"
+MANIFEST="$(jq --compact-output <<EOF
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:${CONFIG_DIGEST}",
+    "size": ${CONFIG_SIZE}
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:${CONTENT_DIGEST}",
+      "size": ${CONTENT_SIZE}
+    }
+  ]
+}
+EOF
+)"
+MANIFEST_DIGEST="$(digest_from_blob "${MANIFEST}")"
+echo "${MANIFEST}" > "${WORK_DIR}/blobs/sha256/${MANIFEST_DIGEST}"
+MANIFEST_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${MANIFEST_DIGEST}")"
+
+# Create the OCI index
+jq --compact-output <<EOF >> "${WORK_DIR}/index.json"
+{
+  "schemaVersion": 2,
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:${MANIFEST_DIGEST}",
+      "size": ${MANIFEST_SIZE},
+      "annotations": {
+        "org.opencontainers.image.created": "${TIMESTAMP}"
+      },
+      "platform": {
+        "architecture": "${DOCKER_ARCH}",
+        "os": "linux"
+      }
+    }
+  ]
+}
+EOF
+
+# Create the layout file and create the oci tarball
+echo '{"imageLayoutVersion": "1.0.0"}' > "${WORK_DIR}/oci-layout"
+tar -cf "${OUTPUT_DIR}/${FILENAME_PREFIX}.tar" -C "${WORK_DIR}" .

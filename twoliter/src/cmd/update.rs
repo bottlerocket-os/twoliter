@@ -8,7 +8,7 @@ use std::path::PathBuf;
 pub(crate) struct Update {
     /// Path to Twoliter.toml. Will search for Twoliter.toml when absent
     #[clap(long = "project-path")]
-    project_path: Option<PathBuf>,
+    pub(crate) project_path: Option<PathBuf>,
 }
 
 impl Update {

@@ -10,6 +10,7 @@
 /build/rpms/*/*-debuginfo-*.rpm
 /build/rpms/*/*-debugsource-*.rpm
 !/build/kits/
+!/build/external-kits/
 !/build/tools/*
 **/target/*
 /sbkeys

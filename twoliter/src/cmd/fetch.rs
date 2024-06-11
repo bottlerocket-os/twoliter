@@ -8,10 +8,10 @@ use std::path::PathBuf;
 pub(crate) struct Fetch {
     /// Path to Twoliter.toml. Will search for Twoliter.toml when absent
     #[clap(long = "project-path")]
-    project_path: Option<PathBuf>,
+    pub(crate) project_path: Option<PathBuf>,
 
     #[clap(long = "arch", default_value = "x86_64")]
-    arch: String,
+    pub(crate) arch: String,
 }
 
 impl Fetch {
