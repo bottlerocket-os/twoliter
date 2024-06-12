@@ -807,11 +807,19 @@ fi
 # because we build host tools with cargo as well, like buildsys and pubsys.
 export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
+# The workspace manifest directory could be under variants, or at the root.
+for ws in variants .; do
+  manifest="${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml"
+  [ -s "${manifest}" ] || continue
+  WORKSPACE_MANIFEST="${manifest}"
+done
+
 cargo build \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \
   ${CARGO_MAKE_CARGO_LIMIT_JOBS} \
-  --manifest-path "${BUILDSYS_ROOT_DIR}/packages/${PACKAGE}/Cargo.toml"
+  --manifest-path "${WORKSPACE_MANIFEST:?}" \
+  --package "${PACKAGE}"
 '''
 ]
 
