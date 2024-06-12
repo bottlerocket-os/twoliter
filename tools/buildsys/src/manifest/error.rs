@@ -30,6 +30,15 @@ pub(super) enum Error {
         source: toml::de::Error,
     },
 
+    #[snafu(display("Failed to read external kit metadata file '{}': {}", path.display(), source))]
+    ExternalKitMetadataFileRead { path: PathBuf, source: io::Error },
+
+    #[snafu(display("Failed to load external kit metadata file '{}': {}", path.display(), source))]
+    ExternalKitMetadataLoad {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+
     #[snafu(display("Failed to parse image feature '{}'", what))]
     ParseImageFeature { what: String },
 

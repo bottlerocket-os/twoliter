@@ -229,6 +229,7 @@ fips = true
 mod error;
 
 use crate::BuildType;
+use buildsys_config::EXTERNAL_KIT_METADATA;
 use guppy::graph::{DependencyDirection, PackageGraph, PackageLink, PackageMetadata};
 use guppy::{CargoMetadata, PackageId};
 use serde::{Deserialize, Serialize};
@@ -238,6 +239,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::fs;
+use std::fs::read;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Snafu)]
@@ -325,6 +327,44 @@ impl Manifest {
     pub fn info(&self) -> &ManifestInfo {
         &self.manifest_info
     }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ExternalKitMetadataView {
+    #[serde(rename = "kit")]
+    kits: Vec<ImageView>,
+}
+
+impl ExternalKitMetadataView {
+    /// Load a view of the external kit metadata
+    pub fn load<P>(path: P) -> Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let metadata_file = path.as_ref().join(EXTERNAL_KIT_METADATA);
+        let metadata_bytes =
+            read(&metadata_file).context(error::ExternalKitMetadataFileReadSnafu {
+                path: metadata_file.clone(),
+            })?;
+        serde_json::from_slice(metadata_bytes.as_slice())
+            .context(error::ExternalKitMetadataLoadSnafu {
+                path: metadata_file.clone(),
+            })
+            .map_err(Error)
+    }
+    /// List all external kits needed for the build in the format of "<vendor>-<kit_name>"
+    pub fn list(&self) -> Vec<String> {
+        self.kits
+            .iter()
+            .map(|x| format!("{}/{}", x.vendor, x.name))
+            .collect()
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct ImageView {
+    name: String,
+    vendor: String,
 }
 
 /// The nested structures here are somewhat complex, but they make it trivial

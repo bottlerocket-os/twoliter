@@ -6,6 +6,7 @@ pub const EXTERNAL_KIT_DIRECTORY: &str = "build/external-kits";
 pub const EXTERNAL_KIT_METADATA: &str = "build/external-kits/external-kit-metadata.json";
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub enum DockerArchitecture {
     Amd64,
     Arm64,

@@ -222,13 +222,14 @@ impl OCIArchive {
     {
         let path = out_dir.as_ref();
         let digest_file = path.join("digest");
-        ensure!(digest_file.exists(), "digest file '{}' does not exist, most likely because the oci archive has not been pulled", digest_file.display());
-        let digest = read_to_string(&digest_file).await.context(format!(
-            "failed to read digest file at {}",
-            digest_file.display()
-        ))?;
-        if digest == self.digest {
-            return Ok(());
+        if digest_file.exists() {
+            let digest = read_to_string(&digest_file).await.context(format!(
+                "failed to read digest file at {}",
+                digest_file.display()
+            ))?;
+            if digest == self.digest {
+                return Ok(());
+            }
         }
 
         remove_dir_all(path).await?;
@@ -246,7 +247,7 @@ impl OCIArchive {
         oci_archive
             .unpack(temp_dir.path())
             .context("failed to unpack oci image")?;
-        let index_bytes = read(path.join("index.json")).await?;
+        let index_bytes = read(temp_dir.path().join("index.json")).await?;
         let index: IndexView = serde_json::from_slice(index_bytes.as_slice())
             .context("failed to deserialize oci image index")?;
 
