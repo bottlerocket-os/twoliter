@@ -1,0 +1,15 @@
+[package]
+name = "extra-1-kit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+
+[package.metadata.build-kit]
+vendor = "bottlerocket"
+
+[lib]
+path = "../kit.rs"
+
+[build-dependencies]
+pkg-b = { path = "../../packages/pkg-b" }
