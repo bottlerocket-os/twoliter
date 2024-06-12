@@ -96,6 +96,7 @@ FROM sdk AS rpmbuild
 ARG PACKAGE
 ARG PACKAGE_DEPENDENCIES
 ARG KIT_DEPENDENCIES
+ARG EXTERNAL_KIT_DEPENDENCIES
 ARG ARCH
 ARG NOCACHE
 ARG VARIANT
@@ -152,11 +153,19 @@ RUN --mount=target=/host \
       KIT_REPOS+=("--repofrompath=${kit},/host/build/kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
     done && \
     echo "${KIT_REPOS[@]}" && \
+    declare -a EXTERNAL_KIT_REPOS && \
+    for kit in ${EXTERNAL_KIT_DEPENDENCIES} ; do \
+       REPO_NAME="$(tr -s '/' '-' <<< "${kit}")" && \
+       REPO_PATH="/host/build/external-kits/${kit}/${ARCH}" && \
+       EXTERNAL_KIT_REPOS+=("--repofrompath=${REPO_NAME},${REPO_PATH}" --enablerepo "${REPO_NAME}"); \
+    done && \
+    echo "${EXTERNAL_KIT_REPOS[@]}" && \
     dnf -y \
         --disablerepo '*' \
         --repofrompath repo,./rpmbuild/RPMS \
         --enablerepo 'repo' \
         "${KIT_REPOS[@]}" \
+        "${EXTERNAL_KIT_REPOS[@]}" \
         --nogpgcheck \
         --forcearch "${ARCH}" \
         builddep rpmbuild/SPECS/${PACKAGE}.spec
@@ -234,6 +243,7 @@ ARG PACKAGES
 # The complete list of non-kit packages required by way of pure package-to-package dependencies.
 ARG PACKAGE_DEPENDENCIES
 ARG KIT_DEPENDENCIES
+ARG EXTERNAL_KIT_DEPENDENCIES
 ARG ARCH
 ARG NOCACHE
 
@@ -276,11 +286,19 @@ RUN --mount=target=/host \
     for kit in ${KIT_DEPENDENCIES} ; do \
       KIT_REPOS+=("--repofrompath=${kit},/host/build/kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
     done && \
+    declare -a EXTERNAL_KIT_REPOS && \
+    for kit in ${EXTERNAL_KIT_DEPENDENCIES} ; do \
+       REPO_NAME="$(tr -s '/' '-' <<< "${kit}")" && \
+       REPO_PATH="/host/build/external-kits/${kit}/${ARCH}" && \
+       EXTERNAL_KIT_REPOS+=("--repofrompath=${REPO_NAME},${REPO_PATH}" --enablerepo "${REPO_NAME}"); \
+    done && \
+    echo "${EXTERNAL_KIT_REPOS[@]}" && \
     dnf -y \
         --disablerepo '*' \
         --repofrompath repo,./rpmbuild/RPMS \
         --enablerepo 'repo' \
         "${KIT_REPOS[@]}" \
+        "${EXTERNAL_KIT_REPOS[@]}" \
         --nogpgcheck \
         --downloadonly \
         --downloaddir . \

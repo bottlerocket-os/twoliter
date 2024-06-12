@@ -8,7 +8,8 @@ pub(crate) mod error;
 
 use crate::args::{BuildKitArgs, BuildPackageArgs, BuildVariantArgs, RepackVariantArgs};
 use buildsys::manifest::{
-    ImageFeature, ImageFormat, ImageLayout, Manifest, PartitionPlan, SupportedArch,
+    ExternalKitMetadataView, ImageFeature, ImageFormat, ImageLayout, Manifest, PartitionPlan,
+    SupportedArch,
 };
 use buildsys::BuildType;
 use buildsys_config::EXTERNAL_KIT_METADATA;
@@ -135,6 +136,7 @@ struct PackageBuildArgs {
     package: String,
     package_dependencies: Vec<String>,
     kit_dependencies: Vec<String>,
+    external_kit_dependencies: Vec<String>,
     variant: String,
     variant_family: String,
     variant_flavor: String,
@@ -177,6 +179,10 @@ impl crate::builder::PackageBuildArgs {
         args.push("--network".into());
         args.push("none".into());
         args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
+        args.build_arg(
+            "EXTERNAL_KIT_DEPENDENCIES",
+            self.external_kit_dependencies.join(" "),
+        );
         args.build_arg("PACKAGE", &self.package);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
         args.build_arg("VARIANT", &self.variant);
@@ -198,6 +204,7 @@ impl crate::builder::PackageBuildArgs {
 struct VariantBuildArgs {
     package_dependencies: Vec<String>,
     kit_dependencies: Vec<String>,
+    external_kit_dependencies: Vec<String>,
     data_image_publish_size_gib: i32,
     data_image_size_gib: String,
     image_features: HashSet<ImageFeature>,
@@ -233,6 +240,10 @@ impl VariantBuildArgs {
         args.build_arg("IMAGE_NAME", &self.name);
         args.build_arg("KERNEL_PARAMETERS", &self.kernel_parameters);
         args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
+        args.build_arg(
+            "EXTERNAL_KIT_DEPENDENCIES",
+            self.external_kit_dependencies.join(" "),
+        );
         args.build_arg("OS_IMAGE_PUBLISH_SIZE_GIB", &self.os_image_publish_size_gib);
         args.build_arg("OS_IMAGE_SIZE_GIB", &self.os_image_size_gib);
         args.build_arg("PACKAGES", &self.packages);
@@ -366,6 +377,9 @@ impl DockerBuild {
                 package: package.to_string(),
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
+                external_kit_dependencies: ExternalKitMetadataView::load(args.common.root_dir)
+                    .context(error::GraphSnafu)?
+                    .list(),
                 variant: args.variant,
                 variant_family: args.variant_family,
                 variant_flavor: args.variant_flavor,
@@ -456,6 +470,9 @@ impl DockerBuild {
             target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
+                external_kit_dependencies: ExternalKitMetadataView::load(args.common.root_dir)
+                    .context(error::GraphSnafu)?
+                    .list(),
                 data_image_publish_size_gib,
                 data_image_size_gib: data_image_size_gib.to_string(),
                 image_features: manifest.info().image_features().unwrap_or_default(),
