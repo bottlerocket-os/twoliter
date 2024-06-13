@@ -78,6 +78,11 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
         let kit_filename = format!("{}-{}-{}.tar", &kit_name, &kit_version, arch);
         let path = kit_path.join(&kit_filename);
 
+        if !path.exists() {
+            debug!("Kit image does not exist for arch {}", arch);
+            continue;
+        }
+
         let out = docker!(["load", format!("--input={}", path.display()).as_str(),]);
         let out = String::from_utf8_lossy(&out);
         let digest_expression =
