@@ -33,64 +33,6 @@ COPY --chown=1000:1000 --from=sdk /tmp /cache
 COPY --chown=1000:1000 Twoliter.toml /cache/.${PACKAGE}.${ARCH}.${TOKEN}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
-# Some builds need to modify files in the source directory, for example Rust software using
-# build.rs to generate code.  The source directory is mounted in using "--mount=source"
-# which is owned by root, and we need to modify it as the builder user.  To get around this,
-# we can use a "cache" mount, which we just won't share or reuse.  We mount a cache into the
-# location we need to change, and in some cases, set up symlinks so that it looks like a
-# normal part of the source tree.  (This is like a tmpfs mount, but cache mounts have more
-# flexibility - you can specify a source to set them up beforehand, specify uid/gid, etc.)
-# This cache is also variant-specific (in addition to package and arch, like the one above)
-# for cases where we need to build differently per variant; the cache will be empty if you
-# change BUILDSYS_VARIANT.
-FROM scratch AS variantcache
-ARG PACKAGE
-ARG ARCH
-ARG VARIANT
-ARG TOKEN
-# We can't create directories via RUN in a scratch container, so take an existing one.
-COPY --chown=1000:1000 --from=sdk /tmp /variantcache
-# Ensure the ARG variables are used in the layer to prevent reuse by other builds.
-COPY --chown=1000:1000 Twoliter.toml /variantcache/.${PACKAGE}.${ARCH}.${VARIANT}.${TOKEN}
-
-# =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
-# Generate the expected RPM macros and bconds.
-FROM sdk as rpm-macros-and-bconds
-ARG VARIANT
-ARG VARIANT_PLATFORM
-ARG VARIANT_RUNTIME
-ARG VARIANT_FAMILY
-ARG VARIANT_FLAVOR
-ARG GRUB_SET_PRIVATE_VAR
-ARG UEFI_SECURE_BOOT
-ARG SYSTEMD_NETWORKD
-ARG UNIFIED_CGROUP_HIERARCHY
-ARG XFS_DATA_PARTITION
-ARG FIPS
-
-USER builder
-WORKDIR /home/builder
-RUN \
-   export RPM_MACROS="generated.rpmmacros" \
-   && export RPM_BCONDS="generated.bconds" \
-   && echo "%_cross_variant ${VARIANT}" > "${RPM_MACROS}" \
-   && echo "%_cross_variant_platform ${VARIANT_PLATFORM}" >> "${RPM_MACROS}" \
-   && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> "${RPM_MACROS}" \
-   && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> "${RPM_MACROS}" \
-   && echo "%_cross_variant_flavor ${VARIANT_FLAVOR:-none}" >> "${RPM_MACROS}" \
-   && echo "%_topdir /home/builder/rpmbuild" >> "${RPM_MACROS}" \
-   && echo "%bcond_without $(V=${VARIANT_PLATFORM,,}; echo ${V//-/_})_platform" > "${RPM_BCONDS}" \
-   && echo "%bcond_without $(V=${VARIANT_RUNTIME,,}; echo ${V//-/_})_runtime" >> "${RPM_BCONDS}" \
-   && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> "${RPM_BCONDS}" \
-   && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
-   && echo -e -n "${GRUB_SET_PRIVATE_VAR:+%bcond_without grub_set_private_var\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}"
-
-# =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Builds an RPM package from a spec file.
 FROM sdk AS rpmbuild
 ARG PACKAGE
@@ -99,14 +41,10 @@ ARG KIT_DEPENDENCIES
 ARG EXTERNAL_KIT_DEPENDENCIES
 ARG ARCH
 ARG NOCACHE
-ARG VARIANT
-ARG SYSTEMD_NETWORKD
 ARG BUILD_ID
 ARG BUILD_ID_TIMESTAMP
 ARG BUILD_EPOCH
-ENV SYSTEMD_NETWORKD=${SYSTEMD_NETWORKD}
-ENV VARIANT=${VARIANT}
-ENV BUILD_ID=${BUILD_ID} 
+ENV BUILD_ID=${BUILD_ID}
 ENV BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP}
 ENV BUILD_EPOCH=${BUILD_EPOCH}
 WORKDIR /home/builder
@@ -115,18 +53,16 @@ USER builder
 ENV PACKAGE=${PACKAGE} ARCH=${ARCH}
 COPY ./packages/${PACKAGE}/ .
 
-COPY --chown=builder --from=rpm-macros-and-bconds /home/builder/generated.* .
-
-# Merge generated bconds with the package spec, and put sources in the right place. Set Epoch values for the package 
+# Copy over the target-specific macros, and put sources in the right place. Set Epoch values for the package
 # and all of its subpackages. Additionally, for packages declaring explicit package versions requirements via 
 # "{Requires,Conflicts,Obsoletes}: = ...", ensure the epoch for the specified package is set.
 # "[Requires|Conflicts|Obsoletes]:.*[=>,>,<,<=,=]\) \(\%{version}\-\%{release}$\)" matches any line in a form like:
 # "Requires: %{name}-modules = %{version}-%{release}". The full `sed` expression below captures this match into
 # two groups and insert the Epoch value such that the result is "Requires: %{name}-modules = EPOCH:%{version}-%{release}"
 RUN \
-   cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
+   cp "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" .rpmmacros \
    && echo "Epoch: ${BUILD_EPOCH}" >> rpmbuild/SPECS/${PACKAGE}.spec \
-   && cat generated.bconds ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
+   && cat ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
    && sed -i "/^%package\s.*$/a Epoch: ${BUILD_EPOCH}" rpmbuild/SPECS/${PACKAGE}.spec \
    && sed -i "s;\([Requires|Conflicts|Obsoletes]:.*[=>,>,<,<=,=]\) \(\%{version}\-\%{release}$\);\1 ${BUILD_EPOCH}:\2;" rpmbuild/SPECS/${PACKAGE}.spec \
    && find . -maxdepth 1 -not -path '*/\.*' -type f -exec mv {} rpmbuild/SOURCES/ \; \
@@ -173,12 +109,9 @@ RUN --mount=target=/host \
 # Ensure that the target binutils that `find-debuginfo.sh` uses are present in $PATH.
 ENV PATH="/usr/${ARCH}-bottlerocket-linux-gnu/debuginfo/bin:${PATH}"
 
-# We use the "nocache" writable space to generate code where necessary, like the variant-
-# specific models.
 USER builder
 RUN --mount=source=.cargo,target=/home/builder/.cargo \
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
-    --mount=type=cache,target=/home/builder/rpmbuild/BUILD/sources/models/src/variant,from=variantcache,source=/variantcache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
     # The dist tag is set as the `Release` field in Bottlerocket RPMs. Define it to be
     # in the form <timestamp of latest commit>.<latest commit short sha>.br1
@@ -236,8 +169,46 @@ COPY --from=kitbuild /home/builder/output/. /output/
 # the rpm files have been created by repeatedly using Sections 1 and 2.
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
+# Generate the expected RPM macros and bconds.
+FROM sdk as rpm-macros-and-bconds
+ARG VARIANT
+ARG VARIANT_PLATFORM
+ARG VARIANT_RUNTIME
+ARG VARIANT_FAMILY
+ARG VARIANT_FLAVOR
+ARG GRUB_SET_PRIVATE_VAR
+ARG UEFI_SECURE_BOOT
+ARG SYSTEMD_NETWORKD
+ARG UNIFIED_CGROUP_HIERARCHY
+ARG XFS_DATA_PARTITION
+ARG FIPS
+
+USER builder
+WORKDIR /home/builder
+RUN \
+   export RPM_MACROS="generated.rpmmacros" \
+   && export RPM_BCONDS="generated.bconds" \
+   && echo "%_cross_variant ${VARIANT}" > "${RPM_MACROS}" \
+   && echo "%_cross_variant_platform ${VARIANT_PLATFORM}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_runtime ${VARIANT_RUNTIME}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_family ${VARIANT_FAMILY}" >> "${RPM_MACROS}" \
+   && echo "%_cross_variant_flavor ${VARIANT_FLAVOR:-none}" >> "${RPM_MACROS}" \
+   && echo "%_topdir /home/builder/rpmbuild" >> "${RPM_MACROS}" \
+   && echo "%bcond_without $(V=${VARIANT_PLATFORM,,}; echo ${V//-/_})_platform" > "${RPM_BCONDS}" \
+   && echo "%bcond_without $(V=${VARIANT_RUNTIME,,}; echo ${V//-/_})_runtime" >> "${RPM_BCONDS}" \
+   && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> "${RPM_BCONDS}" \
+   && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
+   && echo -e -n "${GRUB_SET_PRIVATE_VAR:+%bcond_without grub_set_private_var\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}"
+
+
+# =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Creates an RPM repository from packages created in Section 1 and kits from Section 2.
-FROM sdk AS repobuild
+FROM rpm-macros-and-bconds AS repobuild
 # The list of packages from the variant Cargo.toml package.metadata.build-variant.packages section.
 ARG PACKAGES
 # The complete list of non-kit packages required by way of pure package-to-package dependencies.
@@ -249,8 +220,6 @@ ARG NOCACHE
 
 WORKDIR /home/builder
 USER builder
-
-COPY --chown=builder --from=rpm-macros-and-bconds /home/builder/generated.* .
 
 # Build the metadata RPM for the variant.
 RUN --mount=target=/host \
