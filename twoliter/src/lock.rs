@@ -53,7 +53,7 @@ pub(crate) struct LockedImage {
     /// The digest of the image
     pub digest: String,
     #[serde(skip)]
-    manifest: Vec<u8>,
+    pub(crate) manifest: Vec<u8>,
 }
 
 impl LockedImage {

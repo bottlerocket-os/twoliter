@@ -1,6 +1,4 @@
 use crate::common::{exec_log, BUILDSYS_OUTPUT_GENERATION_ID};
-use crate::docker::ImageUri;
-use crate::project::Project;
 use anyhow::{bail, Result};
 use log::trace;
 use std::path::PathBuf;
@@ -51,8 +49,7 @@ pub struct CargoMake {
 impl CargoMake {
     /// Create a new `cargo make` command. The sdk environment variable will be set based on the
     /// definition in `Twoliter.toml`.
-    pub(crate) fn new(project: &Project) -> Result<Self> {
-        let sdk = require_sdk(project)?;
+    pub(crate) fn new(sdk: &str) -> Result<Self> {
         Ok(Self::default().env("TLPRIVATE_SDK_IMAGE", sdk).env(
             "BUILDSYS_OUTPUT_GENERATION_ID",
             BUILDSYS_OUTPUT_GENERATION_ID.to_string(),
@@ -136,15 +133,6 @@ impl CargoMake {
                 .args(args.into_iter().map(Into::into)),
         )
         .await
-    }
-}
-
-fn require_sdk(project: &Project) -> Result<ImageUri> {
-    match project.sdk()? {
-        Some(s) => Ok(s),
-        _ => bail!(
-            "When using twoliter make, it is required that the SDK be specified in Twoliter.toml"
-        ),
     }
 }
 

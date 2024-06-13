@@ -136,22 +136,6 @@ impl Project {
         self.sdk.clone()
     }
 
-    pub(crate) fn sdk(&self) -> Result<Option<ImageUri>> {
-        if let Some(sdk) = self.sdk.as_ref() {
-            let vendor = self.vendor.get(&sdk.vendor).context(format!(
-                "vendor '{}' was not specified in Twoliter.toml",
-                sdk.vendor
-            ))?;
-            Ok(Some(ImageUri::new(
-                Some(vendor.registry.clone()),
-                sdk.name.to_string(),
-                format!("v{}", sdk.version),
-            )))
-        } else {
-            Ok(None)
-        }
-    }
-
     #[allow(unused)]
     pub(crate) fn kit(&self, name: &str) -> Result<Option<ImageUri>> {
         if let Some(kit) = self.kit.iter().find(|y| y.name.to_string() == name) {
@@ -257,7 +241,7 @@ pub(crate) struct Vendor {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub(crate) struct ValidIdentifier(String);
+pub(crate) struct ValidIdentifier(pub(crate) String);
 
 impl Serialize for ValidIdentifier {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -491,33 +475,6 @@ mod test {
 
         // Ensure that the file we loaded was the one we expected to load.
         assert_eq!(project.filepath(), twoliter_toml_path);
-    }
-
-    #[test]
-    fn test_sdk_uri() {
-        let project = Project {
-            filepath: Default::default(),
-            project_dir: Default::default(),
-            schema_version: Default::default(),
-            release_version: String::from("1.0.0"),
-            sdk: Some(Image {
-                name: ValidIdentifier("foo-abc".to_string()),
-                version: Version::new(1, 2, 3),
-                vendor: ValidIdentifier("example".into()),
-            }),
-            vendor: BTreeMap::from([(
-                ValidIdentifier("example".into()),
-                Vendor {
-                    registry: "example.com".into(),
-                },
-            )]),
-            kit: Vec::new(),
-        };
-
-        assert_eq!(
-            "example.com/foo-abc:v1.2.3",
-            project.sdk().unwrap().unwrap().to_string()
-        );
     }
 
     #[tokio::test]
