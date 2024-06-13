@@ -30,7 +30,11 @@ macro_rules! docker {
             .output()
             .await
             .context($error_msg)?;
-        ensure!(output.status.success(), $error_msg);
+        ensure!(
+            output.status.success(),
+            "docker failed to run operation: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         output.stdout
     }};
 }
