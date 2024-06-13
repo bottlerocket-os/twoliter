@@ -1,14 +1,11 @@
 use super::build_clean::BuildClean;
 use crate::cargo_make::CargoMake;
 use crate::common::fs;
-use crate::docker::DockerContainer;
-use crate::lock::Lock;
 use crate::project;
 use crate::tools::install_tools;
 use anyhow::{Context, Result};
 use clap::Parser;
-use log::debug;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[derive(Debug, Parser)]
@@ -114,50 +111,14 @@ pub(crate) struct BuildVariant {
 impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let token = project.token();
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
-        let lock_file = Lock::load(&project).await?;
         // A temporary directory in the `build` directory
         let build_temp_dir = TempDir::new_in(project.project_dir())
             .context("Unable to create a tempdir for Twoliter's build")?;
         let packages_dir = build_temp_dir.path().join("sdk_rpms");
         fs::create_dir_all(&packages_dir).await?;
-
-        let sdk_container =
-            DockerContainer::new(format!("sdk-{}", token), lock_file.sdk.source).await?;
-        sdk_container
-            .cp_out(Path::new("twoliter/alpha/build/rpms"), &packages_dir)
-            .await?;
-
-        let rpms_dir = project.project_dir().join("build").join("rpms");
-        fs::create_dir_all(&rpms_dir).await?;
-        debug!("Moving rpms to build dir");
-        let rpms = packages_dir.join("rpms");
-        let mut read_dir = tokio::fs::read_dir(&rpms)
-            .await
-            .context(format!("Unable to read dir '{}'", rpms.display()))?;
-        while let Some(entry) = read_dir.next_entry().await.context(format!(
-            "Error while reading entries in dir '{}'",
-            rpms.display()
-        ))? {
-            debug!("Moving '{}'", entry.path().display());
-            fs::rename(entry.path(), rpms_dir.join(entry.file_name())).await?;
-        }
-
-        let sbkeys_dir = project.project_dir().join("sbkeys");
-        if !sbkeys_dir.is_dir() {
-            // Create a sbkeys directory in the main project
-            debug!("sbkeys dir not found. Creating a temporary directory");
-            fs::create_dir_all(&sbkeys_dir).await?;
-            sdk_container
-                .cp_out(
-                    Path::new("twoliter/alpha/sbkeys/generate-local-sbkeys"),
-                    &sbkeys_dir,
-                )
-                .await?;
-        };
 
         let mut optional_envs = Vec::new();
 
@@ -176,7 +137,6 @@ impl BuildVariant {
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)
-            .env("BUILDSYS_SBKEYS_DIR", sbkeys_dir.display().to_string())
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .env("GO_MODULES", project.find_go_modules().await?.join(" "))
             .env(
