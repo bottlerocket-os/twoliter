@@ -228,14 +228,14 @@ rm -rf "${ROOT_MOUNT}"/var/lib "${ROOT_MOUNT}"/usr/share/licenses/*
 if [[ "${ARCH}" == "x86_64" ]]; then
   # MBR and BIOS-BOOT
   echo "(hd0) ${OS_IMAGE}" >"${ROOT_MOUNT}/boot/grub/device.map"
-  "${ROOT_MOUNT}/sbin/grub-bios-setup" \
+  grub-bios-setup \
     --directory="${ROOT_MOUNT}/boot/grub" \
     --device-map="${ROOT_MOUNT}/boot/grub/device.map" \
     --root="hd0" \
     --skip-fs-probe \
     "${OS_IMAGE}"
 
-  rm -vf "${ROOT_MOUNT}"/boot/grub/* "${ROOT_MOUNT}"/sbin/grub*
+  rm -vf "${ROOT_MOUNT}"/boot/grub/*
 fi
 
 # We also need an EFI partition, formatted FAT32 with the
