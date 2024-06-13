@@ -23,6 +23,7 @@ Configuration comes from:
 */
 
 mod aws;
+mod kit;
 mod repo;
 mod vmware;
 
@@ -124,6 +125,11 @@ async fn run() -> Result<()> {
         SubCommands::UploadOva(ref upload_args) => vmware::upload_ova::run(&args, upload_args)
             .await
             .context(error::UploadOvaSnafu),
+        SubCommands::PublishKit(ref publish_kit_args) => {
+            kit::publish_kit::run(&args, publish_kit_args)
+                .await
+                .context(error::PublishKitSnafu)
+        }
     }
 }
 
@@ -168,6 +174,8 @@ enum SubCommands {
     ValidateSsm(aws::validate_ssm::ValidateSsmArgs),
 
     UploadOva(vmware::upload_ova::UploadArgs),
+
+    PublishKit(kit::publish_kit::PublishKitArgs),
 }
 
 /// Parses a SemVer, stripping a leading 'v' if present
@@ -259,6 +267,11 @@ mod error {
         #[snafu(display("Failed to validate EC2 images: {}", source))]
         ValidateAmi {
             source: crate::aws::validate_ami::Error,
+        },
+
+        #[snafu(display("Failed to publish kit: {}", source))]
+        PublishKit {
+            source: crate::kit::publish_kit::Error,
         },
     }
 
