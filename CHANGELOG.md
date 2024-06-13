@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2024-06-13
+
+### Added
+
+- Add external kit support ([#230])
+- Add a subcommand to build kits ([#249])
+- Add Twoliter.lock creation and resolution ([#250])
+- Add Twoliter fetch command ([#270])
+- Add ability to generate kit metadata and create OCI image ([#271])
+- Add external kits test project and kit repo discovery ([#272])
+
+[#230]: https://github.com/bottlerocket-os/twoliter/pull/230
+[#249]: https://github.com/bottlerocket-os/twoliter/pull/249
+[#250]: https://github.com/bottlerocket-os/twoliter/pull/250
+[#270]: https://github.com/bottlerocket-os/twoliter/pull/270
+[#271]: https://github.com/bottlerocket-os/twoliter/pull/271
+[#272]: https://github.com/bottlerocket-os/twoliter/pull/272
+
+### Changed
+
+- Dependabot: update h2, rustls versions ([#212], [#213])
+- Remove support for license overrides ([#241])
+- Use grub-bios-setup from the SDK ([#242])
+- Changes and fixes to better support kits ([#245], [#246], [#265], [#266], [#268], [#278], [#285], [#287], [#288], [#290], [#291], [#292], [#293], [#294], [#296])
+- Add cargo-metadata dependency to repack-variant ([#260])
+- Remove fetch-licenses from build kit ([#261])
+- Change the way application inventory is created ([#263])
+- Twoliter cleanup and fixes ([#274], [#275], [#276], [#280], [#283], [#295])
+- Remove variant based sensitivity ([#282])
+- Remove Alpha SDK usage in twoliter build variant ([#286])
+
+[#241]: https://github.com/bottlerocket-os/twoliter/pull/241
+[#242]: https://github.com/bottlerocket-os/twoliter/pull/242
+[#245]: https://github.com/bottlerocket-os/twoliter/pull/245
+[#246]: https://github.com/bottlerocket-os/twoliter/pull/246
+[#260]: https://github.com/bottlerocket-os/twoliter/pull/260
+[#261]: https://github.com/bottlerocket-os/twoliter/pull/261
+[#263]: https://github.com/bottlerocket-os/twoliter/pull/263
+[#265]: https://github.com/bottlerocket-os/twoliter/pull/265
+[#266]: https://github.com/bottlerocket-os/twoliter/pull/266
+[#268]: https://github.com/bottlerocket-os/twoliter/pull/268
+[#274]: https://github.com/bottlerocket-os/twoliter/pull/274
+[#275]: https://github.com/bottlerocket-os/twoliter/pull/275
+[#276]: https://github.com/bottlerocket-os/twoliter/pull/276
+[#278]: https://github.com/bottlerocket-os/twoliter/pull/278
+[#280]: https://github.com/bottlerocket-os/twoliter/pull/280
+[#282]: https://github.com/bottlerocket-os/twoliter/pull/282
+[#283]: https://github.com/bottlerocket-os/twoliter/pull/283
+[#285]: https://github.com/bottlerocket-os/twoliter/pull/285
+[#286]: https://github.com/bottlerocket-os/twoliter/pull/286
+[#287]: https://github.com/bottlerocket-os/twoliter/pull/287
+[#288]: https://github.com/bottlerocket-os/twoliter/pull/288
+[#290]: https://github.com/bottlerocket-os/twoliter/pull/290
+[#291]: https://github.com/bottlerocket-os/twoliter/pull/291
+[#292]: https://github.com/bottlerocket-os/twoliter/pull/292
+[#293]: https://github.com/bottlerocket-os/twoliter/pull/293
+[#294]: https://github.com/bottlerocket-os/twoliter/pull/294
+[#295]: https://github.com/bottlerocket-os/twoliter/pull/295
+[#296]: https://github.com/bottlerocket-os/twoliter/pull/296
+
 ## [0.2.0] - 2024-05-29
 
 ### Added
