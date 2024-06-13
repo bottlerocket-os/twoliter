@@ -11,7 +11,7 @@ use log::{debug, info, trace, warn};
 use semver::Version;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
@@ -167,13 +167,6 @@ impl Project {
         } else {
             Ok(None)
         }
-    }
-
-    pub(crate) fn token(&self) -> String {
-        let mut d = Sha512::new();
-        d.update(self.filepath().display().to_string());
-        let digest = hex::encode(d.finalize());
-        (digest[..12]).to_string()
     }
 
     /// Returns a list of the names of Go modules by searching the `sources` directory for `go.mod`
