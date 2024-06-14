@@ -27,6 +27,7 @@ for pkg in ${PACKAGES} ; do
   find "${PACKAGES_DIR}/${pkg}" \
     -mindepth 1 \
     -maxdepth 1 \
+    -name "*.${ARCH}.rpm" \
     ! -name '*-debuginfo-*' \
     ! -name '*-debugsource-*' \
     -size +0c \
@@ -51,13 +52,10 @@ esac
 
 # Create the content layer
 mkdir -p "${WORK_DIR}/blobs/sha256"
-DIFF_ARCHIVE="${WORK_DIR}/content-layer.tar"
-tar -cf "${DIFF_ARCHIVE}" -C "${KIT_DIR}" .
-DIFF_ID="$(digest_from_file "${DIFF_ARCHIVE}")"
-gzip "${DIFF_ARCHIVE}"
-CONTENT_ARCHIVE="${DIFF_ARCHIVE}.gz"
+CONTENT_ARCHIVE="${WORK_DIR}/content-layer.tar"
+tar -cvf "${CONTENT_ARCHIVE}" -C "${KIT_DIR}" .
 CONTENT_DIGEST="$(digest_from_file "${CONTENT_ARCHIVE}")"
-mv "${WORK_DIR}/content-layer.tar.gz" "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}"
+mv "${CONTENT_ARCHIVE}" "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}"
 
 METADATA_TEMPLATE=$(cat <<EOF
 {
@@ -98,7 +96,7 @@ CONFIG="$(jq --compact-output <<EOF
   "rootfs": {
     "type": "layers",
     "diff_ids": [
-      "sha256:${DIFF_ID}"
+      "sha256:${CONTENT_DIGEST}"
     ]
   }
 }
@@ -121,7 +119,7 @@ MANIFEST="$(jq --compact-output <<EOF
   },
   "layers": [
     {
-      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "mediaType": "application/vnd.oci.image.layer.v1.tar",
       "digest": "sha256:${CONTENT_DIGEST}",
       "size": ${CONTENT_SIZE}
     }
