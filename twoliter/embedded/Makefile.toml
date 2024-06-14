@@ -1547,6 +1547,36 @@ pubsys \
 '''
 ]
 
+[tasks.publish-kit]
+dependencies = ["fetch-sources"]
+script_runner = "bash"
+script = [
+'''
+set -e
+if [ -z "${BUILDSYS_KIT}" ]; then
+    echo "The BUILDSYS_KIT environment variable must be set. For example:"
+    echo "cargo make -e BUILDSYS_KIT=core-kit publish-kit"
+    exit 1
+fi
+
+if [ -z "${PUBLISH_VENDOR}" ]; then
+    echo "The PUBLISH_VENDOR environment variable must be set."
+    exit 1
+fi
+
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+pubsys \
+   --log-level "${PUBLISH_LOG_LEVEL}" \
+   --infra-config-path "${PUBLISH_INFRA_CONFIG_PATH}" \
+   publish-kit \
+   --kit-path "${BUILDSYS_BUILD_DIR}/kits/${BUILDSYS_KIT}" \
+   --vendor "${PUBLISH_VENDOR}" \
+   --version "v${BUILDSYS_VERSION_IMAGE}" \
+   --build-id "${BUILDSYS_VERSION_BUILD}"
+'''
+]
+
 [tasks._upload-ova-base]
 # Rather than depend on "build", which currently rebuilds images each run, we
 # depend on publish-tools and check for the image files below to save time.
