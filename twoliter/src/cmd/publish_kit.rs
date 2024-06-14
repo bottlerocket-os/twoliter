@@ -1,9 +1,9 @@
+use crate::cargo_make::CargoMake;
 use crate::project;
 use crate::tools::install_tools;
-use anyhow::{ensure, Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tokio::process::Command;
 
 /// Group all publish commands
 #[derive(Debug, Parser)]
@@ -31,9 +31,6 @@ pub(crate) struct PublishKit {
 
     /// Vendor to publish to
     vendor: String,
-
-    /// Version and build id of the kit to publish, e.g. v1.0.0-abcd123
-    version: String,
 }
 
 impl PublishKit {
@@ -41,33 +38,16 @@ impl PublishKit {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
-        let pubsys_path = toolsdir.join("pubsys");
-        let infra_path = project.project_dir().join("Infra.toml");
-        let kit_path = project
-            .project_dir()
-            .join("build")
-            .join("kits")
-            .join(self.kit_name.as_str());
+        let makefile_path = toolsdir.join("Makefile.toml");
 
-        let infra_arg = format!("--infra-config-path={}", infra_path.display());
-        let kit_arg = format!("--kit-path={}", kit_path.display());
-        let vendor_arg = format!("--vendor={}", self.vendor);
-        let version_arg = format!("--version={}", self.version);
-        // Now we want to offload this operation to pubsys
-        let res = Command::new(pubsys_path)
-            .args([
-                infra_arg.as_str(),
-                "publish-kit",
-                kit_arg.as_str(),
-                vendor_arg.as_str(),
-                version_arg.as_str(),
-            ])
-            .spawn()
-            .context("failed to spawn pubsys")?
-            .wait()
+        CargoMake::new(&project)?
+            .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
+            .env("BUILDSYS_KIT", &self.kit_name)
+            .env("BUILDSYS_VERSION_IMAGE", project.release_version())
+            .env("PUBLISH_VENDOR", &self.vendor)
+            .makefile(makefile_path)
+            .project_dir(project.project_dir())
+            .exec("publish-kit")
             .await
-            .context("failed to publish a kit with pubsys")?;
-        ensure!(res.success(), "failed to publish a kit with pubsys");
-        Ok(())
     }
 }
