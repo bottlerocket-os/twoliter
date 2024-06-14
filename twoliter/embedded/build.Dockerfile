@@ -120,7 +120,7 @@ RUN --mount=source=.cargo,target=/home/builder/.cargo \
     rpmbuild -bb --clean \
       --undefine _auto_set_build_flags \
       --define "_target_cpu ${ARCH}" \
-      --define "dist ${BUILD_ID_TIMESTAMP}.${BUILD_ID//-dirty/}.br1" \
+      --define "dist .${BUILD_ID_TIMESTAMP}.${BUILD_ID//-dirty/}.br1" \
       rpmbuild/SPECS/${PACKAGE}.spec
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=

@@ -107,7 +107,7 @@ mod test {
 
         for package in packages {
             let rpm = kit_output_dir.join(&format!(
-                "bottlerocket-{package}-0.0-00000000000.00000000.br1.{arch}.rpm"
+                "bottlerocket-{package}-0.0-0.0000000000.00000000.br1.{arch}.rpm"
             ));
             assert!(
                 rpm.is_file(),
