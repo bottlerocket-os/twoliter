@@ -371,6 +371,18 @@ impl Lock {
         self.external_kit_metadata()
             .serialize(&mut ser)
             .context("failed to serialize external kit metadata")?;
+        // Compare the output of the serialize if the file exists
+        let external_metadata_file = project.external_kits_metadata();
+        if external_metadata_file.exists() {
+            let existing = read(&external_metadata_file).await.context(format!(
+                "failed to read external kit metadata: {}",
+                external_metadata_file.display()
+            ))?;
+            // If this is the same as what we generated skip the write
+            if existing == kit_list {
+                return Ok(());
+            }
+        }
         write(project.external_kits_metadata(), kit_list.as_slice())
             .await
             .context(format!(
