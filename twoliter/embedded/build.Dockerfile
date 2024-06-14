@@ -376,8 +376,8 @@ WORKDIR /tmp
 RUN --mount=target=/host \
     mkdir -p /local/archives \
     && KERNEL="$(printf "%s\n" ${PACKAGES} | awk '/^kernel-/{print $1}')" \
-    && find /host/build/rpms/ -maxdepth 2 -type f \
-        -name "bottlerocket-${KERNEL}-archive-*.rpm" \
+    && find /host/build/ -type f \
+        -name "bottlerocket-${KERNEL}-archive-*.${ARCH}.rpm" \
         -exec cp '{}' '/local/archives/' ';' \
     && /host/build/tools/rpm2kmodkit \
         --archive-dir=/local/archives \
