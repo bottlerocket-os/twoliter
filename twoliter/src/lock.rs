@@ -39,6 +39,18 @@ macro_rules! docker {
     }};
 }
 
+macro_rules! docker_noisy {
+    ($arg: expr, $error_msg: expr) => {{
+        Command::new("docker")
+            .args($arg)
+            .spawn()
+            .context($error_msg)?
+            .wait()
+            .await
+            .context("docker failed to run operation")?;
+    }};
+}
+
 /// Represents a locked dependency on an image
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct LockedImage {
@@ -209,7 +221,7 @@ impl OCIArchive {
         let oci_archive_path = self.archive_path();
         if !oci_archive_path.exists() {
             let oci_archive_str = oci_archive_path.to_string_lossy();
-            docker!(
+            docker_noisy!(
                 ["save", digest_uri.as_str(), "-o", oci_archive_str.as_ref()],
                 format!(
                     "failed to fetch kit and save to disk from {} to {}",
