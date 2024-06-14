@@ -112,6 +112,10 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
 
         platform_images.push((docker_arch, arch_specific_target_uri.clone()));
     }
+    ensure!(
+        !platform_images.is_empty(),
+        error::NoArchiveSnafu { path: kit_path }
+    );
 
     let target_uri = format!("{}/{}:{}", vendor_registry_uri, kit_name, kit_version);
 
