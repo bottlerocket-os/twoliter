@@ -41,6 +41,27 @@ macro_rules! docker {
     }};
 }
 
+macro_rules! docker_noisy {
+    ($arg: expr, $arch: ident, $uri: ident) => {{
+        let status = Command::new("docker")
+            .args($arg)
+            .spawn()
+            .context(error::CommandSnafu { command: "docker" })?
+            .wait()
+            .await
+            .context(error::CommandSnafu { command: "docker" })?;
+        ensure!(
+            status.success(),
+            error::PublishFailSnafu {
+                reason: format!(
+                    "failed to push image for architecture '{}' to {}",
+                    $arch, $uri
+                )
+            }
+        );
+    }};
+}
+
 pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
@@ -83,6 +104,7 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
             continue;
         }
 
+        info!("Loading kit image from OCI archive");
         let out = docker!(["load", format!("--input={}", path.display()).as_str(),]);
         let out = String::from_utf8_lossy(&out);
         let digest_expression =
@@ -103,7 +125,11 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
             "Pushing kit image for platform {} to {}",
             arch, &arch_specific_target_uri
         );
-        docker!(["push", &arch_specific_target_uri,]);
+        docker_noisy!(
+            ["push", &arch_specific_target_uri,],
+            arch,
+            arch_specific_target_uri
+        );
 
         platform_images.push((docker_arch, arch_specific_target_uri.clone()));
     }
@@ -115,6 +141,7 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
         .map(|(_, image)| image.as_str())
         .collect();
 
+    info!("Creating image list for kit");
     let mut manifest_create_args = vec!["manifest", "create", &target_uri];
     manifest_create_args.extend_from_slice(&images);
     docker!(manifest_create_args);
