@@ -19,9 +19,13 @@ pub(crate) struct PublishKitArgs {
     #[arg(long)]
     vendor: String,
 
-    /// The version and build ID of the kit that should be published, e.g. v1.0.0-abcd123
+    /// The version of the kit that should be published
     #[arg(long)]
     version: String,
+
+    /// The build id of the kit that should be published
+    #[arg(long)]
+    build_id: String,
 }
 
 macro_rules! docker {
@@ -69,13 +73,14 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
         .context(error::InvalidPathSnafu { path: &kit_path })?
         .to_string_lossy();
     let kit_version = publish_kit_args.version.clone();
+    let build_id = publish_kit_args.build_id.clone();
 
     let mut platform_images = Vec::new();
     for arch in ["aarch64", "x86_64"] {
         let docker_arch =
             DockerArchitecture::try_from(arch).context(error::InvalidArchitectureSnafu)?;
 
-        let kit_filename = format!("{}-{}-{}.tar", &kit_name, &kit_version, arch);
+        let kit_filename = format!("{}-{}-{}-{}.tar", &kit_name, &kit_version, &build_id, arch);
         let path = kit_path.join(&kit_filename);
 
         if !path.exists() {
@@ -93,8 +98,8 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
         let digest = &caps["digest"];
 
         let arch_specific_target_uri = format!(
-            "{}/{}:{}-{}",
-            vendor_registry_uri, kit_name, &kit_version, arch
+            "{}/{}:{}-{}-{}",
+            vendor_registry_uri, kit_name, &kit_version, &build_id, arch
         );
 
         docker!(["tag", digest, &arch_specific_target_uri,]);

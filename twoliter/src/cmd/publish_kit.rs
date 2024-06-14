@@ -32,8 +32,11 @@ pub(crate) struct PublishKit {
     /// Vendor to publish to
     vendor: String,
 
-    /// Version and build id of the kit to publish, e.g. v1.0.0-abcd123
+    /// Version of the kit to publish
     version: String,
+
+    /// Build ID of the kit to publish
+    build_id: String,
 }
 
 impl PublishKit {
@@ -53,6 +56,7 @@ impl PublishKit {
         let kit_arg = format!("--kit-path={}", kit_path.display());
         let vendor_arg = format!("--vendor={}", self.vendor);
         let version_arg = format!("--version={}", self.version);
+        let build_id_arg = format!("--build-id={}", self.build_id);
         // Now we want to offload this operation to pubsys
         let res = Command::new(pubsys_path)
             .args([
@@ -61,6 +65,7 @@ impl PublishKit {
                 kit_arg.as_str(),
                 vendor_arg.as_str(),
                 version_arg.as_str(),
+                build_id_arg.as_str(),
             ])
             .spawn()
             .context("failed to spawn pubsys")?
