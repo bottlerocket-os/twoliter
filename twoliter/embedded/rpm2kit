@@ -27,6 +27,7 @@ for pkg in ${PACKAGES} ; do
   find "${PACKAGES_DIR}/${pkg}" \
     -mindepth 1 \
     -maxdepth 1 \
+    -name "*.${ARCH}.rpm" \
     ! -name '*-debuginfo-*' \
     ! -name '*-debugsource-*' \
     -size +0c \
