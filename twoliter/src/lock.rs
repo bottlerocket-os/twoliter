@@ -271,10 +271,9 @@ impl OCIArchive {
         // Extract each layer into the target directory
         for layer in manifest_layout.layers {
             let digest = layer.digest.to_string().replace(':', "/");
-            let mut layer_blob = File::open(temp_dir.path().join(format!("blobs/{digest}")))
+            let layer_blob = File::open(temp_dir.path().join(format!("blobs/{digest}")))
                 .context("failed to read layer of oci image")?;
-            let decompressed = flate2::read::GzDecoder::new(&mut layer_blob);
-            let mut layer_archive = TarArchive::new(decompressed);
+            let mut layer_archive = TarArchive::new(layer_blob);
             layer_archive
                 .unpack(path)
                 .context("failed to unpack layer to disk")?;
