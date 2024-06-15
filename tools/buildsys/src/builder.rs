@@ -503,7 +503,7 @@ impl DockerBuild {
             image_layout.publish_image_sizes_gib();
 
         Ok(Self {
-            dockerfile: args.common.tools_dir.join("repack.Dockerfile"),
+            dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
             target: "repack".to_string(),
             tag: append_token(
