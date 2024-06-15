@@ -3865,6 +3865,7 @@ dependencies = [
  "log",
  "non-empty-string",
  "olpc-cjson",
+ "pipesys",
  "pubsys",
  "pubsys-setup",
  "semver",
@@ -3877,6 +3878,7 @@ dependencies = [
  "tokio",
  "toml",
  "tuftool",
+ "unplug",
  "uuid",
 ]
 
