@@ -33,8 +33,6 @@ fn main() {
     paths.copy_file("img2img");
     paths.copy_file("imghelper");
     paths.copy_file("partyplanner");
-    paths.copy_file("repack.Dockerfile");
-    paths.copy_file("repack.Dockerfile.dockerignore");
     paths.copy_file("rpm2img");
     paths.copy_file("rpm2kit");
     paths.copy_file("rpm2kmodkit");

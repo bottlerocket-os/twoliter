@@ -116,8 +116,6 @@ async fn test_install_tools() {
     assert!(toolsdir.join("imghelper").is_file());
     assert!(toolsdir.join("metadata.spec").is_file());
     assert!(toolsdir.join("partyplanner").is_file());
-    assert!(toolsdir.join("repack.Dockerfile").is_file());
-    assert!(toolsdir.join("repack.Dockerfile.dockerignore").is_file());
     assert!(toolsdir.join("rpm2img").is_file());
     assert!(toolsdir.join("rpm2kit").is_file());
     assert!(toolsdir.join("rpm2kmodkit").is_file());
