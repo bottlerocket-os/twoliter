@@ -11,6 +11,9 @@ ARG ARCH
 ARG VERSION_ID
 ARG BUILD_ID
 ARG NOCACHE
+ARG BYPASS_SOCKET
+ARG OUTPUT_SOCKET
+ARG BUILDER_UID
 ARG VARIANT
 ARG IMAGE_NAME
 ARG IMAGE_FORMAT
@@ -40,21 +43,27 @@ RUN --mount=target=/host \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
     --mount=type=secret,id=aws-session-token.env,target=/root/.aws/aws-session-token.env \
+    /host/build/tools/pipesys link --fd-socket "${BYPASS_SOCKET}" --target /bypass && \
+    /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
+    rm -rf /output/* && \
     /host/build/tools/img2img \
-      --input-dir="/host/build/images/${ARCH}-${VARIANT}/${VERSION_ID}-${BUILD_ID}" \
-      --output-dir=/local/output \
+      --input-dir="/bypass/build/images/${ARCH}-${VARIANT}/${VERSION_ID}-${BUILD_ID}" \
+      --output-dir=/output \
       --output-fmt="${IMAGE_FORMAT}" \
       --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
       --data-image-size-gib="${DATA_IMAGE_SIZE_GIB}" \
       --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
       --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
       --partition-plan="${PARTITION_PLAN}" \
-      --ovf-template="/host/variants/${VARIANT}/template.ovf" \
-      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
-    && echo ${NOCACHE}
+      --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
+      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} && \
+    chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
+    rm /output && \
+    rm /bypass && \
+    touch /tmp/.${NOCACHE}
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
-# Copies the repackaged artifacts to their expected location so that buildsys can find them
-# and copy them out.
+# Finish up the image repack stage.
 FROM scratch AS repack
-COPY --from=imgrepack /local/output/. /output/
+ARG NOCACHE
+COPY --from=imgrepack /tmp/.${NOCACHE} /output/
