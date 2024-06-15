@@ -43,6 +43,13 @@ createrepo_c "${KIT_DIR}"
 dnf --disablerepo '*' --repofrompath "kit,file:///${KIT_DIR}" repoquery --all
 
 WORK_DIR="$(mktemp -d)"
+
+# Clean up working directories to reduce size of layer.
+cleanup() {
+  rm -rf /tmp/*
+}
+trap 'cleanup' EXIT
+
 TIMESTAMP="$(date +"%FT%T.%NZ")"
 FILENAME_PREFIX="${KIT:?}-v${VERSION_ID:?}-${BUILD_ID:?}-${ARCH:?}"
 # Translate ARCH into the proper docker arch
@@ -106,7 +113,7 @@ LOCAL_KITS=("${LOCAL_KIT_DEPENDENCIES}")
 # we disable spellcheck for the line because we want it to split elements
 # shellcheck disable=SC2068
 LOCAL_KIT_INPUT="$(jq --null-input --compact-output '$ARGS.positional // []' --args ${LOCAL_KITS[@]})"
-EXTERNAL_KIT_INPUT="$(cat "/host/${EXTERNAL_KIT_METADATA}")"
+EXTERNAL_KIT_INPUT="$(cat "/bypass/${EXTERNAL_KIT_METADATA}")"
 KIT_INPUT="${EXTERNAL_KIT_INPUT} ${LOCAL_KIT_INPUT}"
 KIT_METADATA="$(jq --compact-output --sort-keys --slurp "${METADATA_TEMPLATE}" <<< "${KIT_INPUT}" )"
 METADATA="$(base64 -w0 <<< "${KIT_METADATA}")"
