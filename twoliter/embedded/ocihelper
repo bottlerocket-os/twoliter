@@ -9,5 +9,5 @@ digest_from_blob() {
 digest_from_file() {
   local file_path
   file_path="${1:?}"
-  sha256sum < "${file_path}" | awk '{ print $1 };'
+  sha256sum "${file_path}" | awk '{ print $1 };'
 }
