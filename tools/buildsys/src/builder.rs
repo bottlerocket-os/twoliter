@@ -577,6 +577,7 @@ impl DockerBuild {
             --tag {tag} \
             --network host \
             --file {dockerfile} \
+            --no-cache-filter rpmbuild,kitbuild,repobuild,imgbuild,migrationbuild,kmodkitbuild,imgrepack \
             --build-arg BYPASS_SOCKET={tag}-bypass \
             --build-arg BUILDER_UID={uid}",
             context = self.context.display(),
