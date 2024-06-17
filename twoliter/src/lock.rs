@@ -221,10 +221,16 @@ impl OCIArchive {
         let oci_archive_path = self.archive_path();
         if !oci_archive_path.exists() {
             let oci_archive_str = oci_archive_path.to_string_lossy();
+            // First use docker pull to let the daemon cache individual blobs
+            docker_noisy!(
+                ["pull", digest_uri.as_str()],
+                format!("failed to fetch kit from {}", digest_uri)
+            );
+            // Save the image out to disk
             docker_noisy!(
                 ["save", digest_uri.as_str(), "-o", oci_archive_str.as_ref()],
                 format!(
-                    "failed to fetch kit and save to disk from {} to {}",
+                    "failed to save to disk from {} to {}",
                     digest_uri, oci_archive_str
                 )
             );
