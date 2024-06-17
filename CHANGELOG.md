@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.0...HEAD
+
+## [0.4.0] - 2024-06-17
+
+### Changed
+
+- Save each package in its own layer for external kits in Twoliter ([#297])
+- Docker pull before docker save for external kits in Twoliter ([#298])
+
+[#297]: https://github.com/bottlerocket-os/twoliter/pull/297
+[#298]: https://github.com/bottlerocket-os/twoliter/pull/298
+
 ## [0.3.0] - 2024-06-13
 
 ### Added
@@ -276,7 +288,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bottlerocket's `cargo make` build system.
 - `Makefile.toml` taken from the Bottlerocket project.
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.7...v0.1.0
 [0.0.7]: https://github.com/bottlerocket-os/twoliter/compare/v0.0.6...v0.0.7
