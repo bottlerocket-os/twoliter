@@ -24,6 +24,7 @@ rm -rf "${KIT_DIR}"
 
 mkdir -p "${KIT_DIR}/Packages"
 for pkg in ${PACKAGES} ; do
+  mkdir -p "${KIT_DIR}/Packages/${pkg}"
   find "${PACKAGES_DIR}/${pkg}" \
     -mindepth 1 \
     -maxdepth 1 \
@@ -31,7 +32,11 @@ for pkg in ${PACKAGES} ; do
     ! -name '*-debuginfo-*' \
     ! -name '*-debugsource-*' \
     -size +0c \
-    -exec install -p -m 0644 -t "${KIT_DIR}/Packages" {} \+
+    -exec install -p -m 0644 -t "${KIT_DIR}/Packages/${pkg}" {} \+
+  # Set a reproducible timestamp on the directory, so that the tar archive for
+  # this package will be the same if the package has not otherwise changed.
+  refpkg="$(ls -1 "${PACKAGES_DIR}/${pkg}" | head -n1)"
+  touch -r "${PACKAGES_DIR}/${pkg}/${refpkg}" "${KIT_DIR}/Packages/${pkg}"
 done
 
 createrepo_c "${KIT_DIR}"
@@ -50,12 +55,38 @@ case "${ARCH}" in
   ;;
 esac
 
-# Create the content layer
+# Create the content layers
 mkdir -p "${WORK_DIR}/blobs/sha256"
-CONTENT_ARCHIVE="${WORK_DIR}/content-layer.tar"
-tar -cvf "${CONTENT_ARCHIVE}" -C "${KIT_DIR}" .
-CONTENT_DIGEST="$(digest_from_file "${CONTENT_ARCHIVE}")"
-mv "${CONTENT_ARCHIVE}" "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}"
+
+# Store each directory in the repo as a separate layer, to minimize overhead
+# when pushing and pulling a kit that only has a few modified packages.
+declare -A LAYER_DIGESTS
+for layer in ${PACKAGES[@]} repodata ; do
+  [ "${layer}" != "repodata" ] && layer="Packages/${layer}"
+  layer_archive="${WORK_DIR}/content-layer.tar"
+  tar -cvf "${layer_archive}" --sort=name -C "${KIT_DIR}" "${layer}"
+  layer_digest="$(digest_from_file "${layer_archive}")"
+  mv "${layer_archive}" "${WORK_DIR}/blobs/sha256/${layer_digest}"
+  layer_size="$(stat -c %s "${WORK_DIR}/blobs/sha256/${layer_digest}")"
+  LAYER_DIGESTS["${layer_digest}"]="${layer_size}"
+done
+
+# Generate a JSON list of diff IDs for the layers.
+declare -a CONTENT_DIGESTS
+CONTENT_DIGESTS=(${!LAYER_DIGESTS[@]})
+CONTENT_DIGESTS=(${CONTENT_DIGESTS[@]/#/sha256:})
+DIFF_IDS="$(jq --null-input --compact-output '$ARGS.positional // []' --args ${CONTENT_DIGESTS[@]})"
+
+# Generate a JSON list of objects for the layers.
+declare -a LAYER_OBJECTS
+for layer_digest in ${!LAYER_DIGESTS[@]} ; do
+  layer_size="${LAYER_DIGESTS[${layer_digest}]}"
+  layer='{"mediaType":"application/vnd.oci.image.layer.v1.tar",'
+  layer+='"digest":"'"sha256:${layer_digest}"'",'
+  layer+='"size":'"${layer_size}"'}'
+  LAYER_OBJECTS+=(${layer})
+done
+LAYERS="$(echo ${LAYER_OBJECTS[@]} | jq --slurp --compact-output)"
 
 METADATA_TEMPLATE=$(cat <<EOF
 {
@@ -95,9 +126,7 @@ CONFIG="$(jq --compact-output <<EOF
   "os": "linux",
   "rootfs": {
     "type": "layers",
-    "diff_ids": [
-      "sha256:${CONTENT_DIGEST}"
-    ]
+    "diff_ids": ${DIFF_IDS}
   }
 }
 EOF
@@ -107,7 +136,6 @@ echo "${CONFIG}" > "${WORK_DIR}/blobs/sha256/${CONFIG_DIGEST}"
 
 # Create the OCI Manifest
 CONFIG_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${CONFIG_DIGEST}")"
-CONTENT_SIZE="$(stat -c %s "${WORK_DIR}/blobs/sha256/${CONTENT_DIGEST}")"
 MANIFEST="$(jq --compact-output <<EOF
 {
   "schemaVersion": 2,
@@ -117,13 +145,7 @@ MANIFEST="$(jq --compact-output <<EOF
     "digest": "sha256:${CONFIG_DIGEST}",
     "size": ${CONFIG_SIZE}
   },
-  "layers": [
-    {
-      "mediaType": "application/vnd.oci.image.layer.v1.tar",
-      "digest": "sha256:${CONTENT_DIGEST}",
-      "size": ${CONTENT_SIZE}
-    }
-  ]
+  "layers": ${LAYERS}
 }
 EOF
 )"

@@ -91,11 +91,14 @@ pub(super) fn init_logger(level: Option<LevelFilter>) {
 mod test {
     use super::*;
     use crate::cmd::build::BuildKit;
+    use async_walkdir::WalkDir;
+    use futures::stream::StreamExt;
+    use std::collections::HashSet;
     use std::path::Path;
 
     const PROJECT: &str = "local-kit";
 
-    fn expect_kit(project_dir: &Path, name: &str, arch: &str, packages: &[&str]) {
+    async fn expect_kit(project_dir: &Path, name: &str, arch: &str, packages: &[&str]) {
         let build = project_dir.join("build");
         let kit_output_dir = build.join("kits").join(name).join(arch).join("Packages");
         assert!(
@@ -105,18 +108,25 @@ mod test {
             kit_output_dir.display()
         );
 
+        let mut expected = HashSet::new();
         for package in packages {
-            let rpm = kit_output_dir.join(&format!(
+            expected.insert(format!(
                 "bottlerocket-{package}-0.0-0.0000000000.00000000.br1.{arch}.rpm"
             ));
-            assert!(
-                rpm.is_file(),
-                "Expected to find RPM for {}, for {} at {}",
-                package,
-                name,
-                rpm.display()
-            );
         }
+
+        let mut entries = WalkDir::new(kit_output_dir);
+        while let Some(entry) = entries.next().await {
+            let entry = entry.unwrap();
+            let file: String = entry.file_name().to_string_lossy().to_string();
+            expected.remove(&file);
+        }
+
+        assert!(
+            expected.is_empty(),
+            "Did not find expected RPMs: {:?}",
+            expected
+        );
     }
 
     async fn twoliter_update(project_path: &Path) {
@@ -153,7 +163,7 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
     }
 
     #[tokio::test]
@@ -175,8 +185,8 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
-        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]);
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
     }
 
     #[tokio::test]
@@ -198,8 +208,8 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
-        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]);
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
     }
 
     #[tokio::test]
@@ -221,14 +231,15 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]);
-        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]);
-        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]);
+        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
+        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
         expect_kit(
             &project_dir,
             "extra-3-kit",
             arch,
             &["pkg-e", "pkg-f", "pkg-g"],
-        );
+        )
+        .await;
     }
 }
