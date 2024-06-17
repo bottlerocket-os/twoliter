@@ -789,13 +789,6 @@ fi
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
-# Parse the variant into its components and set additional variables.
-eval "$(bottlerocket-variant)"
-export BUILDSYS_VARIANT_PLATFORM="${BUILDSYS_VARIANT_PLATFORM:?}"
-export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
-export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
-export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
-
 # Relocate an existing target directory to the new location, to avoid breaking
 # compatibility on upgrade. On downgrade, the missing directory will trigger a
 # full rebuild, which is good because the new layout of RPM artifacts is not
@@ -840,14 +833,6 @@ if [ -z "${BUILDSYS_KIT}" ]; then
     exit 1
 fi
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-
-# TODO - remove this once package builds no longer require variant variables.
-# Parse the variant into its components and set additional variables.
-eval "$(bottlerocket-variant)"
-export BUILDSYS_VARIANT_PLATFORM="${BUILDSYS_VARIANT_PLATFORM:?}"
-export BUILDSYS_VARIANT_RUNTIME="${BUILDSYS_VARIANT_RUNTIME:?}"
-export BUILDSYS_VARIANT_FAMILY="${BUILDSYS_VARIANT_FAMILY:?}"
-export BUILDSYS_VARIANT_FLAVOR="${BUILDSYS_VARIANT_FLAVOR}"
 
 # Save built artifacts for each architecture.  We don't set this everywhere
 # because we build host tools with cargo as well, like buildsys and pubsys.
