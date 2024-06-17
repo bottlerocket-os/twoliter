@@ -51,15 +51,15 @@ mod error {
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(super) enum Error {
+        #[snafu(display("{source}"))]
         VariantParse {
             source: bottlerocket_variant::error::Error,
         },
 
-        ManifestParse {
-            source: buildsys::manifest::Error,
-        },
+        #[snafu(display("{source}"))]
+        ManifestParse { source: buildsys::manifest::Error },
 
-        #[snafu(display("Missing environment variable '{}'", var))]
+        #[snafu(display("Missing environment variable '{var}'"))]
         Environment {
             var: String,
             source: std::env::VarError,
