@@ -195,6 +195,10 @@ fi
 # Write the inventory.
 printf "%s\n" "${INVENTORY_DATA}" >"${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
+# Write the the inventory to a file in the local build output directory so that builders
+# can access the inventory without needed to dig into the generated image.
+printf "%s\n" "${INVENTORY_DATA}" >"${OUTPUT_DIR}/application-inventory.json"
+
 # Regenerate module dependencies, if possible.
 KMOD_DIR="${ROOT_MOUNT}/lib/modules"
 # shellcheck disable=SC2066
