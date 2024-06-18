@@ -43,28 +43,18 @@ ARG ARCH
 ARG NOCACHE
 ARG BUILD_ID
 ARG BUILD_ID_TIMESTAMP
-ARG BUILD_EPOCH
 ENV BUILD_ID=${BUILD_ID}
 ENV BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP}
-ENV BUILD_EPOCH=${BUILD_EPOCH}
 WORKDIR /home/builder
 
 USER builder
 ENV PACKAGE=${PACKAGE} ARCH=${ARCH}
 COPY ./packages/${PACKAGE}/ .
 
-# Copy over the target-specific macros, and put sources in the right place. Set Epoch values for the package
-# and all of its subpackages. Additionally, for packages declaring explicit package versions requirements via 
-# "{Requires,Conflicts,Obsoletes}: = ...", ensure the epoch for the specified package is set.
-# "[Requires|Conflicts|Obsoletes]:.*[=>,>,<,<=,=]\) \(\%{version}\-\%{release}$\)" matches any line in a form like:
-# "Requires: %{name}-modules = %{version}-%{release}". The full `sed` expression below captures this match into
-# two groups and insert the Epoch value such that the result is "Requires: %{name}-modules = EPOCH:%{version}-%{release}"
+# Copy over the target-specific macros, and put sources in the right place.
 RUN \
    cp "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" .rpmmacros \
-   && echo "Epoch: ${BUILD_EPOCH}" >> rpmbuild/SPECS/${PACKAGE}.spec \
    && cat ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
-   && sed -i "/^%package\s.*$/a Epoch: ${BUILD_EPOCH}" rpmbuild/SPECS/${PACKAGE}.spec \
-   && sed -i "s;\([Requires|Conflicts|Obsoletes]:.*[=>,>,<,<=,=]\) \(\%{version}\-\%{release}$\);\1 ${BUILD_EPOCH}:\2;" rpmbuild/SPECS/${PACKAGE}.spec \
    && find . -maxdepth 1 -not -path '*/\.*' -type f -exec mv {} rpmbuild/SOURCES/ \; \
    && echo ${NOCACHE}
 

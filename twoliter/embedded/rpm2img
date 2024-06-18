@@ -164,9 +164,8 @@ rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 # newer release of a package were to have a lower "Release". 
 INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"Publisher\":\"Bottlerocket\"\
-,\"Version\":\"%{Version}\"\
-,\"Release\":\"%{Release}\"\
-,\"Epoch\":\"%{Epoch}\"\
+,\"Version\":\"${VERSION_ID}\"\
+,\"Release\":\"${BUILD_ID}\"\
 ,\"InstalledTime\":\"${INSTALL_TIME}\"\
 ,\"ApplicationType\":\"%{GROUP}\"\
 ,\"Architecture\":\"%{ARCH}\"\

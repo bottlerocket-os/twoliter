@@ -132,7 +132,6 @@ struct PackageBuildArgs {
     kit_dependencies: Vec<String>,
     external_kit_dependencies: Vec<String>,
     version_build: String,
-    version_build_epoch: String,
     version_build_timestamp: String,
 }
 
@@ -175,7 +174,6 @@ impl crate::builder::PackageBuildArgs {
         args.build_arg("PACKAGE", &self.package);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
         args.build_arg("BUILD_ID", &self.version_build);
-        args.build_arg("BUILD_EPOCH", &self.version_build_epoch);
         args.build_arg("BUILD_ID_TIMESTAMP", &self.version_build_timestamp);
         args
     }
@@ -356,7 +354,6 @@ impl DockerBuild {
                     .context(error::GraphSnafu)?
                     .list(),
                 version_build: args.version_build,
-                version_build_epoch: args.version_build_epoch,
                 version_build_timestamp: args.version_build_timestamp,
             }),
             secrets_args: Vec::new(),
