@@ -16,6 +16,7 @@ for opt in "$@"; do
   --package-dir=*) PACKAGE_DIR="${optarg}" ;;
   --output-dir=*) OUTPUT_DIR="${optarg}" ;;
   --output-fmt=*) OUTPUT_FMT="${optarg}" ;;
+  --external-kits-path=*) EXTERNAL_KITS_PATH="${optarg}" ;;
   --os-image-size-gib=*) OS_IMAGE_SIZE_GIB="${optarg}" ;;
   --data-image-size-gib=*) DATA_IMAGE_SIZE_GIB="${optarg}" ;;
   --os-image-publish-size-gib=*) OS_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
@@ -178,11 +179,48 @@ mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
 
 # Wrap installed_rpms mapfile into json.
 INVENTORY_DATA="$(jq --raw-output . <<<"${installed_rpms[@]}")"
-# Remove the 'bottlerocket-' prefix from package names.
-INVENTORY_DATA="$(jq --arg PKG_PREFIX "bottlerocket-" \
-  '(.Name) |= sub($PKG_PREFIX; "")' <<<"${INVENTORY_DATA}")"
 # Sort by package name and add 'Content' as top-level.
 INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<<"${INVENTORY_DATA}" | jq '{"Content": .}')"
+
+# Get the core kit version and vendor from external kit metadata.
+EXTERNAL_KIT_METADATA_PATH="${EXTERNAL_KITS_PATH}/external-kit-metadata.json"
+CORE_KIT_VERSION=$(jq --raw-output '.kit[]|select(.name == "bottlerocket-core-kit")|.version' "${EXTERNAL_KIT_METADATA_PATH}")
+CORE_KIT_VENDOR=$(jq --raw-output '.kit[]|select(.name == "bottlerocket-core-kit")|.vendor' "${EXTERNAL_KIT_METADATA_PATH}")
+# Set the path inside the build container to the core kit RPMs and repo.
+CORE_KIT_PATH="${EXTERNAL_KITS_PATH}/${CORE_KIT_VENDOR}/bottlerocket-core-kit/${ARCH}"
+
+if [[ -n "${CORE_KIT_VERSION}" && -n "${CORE_KIT_VENDOR}" ]]; then
+  # Query the bottlerocket-core-kit repo of RPMs for all package names.
+  CORE_KIT_INVENTORY_QUERY="%{NAME}"
+  # shellcheck disable=SC2312 # Array is validated elsewhere.
+  mapfile -t CORE_KIT_PKGS <<<"$(dnf --repofrompath \
+    core-kit,file://"${CORE_KIT_PATH}" \
+    --repo=core-kit repoquery \
+    --queryformat "${CORE_KIT_INVENTORY_QUERY}")"
+  # Convert the bash array of core kit packages to a JSON array.
+  CORE_KIT_LIST="$(\
+    jq \
+      --null-input \
+      --compact-output \
+      '$ARGS.positional // []' \
+      --args "${CORE_KIT_PKGS[@]}")"
+
+  # Convert the JSON array to a map of 'bottlerocket-' prefixed names to unprefixed package names
+  # for search and replace in the installed application inventory.
+  jq \
+    --compact-output \
+    'map({ (.|tostring): (.|sub("^bottlerocket-";""))}) | add' <<<"${CORE_KIT_LIST}" \
+    > core-kit-replacements.json
+
+  # For any packages in the installed app inventory that exist in the core kit, replace
+  # the version with the core kit's version, and replace the name with the unprefixed name.
+  INVENTORY_DATA="$(jq \
+    --argfile replace core-kit-replacements.json \
+    --arg CORE_KIT_VERSION "${CORE_KIT_VERSION}" \
+    '(.Content[] | select(.Name | $replace[.] != null) | .Version) = $CORE_KIT_VERSION |
+     .Content[].Name |= (if $replace[.] then $replace[.] else . end)' \
+    <<<"${INVENTORY_DATA}")"
+fi
 
 # Verify we successfully inventoried some RPMs.
 INVENTORY_COUNT="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"

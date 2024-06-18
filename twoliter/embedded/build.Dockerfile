@@ -313,6 +313,7 @@ RUN --mount=target=/host \
     /host/build/tools/rpm2img \
       --package-dir=/local/rpms \
       --output-dir=/local/output \
+      --external-kits-path="/host/build/external-kits" \
       --output-fmt="${IMAGE_FORMAT}" \
       --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
       --data-image-size-gib="${DATA_IMAGE_SIZE_GIB}" \
