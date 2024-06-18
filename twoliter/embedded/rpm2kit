@@ -35,7 +35,7 @@ for pkg in ${PACKAGES} ; do
     -exec install -p -m 0644 -t "${KIT_DIR}/Packages/${pkg}" {} \+
   # Set a reproducible timestamp on the directory, so that the tar archive for
   # this package will be the same if the package has not otherwise changed.
-  refpkg="$(ls -1 "${PACKAGES_DIR}/${pkg}" | head -n1)"
+  refpkg="$(ls -1 "${PACKAGES_DIR}/${pkg}" | awk 'NR==1 {pkg = $0} END {print pkg}')"
   touch -r "${PACKAGES_DIR}/${pkg}/${refpkg}" "${KIT_DIR}/Packages/${pkg}"
 done
 
