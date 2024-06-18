@@ -2148,6 +2148,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oci-cli-wrapper"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "snafu 0.8.2",
+ "tar",
+ "tempfile",
+ "tokio",
+ "which",
+]
+
+[[package]]
 name = "olpc-cjson"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3792,6 +3806,7 @@ version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-recursion",
+ "async-trait",
  "async-walkdir",
  "base64 0.22.0",
  "buildsys",
@@ -3805,6 +3820,7 @@ dependencies = [
  "hex",
  "log",
  "non-empty-string",
+ "oci-cli-wrapper",
  "olpc-cjson",
  "pubsys",
  "pubsys-setup",
@@ -3819,6 +3835,7 @@ dependencies = [
  "toml",
  "tuftool",
  "uuid",
+ "which",
 ]
 
 [[package]]
@@ -4071,6 +4088,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 
 [[package]]
+name = "which"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8211e4f58a2b2805adfbefbc07bab82958fc91e3836339b1ab7ae32465dce0d7"
+dependencies = [
+ "either",
+ "home",
+ "rustix",
+ "winsafe",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4260,6 +4289,12 @@ dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "xattr"

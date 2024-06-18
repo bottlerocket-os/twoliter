@@ -5,6 +5,7 @@ members = [
     "tools/bottlerocket-variant",
     "tools/buildsys",
     "tools/buildsys-config",
+    "tools/oci-cli-wrapper",
     "tools/parse-datetime",
     "tools/pubsys",
     "tools/pubsys-config",
