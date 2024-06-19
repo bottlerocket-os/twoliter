@@ -513,44 +513,43 @@ impl Lock {
     async fn find_kit(vendor: &Vendor, image: &LockedImage) -> Result<ImageMetadata> {
         let manifest_list: ManifestListView = serde_json::from_slice(image.manifest.as_slice())
             .context("failed to deserialize manifest list")?;
-        let mut encoded_metadata: Option<String> = None;
-        for manifest in manifest_list.manifests.iter() {
-            let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
-
-            // Now we want to fetch the metadata from the OCI image config
-            let label_bytes = docker!(
-                [
-                    "image",
-                    "inspect",
-                    image_uri.as_str(),
-                    "--format",
-                    "\"{{ json .Config.Labels }}\"",
-                ],
-                format!(
-                    "failed to fetch kit metadata for {} with digest {}",
-                    image.to_string(),
-                    manifest.digest
-                )
-            );
-            let label_str = String::from_utf8_lossy(label_bytes.as_slice()).to_string();
-            let label_str = label_str.trim().trim_matches('"');
-            let labels: HashMap<String, String> = serde_json::from_str(label_str).context(
-                format!("could not deserialize labels on the image for {}", image),
-            )?;
-            let encoded = labels
-                .get("dev.bottlerocket.kit.v1")
-                .context("no metadata stored on image, this image appears to not be a kit")?;
-            if let Some(metadata) = encoded_metadata.as_ref() {
-                ensure!(
-                    encoded == metadata,
-                    "metadata does match between images in manifest list"
-                );
-            } else {
-                encoded_metadata = Some(encoded.clone());
-            }
-        }
-        let encoded =
-            encoded_metadata.context(format!("could not find metadata for kit {}", image))?;
+        let manifest = manifest_list.manifests.first().context(format!(
+            "kit image at {} does not have an architecture image",
+            image.source
+        ))?;
+        let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
+        docker_noisy!(
+            ["pull", image_uri.as_str()],
+            format!(
+                "failed to pull image for {} with digest {}",
+                image.to_string(),
+                manifest.digest
+            )
+        );
+        // Now we want to fetch the metadata from the OCI image config
+        let label_bytes = docker!(
+            [
+                "image",
+                "inspect",
+                image_uri.as_str(),
+                "--format",
+                "\"{{ json .Config.Labels }}\"",
+            ],
+            format!(
+                "failed to fetch kit metadata for {} with digest {}",
+                image.to_string(),
+                manifest.digest
+            )
+        );
+        let label_str = String::from_utf8_lossy(label_bytes.as_slice()).to_string();
+        let label_str = label_str.trim().trim_matches('"');
+        let labels: HashMap<String, String> = serde_json::from_str(label_str).context(format!(
+            "could not deserialize labels on the image for {}",
+            image
+        ))?;
+        let encoded = labels
+            .get("dev.bottlerocket.kit.v1")
+            .context("no metadata stored on image, this image appears to not be a kit")?;
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(encoded.as_str())
             .context("malformed kit metadata detected")?;
