@@ -1760,10 +1760,12 @@ dependencies = [
 [tasks.purge-go-vendor]
 script_runner = "bash"
 script = [
-    '''
-    chmod -R 755 ${GO_MOD_CACHE}
-    rm -rf ${GO_MOD_CACHE}
-    '''
+'''
+if [ -d "${GO_MOD_CACHE}" ] ; then
+  chmod -R 755 "${GO_MOD_CACHE}"
+  rm -rf "${GO_MOD_CACHE}"
+fi
+'''
 ]
 
 # This task will remove all the cached Rust code found in the cargo home dir
