@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.1...HEAD
+
+## [0.4.1] - 2024-06-19
+
+### Changed
+
+- Stop printing `ManifestParse` during builds ([#300])
+- Revert application-inventory: use RPM's Version and Release, set Epoch ([#301])
+- Fix issue in rpm2kit by using awk instead of head ([#303])
+- Application-inventory: use core-kit version for packages sourced from the bottlerocket-core-kit ([#304])
+- Add a pull in Twoliter to allow inspecting the image config ([#306])
+- Fix purge go-vendor task in Twoliter ([#307])
+
+[#300]: https://github.com/bottlerocket-os/twoliter/pull/300
+[#301]: https://github.com/bottlerocket-os/twoliter/pull/301
+[#303]: https://github.com/bottlerocket-os/twoliter/pull/303
+[#304]: https://github.com/bottlerocket-os/twoliter/pull/304
+[#306]: https://github.com/bottlerocket-os/twoliter/pull/306
+[#307]: https://github.com/bottlerocket-os/twoliter/pull/307
+
+[0.4.1]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.0...v0.4.1
 
 ## [0.4.0] - 2024-06-17
 
@@ -18,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [#297]: https://github.com/bottlerocket-os/twoliter/pull/297
 [#298]: https://github.com/bottlerocket-os/twoliter/pull/298
+
+[0.4.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.3.0...v0.4.0
 
 ## [0.3.0] - 2024-06-13
 
@@ -36,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#270]: https://github.com/bottlerocket-os/twoliter/pull/270
 [#271]: https://github.com/bottlerocket-os/twoliter/pull/271
 [#272]: https://github.com/bottlerocket-os/twoliter/pull/272
+
+[0.3.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.2.0...v0.3.0
 
 ### Changed
 
@@ -101,6 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#232]: https://github.com/bottlerocket-os/twoliter/pull/232
 [#236]: https://github.com/bottlerocket-os/twoliter/pull/236
 [#243]: https://github.com/bottlerocket-os/twoliter/pull/243
+
+[0.2.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.1.1...v0.2.0
 
 ### Changed
 
