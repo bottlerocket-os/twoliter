@@ -158,15 +158,10 @@ INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
 # Inventory installed packages.
-# Values specified as %{field-name} are retrieved from the package's corresponding 
-# "field-name:" in the RPM. Note the "Epoch" field is retrieved - its value is set
-# in build.Dockerfile. Epoch is used to trump breaking changes that may occur when
-# the versioning scheme for a package changes between releases - for example, if a
-# newer release of a package were to have a lower "Release". 
 INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"Publisher\":\"Bottlerocket\"\
-,\"Version\":\"${VERSION_ID}\"\
-,\"Release\":\"${BUILD_ID}\"\
+,\"Version\":\"%{Version}\"\
+,\"Release\":\"%{Release}\"\
 ,\"InstalledTime\":\"${INSTALL_TIME}\"\
 ,\"ApplicationType\":\"%{GROUP}\"\
 ,\"Architecture\":\"%{ARCH}\"\
@@ -190,6 +185,12 @@ CORE_KIT_VENDOR=$(jq --raw-output '.kit[]|select(.name == "bottlerocket-core-kit
 CORE_KIT_PATH="${EXTERNAL_KITS_PATH}/${CORE_KIT_VENDOR}/bottlerocket-core-kit/${ARCH}"
 
 if [[ -n "${CORE_KIT_VERSION}" && -n "${CORE_KIT_VENDOR}" ]]; then
+  # Query the bottlerocket-core-kit repo for a single package's Release in order
+  # to extract the commit that built the core kit.
+  CORE_KIT_GIT_SHA="$(dnf --repofrompath \
+    core-kit,file://"${CORE_KIT_PATH}" \
+    --repo=core-kit repoquery \
+    --queryformat '%{Release}' 2>/dev/null | awk '/^1/{print $1}' | cut -d '.' -f 3)"
   # Query the bottlerocket-core-kit repo of RPMs for all package names.
   CORE_KIT_INVENTORY_QUERY="%{NAME}"
   # shellcheck disable=SC2312 # Array is validated elsewhere.
@@ -217,7 +218,9 @@ if [[ -n "${CORE_KIT_VERSION}" && -n "${CORE_KIT_VENDOR}" ]]; then
   INVENTORY_DATA="$(jq \
     --argfile replace core-kit-replacements.json \
     --arg CORE_KIT_VERSION "${CORE_KIT_VERSION}" \
+    --arg CORE_KIT_GIT_SHA "${CORE_KIT_GIT_SHA}" \
     '(.Content[] | select(.Name | $replace[.] != null) | .Version) = $CORE_KIT_VERSION |
+     (.Content[] | select(.Name | $replace[.] != null) | .Release) = $CORE_KIT_GIT_SHA |
      .Content[].Name |= (if $replace[.] then $replace[.] else . end)' \
     <<<"${INVENTORY_DATA}")"
 fi
