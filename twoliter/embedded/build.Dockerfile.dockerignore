@@ -1,17 +1,16 @@
-/.git
-/.gomodcache
-/build/*
-!/build/rpms/
-/build/rpms/*
-!/build/rpms/*.rpm
-/build/rpms/*-debuginfo-*.rpm
-/build/rpms/*-debugsource-*.rpm
-!/build/rpms/*/*.rpm
-/build/rpms/*/*-debuginfo-*.rpm
-/build/rpms/*/*-debugsource-*.rpm
-!/build/kits/
-!/build/external-kits/
-!/build/tools/*
-**/target/*
-/sbkeys
-/tests
+# Exclude everything from the build context by default.
+*
+
+# Include the specific files expected by the Dockerfile.
+!/build/tools
+!/packages/*/*.spec
+!/Twoliter.toml
+
+# Include .cargo to support offline builds with cached crates.
+!/.cargo
+
+# Include everything under sources.
+!/sources
+
+# Exclude "target" directories everywhere.
+*/target/*
