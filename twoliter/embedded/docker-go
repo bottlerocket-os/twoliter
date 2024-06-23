@@ -51,12 +51,12 @@ parse_args() {
   required_arg "--command" "${COMMAND}"
 }
 
-# We need to mount the ../.. parent of GO_MOD_CACHE
-GOPATH=$(cd "${GO_MOD_CACHE}/../.." && pwd)
-
 DOCKER_RUN_ARGS="--network=host"
 
 parse_args "${@}"
+
+# We need to mount the ../.. parent of GO_MOD_CACHE
+GOPATH=$(cd "${GO_MOD_CACHE}/../.." && pwd)
 
 # Pass through relevant Go variables, from the config or environment.
 go_env=( )
