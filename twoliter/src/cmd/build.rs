@@ -69,7 +69,7 @@ impl BuildKit {
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_KIT", &self.kit)
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
-            .env("GO_MODULES", project.find_go_modules().await?.join(" "))
+            .env("GO_MODULES", project.find_go_modules_env().await?.join(" "))
             .env(
                 "BUILDSYS_UPSTREAM_SOURCE_FALLBACK",
                 self.upstream_source_fallback.to_string(),
@@ -141,7 +141,7 @@ impl BuildVariant {
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
-            .env("GO_MODULES", project.find_go_modules().await?.join(" "))
+            .env("GO_MODULES", project.find_go_modules_env().await?.join(" "))
             .env(
                 "BUILDSYS_UPSTREAM_SOURCE_FALLBACK",
                 self.upstream_source_fallback.to_string(),

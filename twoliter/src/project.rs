@@ -153,6 +153,26 @@ impl Project {
         }
     }
 
+    fn get_env_go_modules() -> Option<Vec<String>> {
+        std::env::var("GO_MODULES").ok().map(|env_go_modules| {
+            env_go_modules
+                .split_whitespace()
+                .map(str::to_string)
+                .collect()
+        })
+    }
+
+    /// Returns a list of the names of Go modules by searching the `sources` directory for `go.mod`
+    /// files.
+    ///
+    /// If "GO_MODULES" environment variable is set, uses those modules instead.
+    pub(crate) async fn find_go_modules_env(&self) -> Result<Vec<String>> {
+        match Self::get_env_go_modules() {
+            Some(go_modules) => Ok(go_modules),
+            None => self.find_go_modules().await,
+        }
+    }
+
     /// Returns a list of the names of Go modules by searching the `sources` directory for `go.mod`
     /// files.
     pub(crate) async fn find_go_modules(&self) -> Result<Vec<String>> {
