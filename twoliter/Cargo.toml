@@ -36,10 +36,12 @@ uuid = { version = "1", features = [ "v4" ] }
 
 # Binary dependencies. These are binaries that we want to embed in the Twoliter binary.
 buildsys = { version = "0.1.0", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }
+pipesys = { version = "0.1.0", artifact = [ "bin:pipesys" ], path = "../tools/pipesys" }
 pubsys = { version = "0.1.0", artifact = [ "bin:pubsys" ], path = "../tools/pubsys" }
 pubsys-setup = { version = "0.1.0", artifact = [ "bin:pubsys-setup" ], path = "../tools/pubsys-setup" }
 testsys = { version = "0.1.0", artifact = [ "bin:testsys" ], path = "../tools/testsys" }
 tuftool = { version = "0.10", artifact = [ "bin:tuftool" ] }
+unplug = { version = "0.1.0", artifact = [ "bin:unplug" ], path = "../tools/unplug" }
 
 [build-dependencies]
 bytes = "1"

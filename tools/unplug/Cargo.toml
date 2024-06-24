@@ -1,0 +1,14 @@
+[package]
+name = "unplug"
+version = "0.1.0"
+authors = ["Ben Cressey <bcressey@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0.75"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.148"
+seccompiler = "0.4.0"

@@ -48,9 +48,8 @@ sanity_checks \
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
 mkdir -p "${OUTPUT_DIR}"
 
-# Clean up working directory to reduce size of layer.
+# Clean up working directories to reduce size of layer.
 cleanup() {
-  rm -f "${PACKAGE_DIR}"/*.rpm
   rm -rf /tmp/*
 }
 trap 'cleanup' EXIT

@@ -17,6 +17,7 @@ use duct::cmd;
 use error::Result;
 use lazy_static::lazy_static;
 use nonzero_ext::nonzero;
+use pipesys::server::Server as PipesysServer;
 use rand::Rng;
 use regex::Regex;
 use sha2::{Digest, Sha512};
@@ -25,6 +26,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs::{self, read_dir, File};
 use std::num::NonZeroU16;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use walkdir::{DirEntry, WalkDir};
@@ -88,6 +90,14 @@ lazy_static! {
 
 static DOCKER_BUILD_MAX_ATTEMPTS: NonZeroU16 = nonzero!(10u16);
 
+// Expected UID for privileged and unprivileged processes inside the build container.
+const ROOT_UID: u32 = 0;
+lazy_static! {
+    static ref BUILDER_UID: u32 = std::fs::metadata("/proc/self/comm")
+        .map(|m| m.uid())
+        .expect("Failed to obtain current UID");
+}
+
 enum OutputCleanup {
     BeforeBuild,
     None,
@@ -99,6 +109,7 @@ struct CommonBuildArgs {
     nocache: String,
     token: String,
     cleanup: OutputCleanup,
+    output_socket: String,
 }
 
 impl CommonBuildArgs {
@@ -108,13 +119,14 @@ impl CommonBuildArgs {
         arch: SupportedArch,
         cleanup: OutputCleanup,
     ) -> Self {
-        let mut d = Sha512::new();
-        d.update(root.as_ref().display().to_string());
-        let digest = hex::encode(d.finalize());
-        let token = digest[..12].to_string();
+        let token = token(&root);
 
         // Avoid using a cached layer from a previous build.
-        let nocache = rand::thread_rng().gen::<u32>().to_string();
+        let nocache = rand::thread_rng().gen::<u128>().to_string();
+
+        // Generate a unique address for the socket that sends the output directory file
+        // descriptor.
+        let output_socket = format!("buildsys-output-{token}-{nocache}");
 
         Self {
             arch,
@@ -122,6 +134,7 @@ impl CommonBuildArgs {
             nocache,
             token,
             cleanup,
+            output_socket,
         }
     }
 }
@@ -138,8 +151,6 @@ struct PackageBuildArgs {
 impl KitBuildArgs {
     fn build_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        args.push("--network".into());
-        args.push("none".into());
         args.build_arg("KIT", &self.kit);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
         args.build_arg("BUILD_ID", &self.version_build);
@@ -164,8 +175,6 @@ struct KitBuildArgs {
 impl crate::builder::PackageBuildArgs {
     fn build_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        args.push("--network".into());
-        args.push("none".into());
         args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
         args.build_arg(
             "EXTERNAL_KIT_DEPENDENCIES",
@@ -206,8 +215,6 @@ struct VariantBuildArgs {
 impl VariantBuildArgs {
     fn build_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        args.push("--network".into());
-        args.push("host".into());
         args.build_arg(
             "DATA_IMAGE_PUBLISH_SIZE_GIB",
             self.data_image_publish_size_gib.to_string(),
@@ -496,7 +503,7 @@ impl DockerBuild {
             image_layout.publish_image_sizes_gib();
 
         Ok(Self {
-            dockerfile: args.common.tools_dir.join("repack.Dockerfile"),
+            dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
             target: "repack".to_string(),
             tag: append_token(
@@ -568,31 +575,72 @@ impl DockerBuild {
             "build {context} \
             --target {target} \
             --tag {tag} \
-            --file {dockerfile}",
+            --network host \
+            --file {dockerfile} \
+            --no-cache-filter rpmbuild,kitbuild,repobuild,imgbuild,migrationbuild,kmodkitbuild,imgrepack \
+            --build-arg BYPASS_SOCKET={tag}-bypass \
+            --build-arg BUILDER_UID={uid}",
             context = self.context.display(),
             dockerfile = self.dockerfile.display(),
             target = self.target,
             tag = self.tag,
+            uid = *BUILDER_UID,
         )
         .split_string();
 
         build.extend(self.build_args());
         build.extend(self.secrets_args.clone());
 
-        let create = format!("create --name {} {} true", self.tag, self.tag).split_string();
-        let cp = format!("cp {}:/output/. {}", self.tag, marker_dir.display()).split_string();
-        let rm = format!("rm --force {}", self.tag).split_string();
-        let rmi = format!("rmi --force {}", self.tag).split_string();
+        // Run a container with the project's root as a read-only volume mount, so that pipesys can
+        // serve a read-only file descriptor that's safe to pass into builds.
+        let run_bypass = format!(
+            "run \
+            --name {tag}-bypass \
+            --rm \
+            --init \
+            --net host \
+            --pid host \
+            -u {uid} \
+            -v {root}:/bypass:ro \
+            -v {root}/build/tools/pipesys:/usr/local/bin/pipesys:ro \
+            {sdk} \
+            pipesys serve --socket {tag}-bypass --client-uid {uid} --path /bypass",
+            tag = self.tag,
+            root = self.root_dir.display(),
+            sdk = self.common_build_args.sdk,
+            uid = ROOT_UID,
+        )
+        .split_string();
 
-        // Clean up the stopped container if it exists.
-        let _ = docker(&rm, Retry::No);
+        let rm_image = format!("rmi --force {}", self.tag).split_string();
+        let rm_bypass = format!("rm --force {}-bypass", self.tag).split_string();
 
         // Clean up the previous image if it exists.
-        let _ = docker(&rmi, Retry::No);
+        let _ = docker(&rm_image, Retry::No);
+
+        // Clean up the stopped bypass container if it exists.
+        let _ = docker(&rm_bypass, Retry::No);
+
+        let runtime = tokio::runtime::Runtime::new().context(error::AsyncRuntimeSnafu)?;
+
+        // Spawn a background task to share the file descriptors for the output directory.
+        let output_socket = self.common_build_args.output_socket.clone();
+        let output_dir = marker_dir.clone();
+        runtime.spawn(async move {
+            PipesysServer::for_path(output_socket, ROOT_UID, &output_dir)
+                .serve()
+                .await
+        });
+
+        // Spawn a background task for the bypass container that will serve the project root file
+        // descriptor.
+        runtime.spawn(async move {
+            let _ = docker(&run_bypass, Retry::No);
+        });
 
         // Build the image, which builds the artifacts we want.
         // Work around transient, known failure cases with Docker.
-        docker(
+        let build_result = docker(
             &build,
             Retry::Yes {
                 attempts: DOCKER_BUILD_MAX_ATTEMPTS,
@@ -603,19 +651,19 @@ impl DockerBuild {
                     &*CREATEREPO_C_READ_HEADER_ERROR,
                 ],
             },
-        )?;
+        );
 
-        // Create a stopped container so we can copy artifacts out.
-        docker(&create, Retry::No)?;
+        // Clean up our bypass container.
+        let _ = docker(&rm_bypass, Retry::No);
 
-        // Copy artifacts into our output directory.
-        docker(&cp, Retry::No)?;
+        // Stop the runtime and the background threads.
+        runtime.shutdown_background();
 
-        // Clean up our stopped container after copying artifacts out.
-        docker(&rm, Retry::No)?;
+        // Check whether the build succeeded before continuing.
+        build_result?;
 
         // Clean up our image now that we're done.
-        docker(&rmi, Retry::No)?;
+        docker(&rm_image, Retry::No)?;
 
         // Copy artifacts to the expected directory and write markers to track them.
         copy_build_files(&marker_dir, &self.artifacts_dirs[0])?;
@@ -634,8 +682,8 @@ impl DockerBuild {
         args.build_arg("GOARCH", self.common_build_args.arch.goarch());
         args.build_arg("SDK", &self.common_build_args.sdk);
         args.build_arg("NOCACHE", &self.common_build_args.nocache);
-        // Avoid using a cached layer from a concurrent build in another checkout.
         args.build_arg("TOKEN", &self.common_build_args.token);
+        args.build_arg("OUTPUT_SOCKET", &self.common_build_args.output_socket);
         args
     }
 }
@@ -920,7 +968,6 @@ where
 
 /// Compute a per-checkout suffix for the tag to avoid collisions.
 fn token(p: impl AsRef<Path>) -> String {
-    // Compute a per-checkout prefix for the tag to avoid collisions.
     let mut d = Sha512::new();
     d.update(p.as_ref().display().to_string());
     let digest = hex::encode(d.finalize());
