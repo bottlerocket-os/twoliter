@@ -32,12 +32,6 @@ Provides: %{_cross_os}image-feature(systemd-networkd)
 Provides: %{_cross_os}image-feature(no-systemd-networkd)
 %endif
 
-%if %{with unified_cgroup_hierarchy}
-Provides: %{_cross_os}image-feature(unified-cgroup-hierarchy)
-%else
-Provides: %{_cross_os}image-feature(no-unified-cgroup-hierarchy)
-%endif
-
 %if %{with xfs_data_partition}
 Provides: %{_cross_os}image-feature(xfs-data-partition)
 %else

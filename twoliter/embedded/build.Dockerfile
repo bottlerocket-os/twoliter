@@ -202,7 +202,6 @@ ARG VARIANT_FLAVOR
 ARG GRUB_SET_PRIVATE_VAR
 ARG UEFI_SECURE_BOOT
 ARG SYSTEMD_NETWORKD
-ARG UNIFIED_CGROUP_HIERARCHY
 ARG XFS_DATA_PARTITION
 ARG FIPS
 
@@ -225,7 +224,6 @@ RUN \
    && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
