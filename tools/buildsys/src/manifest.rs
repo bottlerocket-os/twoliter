@@ -170,7 +170,24 @@ kernel-parameters = [
 ]
 
 `image-features` is a map of image feature flags, which can be enabled or disabled. This allows us
-to conditionally use or exclude certain firmware-level features in variants.
+to conditionally use or exclude certain image-level features in variants.
+
+`in-place-updates` means that the disk layout for the variant will support in-place updates, which
+requires a parallel set of partition table entries to use as the active and passive banks. For
+backwards compatibility, this feature is enabled by default unless explicitly disabled.
+```ignore
+[package.metadata.build-variant.image-features]
+in-place-updates = true
+```
+
+`host-containers` means that software support for host and bootstrap containers will be included in
+the variant. This provides a way to extend the host OS with additional software packaged as a
+container, which can be run on boot or as a background service. For backwards compatibility, this
+feature is enabled by default unless explicitly disabled.
+```ignore
+[package.metadata.build-variant.image-features]
+host-containers = true
+```
 
 `grub-set-private-var` means that the grub image for the current variant includes the command to
 find the BOTTLEROCKET_PRIVATE partition and set the appropriate `$private` variable for the grub
@@ -461,11 +478,19 @@ impl ManifestInfo {
 
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
-        self.build_variant().and_then(|b| {
-            b.image_features
-                .as_ref()
-                .map(|m| m.iter().filter(|(_k, v)| **v).map(|(k, _v)| *k).collect())
-        })
+        let variant = self.build_variant()?;
+        let mut features =
+            HashSet::from([ImageFeature::InPlaceUpdates, ImageFeature::HostContainers]);
+        if let Some(image_features) = &variant.image_features {
+            for (feature, enabled) in image_features.iter() {
+                if *enabled {
+                    features.insert(*feature);
+                } else {
+                    features.remove(feature);
+                }
+            }
+        }
+        Some(features)
     }
 
     /// Returns the type of build the manifest is requesting.
@@ -759,6 +784,8 @@ pub enum ImageFeature {
     XfsDataPartition,
     UefiSecureBoot,
     Fips,
+    InPlaceUpdates,
+    HostContainers,
 }
 
 impl TryFrom<String> for ImageFeature {
@@ -770,6 +797,8 @@ impl TryFrom<String> for ImageFeature {
             "xfs-data-partition" => Ok(ImageFeature::XfsDataPartition),
             "uefi-secure-boot" => Ok(ImageFeature::UefiSecureBoot),
             "fips" => Ok(ImageFeature::Fips),
+            "in-place-updates" => Ok(ImageFeature::InPlaceUpdates),
+            "host-containers" => Ok(ImageFeature::HostContainers),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
@@ -783,6 +812,8 @@ impl fmt::Display for ImageFeature {
             ImageFeature::XfsDataPartition => write!(f, "XFS_DATA_PARTITION"),
             ImageFeature::UefiSecureBoot => write!(f, "UEFI_SECURE_BOOT"),
             ImageFeature::Fips => write!(f, "FIPS"),
+            ImageFeature::InPlaceUpdates => write!(f, "IN_PLACE_UPDATES"),
+            ImageFeature::HostContainers => write!(f, "HOST_CONTAINERS"),
         }
     }
 }
