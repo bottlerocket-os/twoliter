@@ -187,16 +187,6 @@ flag is meant primarily for development, and will be removed when development ha
 systemd-networkd = true
 ```
 
-`unified-cgroup-hierarchy` makes systemd set up a unified cgroup hierarchy on
-boot, i.e. the host will use cgroup v2 by default. This feature flag allows
-old variants to continue booting with cgroup v1 and new variants to move to
-cgroup v2, while users will still be able to override the default via command
-line arguments set in the boot configuration.
-```ignore
-[package.metadata.build-variant.image-features]
-unified-cgroup-hierarchy = true
-```
-
 `xfs-data-partition` changes the filesystem for the data partition from ext4 to xfs. The
 default will remain ext4 and xfs is opt-in.
 
@@ -766,7 +756,6 @@ impl SupportedArch {
 pub enum ImageFeature {
     GrubSetPrivateVar,
     SystemdNetworkd,
-    UnifiedCgroupHierarchy,
     XfsDataPartition,
     UefiSecureBoot,
     Fips,
@@ -778,7 +767,6 @@ impl TryFrom<String> for ImageFeature {
         match s.as_str() {
             "grub-set-private-var" => Ok(ImageFeature::GrubSetPrivateVar),
             "systemd-networkd" => Ok(ImageFeature::SystemdNetworkd),
-            "unified-cgroup-hierarchy" => Ok(ImageFeature::UnifiedCgroupHierarchy),
             "xfs-data-partition" => Ok(ImageFeature::XfsDataPartition),
             "uefi-secure-boot" => Ok(ImageFeature::UefiSecureBoot),
             "fips" => Ok(ImageFeature::Fips),
@@ -792,7 +780,6 @@ impl fmt::Display for ImageFeature {
         match self {
             ImageFeature::GrubSetPrivateVar => write!(f, "GRUB_SET_PRIVATE_VAR"),
             ImageFeature::SystemdNetworkd => write!(f, "SYSTEMD_NETWORKD"),
-            ImageFeature::UnifiedCgroupHierarchy => write!(f, "UNIFIED_CGROUP_HIERARCHY"),
             ImageFeature::XfsDataPartition => write!(f, "XFS_DATA_PARTITION"),
             ImageFeature::UefiSecureBoot => write!(f, "UEFI_SECURE_BOOT"),
             ImageFeature::Fips => write!(f, "FIPS"),
