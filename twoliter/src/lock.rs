@@ -4,6 +4,7 @@ use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use base64::Engine;
 use buildsys_config::DockerArchitecture;
+use oci_cli_wrapper::{image_tool, ImageTool};
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
 use semver::Version;
 use serde::de::Error;
@@ -16,40 +17,11 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::mem::take;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use tar::Archive as TarArchive;
-use tempfile::TempDir;
 use tokio::fs::read_to_string;
-use tokio::process::Command;
 
 const TWOLITER_LOCK: &str = "Twoliter.lock";
-
-macro_rules! docker {
-    ($arg: expr, $error_msg: expr) => {{
-        let output = Command::new("docker")
-            .args($arg)
-            .output()
-            .await
-            .context($error_msg)?;
-        ensure!(
-            output.status.success(),
-            "docker failed to run operation: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
-    }};
-}
-
-macro_rules! docker_noisy {
-    ($arg: expr, $error_msg: expr) => {{
-        Command::new("docker")
-            .args($arg)
-            .spawn()
-            .context($error_msg)?
-            .wait()
-            .await
-            .context("docker failed to run operation")?;
-    }};
-}
 
 /// Represents a locked dependency on an image
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -69,12 +41,13 @@ pub(crate) struct LockedImage {
 }
 
 impl LockedImage {
-    pub async fn new(vendor: &Vendor, image: &Image) -> Result<Self> {
+    pub async fn new(
+        image_tool: Rc<dyn ImageTool>,
+        vendor: &Vendor,
+        image: &Image,
+    ) -> Result<Self> {
         let source = format!("{}/{}:v{}", vendor.registry, image.name, image.version);
-        let manifest_bytes = docker!(
-            ["manifest", "inspect", source.as_str()],
-            format!("failed to inspect manifest of resource at {}", source)
-        );
+        let manifest_bytes = image_tool.as_ref().get_manifest(source.as_str()).await?;
 
         // We calculate a 'digest' of the manifest to use as our unique id
         let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
@@ -201,39 +174,30 @@ struct OCIArchive {
 }
 
 impl OCIArchive {
-    fn new<P>(image: &LockedImage, digest: &str, cache_dir: P) -> Self
+    fn new<P>(image: &LockedImage, digest: &str, cache_dir: P) -> Result<Self>
     where
         P: AsRef<Path>,
     {
-        Self {
+        Ok(Self {
             image: image.clone(),
             digest: digest.into(),
             cache_dir: cache_dir.as_ref().to_path_buf(),
-        }
+        })
     }
 
     fn archive_path(&self) -> PathBuf {
         self.cache_dir.join(self.digest.replace(':', "-"))
     }
 
-    async fn pull_image(&self) -> Result<()> {
+    async fn pull_image(&self, image_tool: Rc<dyn ImageTool>) -> Result<()> {
         let digest_uri = self.image.digest_uri(self.digest.as_str());
         let oci_archive_path = self.archive_path();
         if !oci_archive_path.exists() {
-            let oci_archive_str = oci_archive_path.to_string_lossy();
-            // First use docker pull to let the daemon cache individual blobs
-            docker_noisy!(
-                ["pull", digest_uri.as_str()],
-                format!("failed to fetch kit from {}", digest_uri)
-            );
-            // Save the image out to disk
-            docker_noisy!(
-                ["save", digest_uri.as_str(), "-o", oci_archive_str.as_ref()],
-                format!(
-                    "failed to save to disk from {} to {}",
-                    digest_uri, oci_archive_str
-                )
-            );
+            create_dir_all(&oci_archive_path).await?;
+            image_tool
+                .as_ref()
+                .pull_oci_image(oci_archive_path.as_path(), digest_uri.as_str())
+                .await?;
         }
         Ok(())
     }
@@ -256,20 +220,7 @@ impl OCIArchive {
 
         remove_dir_all(path).await?;
         create_dir_all(path).await?;
-        let oci_archive_path = self.archive_path();
-        let mut oci_file = File::open(&oci_archive_path).context(format!(
-            "failed to open oci archive at {}",
-            oci_archive_path.display()
-        ))?;
-        let mut oci_archive = TarArchive::new(&mut oci_file);
-        let temp_dir = TempDir::new_in(path).context(format!(
-            "failed to create temporary directory inside {}",
-            path.display()
-        ))?;
-        oci_archive
-            .unpack(temp_dir.path())
-            .context("failed to unpack oci image")?;
-        let index_bytes = read(temp_dir.path().join("index.json")).await?;
+        let index_bytes = read(self.archive_path().join("index.json")).await?;
         let index: IndexView = serde_json::from_slice(index_bytes.as_slice())
             .context("failed to deserialize oci image index")?;
 
@@ -280,7 +231,7 @@ impl OCIArchive {
             .context("empty oci image")?
             .digest
             .replace(':', "/");
-        let manifest_bytes = read(temp_dir.path().join(format!("blobs/{digest}")))
+        let manifest_bytes = read(self.archive_path().join(format!("blobs/{digest}")))
             .await
             .context("failed to read manifest blob")?;
         let manifest_layout: ManifestLayoutView = serde_json::from_slice(manifest_bytes.as_slice())
@@ -289,7 +240,7 @@ impl OCIArchive {
         // Extract each layer into the target directory
         for layer in manifest_layout.layers {
             let digest = layer.digest.to_string().replace(':', "/");
-            let layer_blob = File::open(temp_dir.path().join(format!("blobs/{digest}")))
+            let layer_blob = File::open(self.archive_path().join(format!("blobs/{digest}")))
                 .context("failed to read layer of oci image")?;
             let mut layer_archive = TarArchive::new(layer_blob);
             layer_archive
@@ -362,14 +313,20 @@ impl Lock {
 
     /// Fetches all external kits defined in a Twoliter.lock to the build directory
     pub(crate) async fn fetch(&self, project: &Project, arch: &str) -> Result<()> {
+        let image_tool = image_tool()?;
         let target_dir = project.external_kits_dir();
         create_dir_all(&target_dir).await.context(format!(
             "failed to create external-kits directory at {}",
             target_dir.display()
         ))?;
         for image in self.kit.iter() {
-            self.extract_kit(&project.external_kits_dir(), image, arch)
-                .await?;
+            self.extract_kit(
+                image_tool.clone(),
+                &project.external_kits_dir(),
+                image,
+                arch,
+            )
+            .await?;
         }
         let mut kit_list = Vec::new();
         let mut ser =
@@ -399,11 +356,13 @@ impl Lock {
         Ok(())
     }
 
-    async fn get_manifest(&self, image: &LockedImage, arch: &str) -> Result<ManifestView> {
-        let manifest_bytes = docker!(
-            ["manifest", "inspect", image.source.as_str()],
-            format!("failed to find a kit {}", image.to_string())
-        );
+    async fn get_manifest(
+        &self,
+        image_tool: Rc<dyn ImageTool>,
+        image: &LockedImage,
+        arch: &str,
+    ) -> Result<ManifestView> {
+        let manifest_bytes = image_tool.get_manifest(image.source.as_str()).await?;
         let manifest_list: ManifestListView = serde_json::from_slice(manifest_bytes.as_slice())
             .context("failed to deserialize manifest list")?;
         let docker_arch = DockerArchitecture::try_from(arch)?;
@@ -418,7 +377,13 @@ impl Lock {
             ))
     }
 
-    async fn extract_kit<P>(&self, path: P, image: &LockedImage, arch: &str) -> Result<()>
+    async fn extract_kit<P>(
+        &self,
+        image_tool: Rc<dyn ImageTool>,
+        path: P,
+        image: &LockedImage,
+        arch: &str,
+    ) -> Result<()>
     where
         P: AsRef<Path>,
     {
@@ -430,11 +395,11 @@ impl Lock {
         create_dir_all(&cache_path).await?;
 
         // First get the manifest for the specific requested architecture
-        let manifest = self.get_manifest(image, arch).await?;
-        let oci_archive = OCIArchive::new(image, manifest.digest.as_str(), &cache_path);
+        let manifest = self.get_manifest(image_tool.clone(), image, arch).await?;
+        let oci_archive = OCIArchive::new(image, manifest.digest.as_str(), &cache_path)?;
 
         // Checks for the saved image locally, or else pulls and saves it
-        oci_archive.pull_image().await?;
+        oci_archive.pull_image(image_tool.clone()).await?;
 
         // Checks if this archive has already been extracted by checking a digest file
         // otherwise cleans up the path and unpacks the archive
@@ -447,6 +412,7 @@ impl Lock {
         let vendor_table = project.vendor();
         let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
         let mut locked: Vec<LockedImage> = Vec::new();
+        let image_tool = image_tool()?;
 
         let mut remaining: Vec<Image> = project.kits();
         let mut sdk_set: HashSet<Image> = HashSet::new();
@@ -475,8 +441,8 @@ impl Lock {
                     (image.name.clone(), image.vendor.clone()),
                     image.version.clone(),
                 );
-                let locked_image = LockedImage::new(vendor, image).await?;
-                let kit = Self::find_kit(vendor, &locked_image).await?;
+                let locked_image = LockedImage::new(image_tool.clone(), vendor, image).await?;
+                let kit = Self::find_kit(image_tool.clone(), vendor, &locked_image).await?;
                 locked.push(locked_image);
                 sdk_set.insert(kit.sdk);
                 for dep in kit.kits {
@@ -505,51 +471,39 @@ impl Lock {
             schema_version: project.schema_version(),
             release_version: project.release_version().to_string(),
             digest: project.digest()?,
-            sdk: LockedImage::new(vendor, sdk).await?,
+            sdk: LockedImage::new(image_tool, vendor, sdk).await?,
             kit: locked,
         })
     }
 
-    async fn find_kit(vendor: &Vendor, image: &LockedImage) -> Result<ImageMetadata> {
+    async fn find_kit(
+        image_tool: Rc<dyn ImageTool>,
+        vendor: &Vendor,
+        image: &LockedImage,
+    ) -> Result<ImageMetadata> {
         let manifest_list: ManifestListView = serde_json::from_slice(image.manifest.as_slice())
             .context("failed to deserialize manifest list")?;
-        let manifest = manifest_list.manifests.first().context(format!(
-            "kit image at {} does not have an architecture image",
-            image.source
-        ))?;
-        let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
-        docker_noisy!(
-            ["pull", image_uri.as_str()],
-            format!(
-                "failed to pull image for {} with digest {}",
-                image.to_string(),
-                manifest.digest
-            )
-        );
-        // Now we want to fetch the metadata from the OCI image config
-        let label_bytes = docker!(
-            [
-                "image",
-                "inspect",
-                image_uri.as_str(),
-                "--format",
-                "\"{{ json .Config.Labels }}\"",
-            ],
-            format!(
-                "failed to fetch kit metadata for {} with digest {}",
-                image.to_string(),
-                manifest.digest
-            )
-        );
-        let label_str = String::from_utf8_lossy(label_bytes.as_slice()).to_string();
-        let label_str = label_str.trim().trim_matches('"');
-        let labels: HashMap<String, String> = serde_json::from_str(label_str).context(format!(
-            "could not deserialize labels on the image for {}",
-            image
-        ))?;
-        let encoded = labels
-            .get("dev.bottlerocket.kit.v1")
-            .context("no metadata stored on image, this image appears to not be a kit")?;
+        let mut encoded_metadata: Option<String> = None;
+        for manifest in manifest_list.manifests.iter() {
+            let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
+
+            // Now we want to fetch the metadata from the OCI image config
+            let config = image_tool.as_ref().get_config(image_uri.as_str()).await?;
+            let encoded = config
+                .labels
+                .get("dev.bottlerocket.kit.v1")
+                .context("no metadata stored on image, this image appears to not be a kit")?;
+            if let Some(metadata) = encoded_metadata.as_ref() {
+                ensure!(
+                    encoded == metadata,
+                    "metadata does match between images in manifest list"
+                );
+            } else {
+                encoded_metadata = Some(encoded.clone());
+            }
+        }
+        let encoded =
+            encoded_metadata.context(format!("could not find metadata for kit {}", image))?;
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(encoded.as_str())
             .context("malformed kit metadata detected")?;
