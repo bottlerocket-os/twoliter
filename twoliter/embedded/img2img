@@ -7,6 +7,7 @@ OUTPUT_FMT="raw"
 OVF_TEMPLATE=""
 
 UEFI_SECURE_BOOT="no"
+IN_PLACE_UPDATES="no"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -21,6 +22,7 @@ for opt in "$@"; do
   --partition-plan=*) PARTITION_PLAN="${optarg}" ;;
   --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
+  --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -81,7 +83,8 @@ EFI_MOUNT="$(mktemp -p "${WORKDIR}" -d efi.XXXXXXXXXX)"
 # Collect partition sizes and offsets from the partition plan.
 declare -A partsize partoff
 set_partition_sizes \
-  "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" "${PARTITION_PLAN}" \
+  "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
+  "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
   partsize partoff
 
 # Process and stage the input images to the working directory.
@@ -91,10 +94,12 @@ stage_images "${INPUT_DIR}" "${OUTPUT_FMT}" OS_IMAGE DATA_IMAGE
 # Collect partition sizes and offsets from the OS image.
 declare -A imgsize imgoff
 get_partition_sizes \
-  "${OS_IMAGE}" "" "${PARTITION_PLAN}" imgsize imgoff
+  "${OS_IMAGE}" "" \
+  imgsize imgoff
 
 # Compare the offsets between the partition plan and the input image.
-for part in "${!imgoff[@]}"; do
+for part in "${!partoff[@]}"; do
+  [[ "${part}" == DATA-* ]] && continue
   if [[ "${partoff["${part}"]}" -ne "${imgoff["${part}"]}" ]]; then
     echo "start mismatch between partition plan and disk: '${part}'" >&2
     exit 1
@@ -102,7 +107,8 @@ for part in "${!imgoff[@]}"; do
 done
 
 # Compare the sizes between the partition plan and the input image.
-for part in "${!imgsize[@]}"; do
+for part in "${!partsize[@]}"; do
+  [[ "${part}" == DATA-* ]] && continue
   if [[ "${partsize["${part}"]}" -ne "${imgsize["${part}"]}" ]]; then
     echo "size mismatch between partition plan and disk: '${part}'" >&2
     exit 1
