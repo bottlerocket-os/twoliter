@@ -2185,6 +2185,7 @@ name = "oci-cli-wrapper"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "regex",
  "serde",
  "serde_json",
  "snafu 0.8.2",
@@ -2505,7 +2506,6 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "buildsys",
- "buildsys-config",
  "bytes",
  "chrono",
  "clap",
@@ -2518,6 +2518,7 @@ dependencies = [
  "log",
  "nonzero_ext",
  "num_cpus",
+ "oci-cli-wrapper",
  "parse-datetime",
  "pubsys-config",
  "regex",

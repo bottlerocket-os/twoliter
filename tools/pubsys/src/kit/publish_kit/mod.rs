@@ -1,12 +1,11 @@
 use crate::Args;
-use buildsys_config::DockerArchitecture;
 use clap::Parser;
 use log::{debug, info, trace};
+use oci_cli_wrapper::{image_tool, DockerArchitecture, ImageTool};
 use pubsys_config::InfraConfig;
-use regex::Regex;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::path::PathBuf;
-use tokio::process::Command;
+use std::rc::Rc;
 
 /// Takes a local kit built using buildsys and publishes it to a vendor specified in Infra.toml
 #[derive(Debug, Parser)]
@@ -28,50 +27,22 @@ pub(crate) struct PublishKitArgs {
     build_id: String,
 }
 
-macro_rules! docker {
-    ($arg: expr) => {{
-        let result = Command::new("docker")
-            .args($arg)
-            .output()
-            .await
-            .context(error::CommandSnafu { command: "docker" })?;
-        ensure!(
-            result.status.success(),
-            error::PublishFailSnafu {
-                reason: String::from_utf8_lossy(&result.stderr)
-            }
-        );
-        result.stdout
-    }};
-}
-
-macro_rules! docker_noisy {
-    ($arg: expr, $arch: ident, $uri: ident) => {{
-        let status = Command::new("docker")
-            .args($arg)
-            .spawn()
-            .context(error::CommandSnafu { command: "docker" })?
-            .wait()
-            .await
-            .context(error::CommandSnafu { command: "docker" })?;
-        ensure!(
-            status.success(),
-            error::PublishFailSnafu {
-                reason: format!(
-                    "failed to push image for architecture '{}' to {}",
-                    $arch, $uri
-                )
-            }
-        );
-    }};
-}
-
 pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Result<()> {
+    let image_tool = image_tool().context(error::ImageToolSnafu)?;
+
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
     trace!("Parsed infra config: {:?}", infra_config);
 
+    publish_kit(infra_config, publish_kit_args, image_tool).await
+}
+
+async fn publish_kit(
+    infra_config: InfraConfig,
+    publish_kit_args: &PublishKitArgs,
+    image_tool: Rc<dyn ImageTool>,
+) -> Result<()> {
     // Fetch the vendor container registry uri
     let vendor = infra_config
         .vendor
@@ -99,7 +70,7 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
     let mut platform_images = Vec::new();
     for arch in ["aarch64", "x86_64"] {
         let docker_arch =
-            DockerArchitecture::try_from(arch).context(error::InvalidArchitectureSnafu)?;
+            DockerArchitecture::try_from(arch).context(error::InvalidArchitectureSnafu { arch })?;
 
         let kit_filename = format!("{}-{}-{}-{}.tar", &kit_name, &kit_version, &build_id, arch);
         let path = kit_path.join(&kit_filename);
@@ -109,32 +80,20 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
             continue;
         }
 
-        info!("Loading kit image from OCI archive");
-        let out = docker!(["load", format!("--input={}", path.display()).as_str(),]);
-        let out = String::from_utf8_lossy(&out);
-        let digest_expression =
-            Regex::new("(?<digest>sha256:[0-9a-f]{64})").context(error::RegexSnafu)?;
-        let caps = digest_expression
-            .captures(&out)
-            .context(error::NoDigestSnafu)?;
-        let digest = &caps["digest"];
-
         let arch_specific_target_uri = format!(
             "{}/{}:{}-{}-{}",
             vendor_registry_uri, kit_name, &kit_version, &build_id, arch
         );
 
-        docker!(["tag", digest, &arch_specific_target_uri,]);
-
         info!(
             "Pushing kit image for platform {} to {}",
             arch, &arch_specific_target_uri
         );
-        docker_noisy!(
-            ["push", &arch_specific_target_uri,],
-            arch,
-            arch_specific_target_uri
-        );
+
+        image_tool
+            .push_oci_archive(&path, &arch_specific_target_uri)
+            .await
+            .context(error::PublishKitSnafu)?;
 
         platform_images.push((docker_arch, arch_specific_target_uri.clone()));
     }
@@ -145,35 +104,14 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
 
     let target_uri = format!("{}/{}:{}", vendor_registry_uri, kit_name, kit_version);
 
-    let images: Vec<&str> = platform_images
-        .iter()
-        .map(|(_, image)| image.as_str())
-        .collect();
-
-    info!("Creating image list for kit");
-    let mut manifest_create_args = vec!["manifest", "create", &target_uri];
-    manifest_create_args.extend_from_slice(&images);
-    docker!(manifest_create_args);
-
-    for (arch, image) in platform_images.iter() {
-        docker!([
-            "manifest",
-            "annotate",
-            format!("--arch={}", arch).as_str(),
-            &target_uri,
-            image,
-        ]);
-    }
-
     info!("Pushing kit to {}", &target_uri);
-    docker!(["manifest", "push", &target_uri,]);
+
+    image_tool
+        .push_multi_platform_manifest(platform_images, &target_uri)
+        .await
+        .context(error::PublishKitSnafu)?;
 
     info!("Successfully published kit to {}", target_uri);
-
-    // Cleans up the manifest list. This doesn't serve a purpose outside of publishing the kit and
-    // takes up space.
-    info!("Cleaning up local manifest");
-    docker!(["manifest", "rm", &target_uri]);
 
     Ok(())
 }
@@ -185,34 +123,34 @@ mod error {
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(crate) enum Error {
-        #[snafu(display("IO error running command `{}`: {}", command, source))]
-        Command {
-            source: std::io::Error,
-            command: String,
-        },
         #[snafu(display("Error reading config: {}", source))]
         Config { source: pubsys_config::Error },
-        #[snafu(display("Invalid architecture: {}", source))]
-        InvalidArchitecture { source: anyhow::Error },
+
+        #[snafu(display("Could not find image tool: {}", source))]
+        ImageTool {
+            source: oci_cli_wrapper::error::Error,
+        },
+
+        #[snafu(display("Could not convert {} to docker architecture: {}", arch, source))]
+        InvalidArchitecture {
+            source: oci_cli_wrapper::error::Error,
+            arch: String,
+        },
+
         #[snafu(display("Failed not get kit name from path {}", path.display()))]
         InvalidPath { path: PathBuf },
+
         #[snafu(display("No kit archive(s) exist at path {}", path.display()))]
         NoArchive { path: PathBuf },
-        #[snafu(display("No digest returned by `docker load`"))]
-        NoDigest,
+
         #[snafu(display("No vendors specified in Infra.toml, you must specify at least one"))]
         NoVendors,
-        #[snafu(display("No kit version found, must be included in kit file name"))]
-        NoVersion,
-        #[snafu(display("Docker failed to load and push kit image: {}", reason))]
-        PublishFail { reason: String },
-        #[snafu(display("IO error reading directory {}: {}", dir.display(), source))]
-        ReadDir {
-            source: std::io::Error,
-            dir: PathBuf,
+
+        #[snafu(display("Could not publish kit: {}", source))]
+        PublishKit {
+            source: oci_cli_wrapper::error::Error,
         },
-        #[snafu(display("Failed to parse kit filename: {}", source))]
-        Regex { source: regex::Error },
+
         #[snafu(display("Vendor '{}' not specified in Infra.toml", name))]
         VendorNotFound { name: String },
     }
