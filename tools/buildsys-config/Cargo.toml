@@ -9,5 +9,3 @@ publish = false
 exclude = ["README.md"]
 
 [dependencies]
-anyhow = "1"
-serde = { version = "1", features = ["derive"]}

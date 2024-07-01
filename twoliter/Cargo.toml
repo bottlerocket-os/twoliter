@@ -12,7 +12,6 @@ exclude = ["/design", "/target", "/dockerfiles", "/scripts"]
 [dependencies]
 anyhow = "1"
 async-recursion = "1"
-async-trait = "0.1"
 async-walkdir = "1"
 base64 = "0.22"
 buildsys-config = { version = "0.1", path = "../tools/buildsys-config" }
@@ -21,9 +20,7 @@ env_logger = "0.11"
 filetime = "0.2"
 flate2 = "1"
 futures= "0.3"
-hex = "0.4"
 log = "0.4"
-non-empty-string = { version = "0.2", features = [ "serde" ] }
 oci-cli-wrapper = { version = "0.1", path = "../tools/oci-cli-wrapper" }
 olpc-cjson = "0.1"
 semver = { version = "1", features = ["serde"] }
@@ -35,7 +32,6 @@ tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread"] }
 toml = "0.8"
 uuid = { version = "1", features = [ "v4" ] }
-which = "6"
 
 # Binary dependencies. These are binaries that we want to embed in the Twoliter binary.
 buildsys = { version = "0.1.0", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }

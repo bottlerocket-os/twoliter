@@ -7,7 +7,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-anyhow = "1"
 aws-config = "1"
 aws-credential-types = "1"
 aws-sdk-ebs = "1"
@@ -33,9 +32,6 @@ num_cpus = "1"
 oci-cli-wrapper = { path = "../oci-cli-wrapper", version = "0.1" }
 parse-datetime = { path = "../parse-datetime", version = "0.1" }
 pubsys-config = { path = "../pubsys-config/", version = "0.1" }
-regex = "1"
-# Need to bring in reqwest with a TLS feature so tough can support TLS repos.
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
