@@ -212,6 +212,14 @@ default will remain ext4 and xfs is opt-in.
 xfs-data-partition = true
 ```
 
+`erofs-root-partition` changes the filesystem for the root partition from ext4 to erofs. The
+default will remain ext4 and erofs is opt-in.
+
+```ignore
+[package.metadata.build-variant.image-features]
+erofs-root-partition = true
+```
+
 `uefi-secure-boot` means that the bootloader and kernel are signed. The grub image for the current
 variant will have a public GPG baked in, and will expect the grub config file to have a valid
 detached signature. Published artifacts such as AMIs and OVAs will enforce the signature checks
@@ -782,6 +790,7 @@ pub enum ImageFeature {
     GrubSetPrivateVar,
     SystemdNetworkd,
     XfsDataPartition,
+    ErofsRootPartition,
     UefiSecureBoot,
     Fips,
     InPlaceUpdates,
@@ -795,6 +804,7 @@ impl TryFrom<String> for ImageFeature {
             "grub-set-private-var" => Ok(ImageFeature::GrubSetPrivateVar),
             "systemd-networkd" => Ok(ImageFeature::SystemdNetworkd),
             "xfs-data-partition" => Ok(ImageFeature::XfsDataPartition),
+            "erofs-root-partition" => Ok(ImageFeature::ErofsRootPartition),
             "uefi-secure-boot" => Ok(ImageFeature::UefiSecureBoot),
             "fips" => Ok(ImageFeature::Fips),
             "in-place-updates" => Ok(ImageFeature::InPlaceUpdates),
@@ -810,6 +820,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::GrubSetPrivateVar => write!(f, "GRUB_SET_PRIVATE_VAR"),
             ImageFeature::SystemdNetworkd => write!(f, "SYSTEMD_NETWORKD"),
             ImageFeature::XfsDataPartition => write!(f, "XFS_DATA_PARTITION"),
+            ImageFeature::ErofsRootPartition => write!(f, "EROFS_ROOT_PARTITION"),
             ImageFeature::UefiSecureBoot => write!(f, "UEFI_SECURE_BOOT"),
             ImageFeature::Fips => write!(f, "FIPS"),
             ImageFeature::InPlaceUpdates => write!(f, "IN_PLACE_UPDATES"),
