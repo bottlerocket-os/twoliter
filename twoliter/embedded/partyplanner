@@ -91,8 +91,9 @@ PRIVATE_SCALE_FACTOR="24"
 ###############################################################################
 # Section 4: ASCII art gallery
 
-# Layout for a 1 GiB OS image. Sizes marked with (*) scale with overall image
-# size, based on the constant factors above.
+# Layout for a 1 GiB OS image that supports in-place updates.
+# Sizes marked with (*) scale with overall image size, based on the constant
+# factors above.
 
 #          +---------------------------------+
 #  Prelude | GPT header               1 MiB  | 5 MiB
@@ -115,100 +116,82 @@ PRIVATE_SCALE_FACTOR="24"
 # Postlude | GPT footer               1 MiB  | GPT is fixed, private partition grows.
 #          +---------------------------------+
 
+# Layout for a 1 GiB OS image that does not support in-place updates.
+# Sizes marked with (*) scale with overall image size, based on the constant
+# factors above.
+
+#          +---------------------------------+
+#  Prelude | GPT header               1 MiB  | 5 MiB
+#          | BIOS boot partition      4 MiB  | Fixed size.
+#          +---------------------------------+
+#          | EFI system partition    10 MiB  |
+#          | Boot partition          40 MiB* | (image size - prelude - postlude) / 2
+#   Bank A | Root partition         920 MiB* | Example: (1 GiB - 5 MiB - 19 MiB) / 2
+#          | Hash partition          10 MiB* |          1000 MiB
+#          | Reserved partition      20 MiB* |
+#          +---------------------------------+
+#          | Private partition       17 MiB* | (image size * 24 as MiB) - prelude - DATA-A size
+#          | Data partition A         1 MiB  | Data partition A
+# Postlude | GPT footer               1 MiB  | GPT is fixed, private partition grows.
+#          +---------------------------------+
+
 ##############################################################################
 # Section 5: library functions
 
-# Populate the caller's tables with sizes and offsets for known partitions of
+# Populate the caller's tables with sizes and offsets for partitions of
 # existing images.
 get_partition_sizes() {
-  local os_image data_image partition_plan
+  local os_image data_image
   local -n pt_size pt_offset
   os_image="$1"
   data_image="$2"
 
-  # Whether we're building a layout for a "split" image, where OS and data
-  # volumes are on separate disks, or a "unified" image, where they share the
-  # same disk.
-  partition_plan="${3:?}"
-
   # Table for partition sizes, in MiB.
-  pt_size="${4:?}"
+  pt_size="${3:?}"
 
   # Table for partition offsets from start of disk, in MiB.
-  pt_offset="${5:?}"
+  pt_offset="${4:?}"
 
-  local os_image_table=""
-  if [[ -n "${os_image}" ]]; then
-    os_image_table="$(sgdisk --print "${os_image}")"
+  local -a images
+  images=("${os_image}")
+  if [[ -n "${data_image}" ]]; then
+    images+=("${data_image}")
   fi
 
-  local data_image_table=""
-  if [[ "${partition_plan}" == "split" ]] && [[ -n "${data_image}" ]]; then
-    data_image_table="$(sgdisk --print "${data_image}")"
-  else
-    data_image_table="${os_image_table}"
-  fi
+  local partitions part_info part_name part_offset part_size part_key
+  for image in "${images[@]}" ; do
+    partitions="$(sgdisk --print "${image}" | awk 'END {print $1}')"
+    for p in $(seq 1 "${partitions}") ; do
+      part_info="$(sgdisk -i "${p}" "${os_image}")"
+      part_name="$(awk -F"'" '/Partition name:/{print $2}'<<<"${part_info}")"
+      [ -n "${part_name}" ] || continue
+      part_offset="$(awk '/First sector:/{print $3}'<<<"${part_info}")"
+      part_size="$(awk '/Partition size:/{print $3}'<<<"${part_info}")"
+      case "${part_name}" in
+      BIOS-BOOT)
+        part_key="BIOS"
+        ;;
+      EFI-SYSTEM)
+        part_key="EFI-A"
+        ;;
+      EFI-BACKUP)
+        part_key="EFI-B"
+        ;;
+      *)
+        part_key="${part_name#BOTTLEROCKET-}"
+        ;;
+      esac
 
-  local offset sectors
-  for part in \
-    BIOS \
-    EFI-A BOOT-A ROOT-A HASH-A RESERVED-A \
-    EFI-B BOOT-B ROOT-B HASH-B RESERVED-B \
-    PRIVATE DATA-A DATA-B; do
-    case "${part}" in
-    BIOS)
-      offset="$(awk /BIOS-BOOT/'{print $2}' <<<"${os_image_table}")"
-      sectors="$(awk /BIOS-BOOT/'{print $4}' <<<"${os_image_table}")"
-      ;;
-    EFI-A)
-      offset="$(awk /EFI-SYSTEM/'{print $2}' <<<"${os_image_table}")"
-      sectors="$(awk /EFI-SYSTEM/'{print $4}' <<<"${os_image_table}")"
-      ;;
-    EFI-B)
-      offset="$(awk /EFI-BACKUP/'{print $2}' <<<"${os_image_table}")"
-      sectors="$(awk /EFI-BACKUP/'{print $4}' <<<"${os_image_table}")"
-      ;;
-    RESERVED-A)
-      offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
-        <<<"${os_image_table}" | head -1 || true)"
-      sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
-        <<<"${os_image_table}" | head -1 || true)"
-      ;;
-    RESERVED-B)
-      offset="$(awk /BOTTLEROCKET-RESERV/'{print $2}' \
-        <<<"${os_image_table}" | tail -1 || true)"
-      sectors="$(awk /BOTTLEROCKET-RESERV/'{print $4}' \
-        <<<"${os_image_table}" | tail -1 || true)"
-      ;;
-    DATA)
-      offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
-        <<<"${data_image_table}")"
-      sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
-        <<<"${data_image_table}")"
-      ;;
-    *)
-      offset="$(awk /BOTTLEROCKET-"${part}"/'{print $2}' \
-        <<<"${os_image_table}")"
-      sectors="$(awk /BOTTLEROCKET-"${part}"/'{print $4}' \
-        <<<"${os_image_table}")"
-      ;;
-    esac
-
-    if [[ -n "${offset}" ]]; then
       # 1 MiB contains 2048 512-byte sectors.
-      offset_mib="$((offset / 2048))"
-      pt_offset["${part}"]="${offset_mib}"
-    fi
-
-    if [[ -n "${sectors}" ]]; then
-      pt_size["${part}"]="${sectors%.0}"
-    fi
+      pt_offset["${part_key}"]="$(( part_offset / 2048 ))"
+      pt_size["${part_key}"]="$(( part_size / 2048 ))"
+    done
   done
 }
 
 # Populate the caller's tables with sizes and offsets for known partitions.
 set_partition_sizes() {
-  local os_image_gib data_image_gib partition_plan
+  local os_image_gib data_image_gib partition_plan in_place_updates
   local -n pp_size pp_offset
   os_image_gib="${1:?}"
   data_image_gib="${2:?}"
@@ -218,11 +201,15 @@ set_partition_sizes() {
   # same disk.
   partition_plan="${3:?}"
 
+  # Whether the image should support in-place updates, where two banks of OS
+  # partitions are available to store active/passive update images.
+  in_place_updates="${4:?}"
+
   # Table for partition sizes, in MiB.
-  pp_size="${4:?}"
+  pp_size="${5:?}"
 
   # Table for partition offsets from start of disk, in MiB.
-  pp_offset="${5:?}"
+  pp_offset="${6:?}"
 
   # Most of the partitions on the main image scale with the overall size.
   local boot_mib root_mib hash_mib reserved_mib private_mib
@@ -247,27 +234,51 @@ set_partition_sizes() {
   pp_size["BIOS"]="${BIOS_MIB}"
   ((offset += BIOS_MIB))
 
-  for bank in A B; do
-    pp_offset["EFI-${bank}"]="${offset}"
-    pp_size["EFI-${bank}"]="${EFI_MIB}"
-    ((offset += EFI_MIB))
+  if [[ "${in_place_updates}" == "yes" ]]; then
+    # Allocate two partition banks to support in-place updates.
+    for bank in A B; do
+      pp_offset["EFI-${bank}"]="${offset}"
+      pp_size["EFI-${bank}"]="${EFI_MIB}"
+      ((offset += EFI_MIB))
 
-    pp_offset["BOOT-${bank}"]="${offset}"
-    pp_size["BOOT-${bank}"]="${boot_mib}"
-    ((offset += boot_mib))
+      pp_offset["BOOT-${bank}"]="${offset}"
+      pp_size["BOOT-${bank}"]="${boot_mib}"
+      ((offset += boot_mib))
 
-    pp_offset["ROOT-${bank}"]="${offset}"
-    pp_size["ROOT-${bank}"]="${root_mib}"
-    ((offset += root_mib))
+      pp_offset["ROOT-${bank}"]="${offset}"
+      pp_size["ROOT-${bank}"]="${root_mib}"
+      ((offset += root_mib))
 
-    pp_offset["HASH-${bank}"]="${offset}"
-    pp_size["HASH-${bank}"]="${hash_mib}"
-    ((offset += hash_mib))
+      pp_offset["HASH-${bank}"]="${offset}"
+      pp_size["HASH-${bank}"]="${hash_mib}"
+      ((offset += hash_mib))
 
-    pp_offset["RESERVED-${bank}"]="${offset}"
-    pp_size["RESERVED-${bank}"]="${reserved_mib}"
-    ((offset += reserved_mib))
-  done
+      pp_offset["RESERVED-${bank}"]="${offset}"
+      pp_size["RESERVED-${bank}"]="${reserved_mib}"
+      ((offset += reserved_mib))
+    done
+  else
+    # Allocate a single partition bank, where each partition is twice as large.
+    pp_offset["EFI-A"]="${offset}"
+    pp_size["EFI-A"]="$(( EFI_MIB * 2 ))"
+    ((offset += EFI_MIB * 2))
+
+    pp_offset["BOOT-A"]="${offset}"
+    pp_size["BOOT-A"]="$(( boot_mib * 2 ))"
+    ((offset += boot_mib * 2))
+
+    pp_offset["ROOT-A"]="${offset}"
+    pp_size["ROOT-A"]="$(( root_mib * 2 ))"
+    ((offset += root_mib * 2))
+
+    pp_offset["HASH-A"]="${offset}"
+    pp_size["HASH-A"]="$(( hash_mib * 2 ))"
+    ((offset += hash_mib * 2))
+
+    pp_offset["RESERVED-A"]="${offset}"
+    pp_size["RESERVED-A"]="$(( reserved_mib * 2 ))"
+    ((offset += reserved_mib * 2))
+  fi
 
   pp_offset["PRIVATE"]="${offset}"
   pp_size["PRIVATE"]="${private_mib}"

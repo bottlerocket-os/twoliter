@@ -14,6 +14,18 @@ Provides: %{_cross_os}variant-runtime(%{_cross_variant_runtime})
 Provides: %{_cross_os}variant-family(%{_cross_variant_family})
 Provides: %{_cross_os}variant-flavor(%{_cross_variant_flavor})
 
+%if %{with in_place_updates}
+Provides: %{_cross_os}image-feature(in-place-updates)
+%else
+Provides: %{_cross_os}image-feature(no-in-place-updates)
+%endif
+
+%if %{with host_containers}
+Provides: %{_cross_os}image-feature(host-containers)
+%else
+Provides: %{_cross_os}image-feature(no-host-containers)
+%endif
+
 %if %{with grub_set_private_var}
 Provides: %{_cross_os}image-feature(grub-set-private-var)
 %else
@@ -30,12 +42,6 @@ Provides: %{_cross_os}image-feature(no-uefi-secure-boot)
 Provides: %{_cross_os}image-feature(systemd-networkd)
 %else
 Provides: %{_cross_os}image-feature(no-systemd-networkd)
-%endif
-
-%if %{with unified_cgroup_hierarchy}
-Provides: %{_cross_os}image-feature(unified-cgroup-hierarchy)
-%else
-Provides: %{_cross_os}image-feature(no-unified-cgroup-hierarchy)
 %endif
 
 %if %{with xfs_data_partition}

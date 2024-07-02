@@ -9,6 +9,7 @@ OVF_TEMPLATE=""
 GRUB_SET_PRIVATE_VAR="no"
 XFS_DATA_PARTITION="no"
 UEFI_SECURE_BOOT="no"
+IN_PLACE_UPDATES="no"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -24,8 +25,9 @@ for opt in "$@"; do
   --partition-plan=*) PARTITION_PLAN="${optarg}" ;;
   --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
   --with-grub-set-private-var=*) GRUB_SET_PRIVATE_VAR="${optarg}" ;;
-  --xfs-data-partition=*) XFS_DATA_PARTITION="${optarg}" ;;
+  --with-xfs-data-partition=*) XFS_DATA_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
+  --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -98,18 +100,23 @@ esac
 
 declare -A partlabel parttype partguid partsize partoff
 set_partition_sizes \
-  "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" "${PARTITION_PLAN}" \
+  "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
+  "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
   partsize partoff
 set_partition_labels partlabel
 set_partition_types parttype
 set_partition_uuids partguid "${PARTITION_PLAN}"
 
+declare -a partitions
+partitions=(BIOS)
+partitions+=(EFI-A BOOT-A ROOT-A HASH-A RESERVED-A)
+if [[ "${IN_PLACE_UPDATES}" == "yes" ]]; then
+  partitions+=(EFI-B BOOT-B ROOT-B HASH-B RESERVED-B)
+fi
+partitions+=(PRIVATE DATA-A DATA-B)
+
 declare -a partargs
-for part in \
-  BIOS \
-  EFI-A BOOT-A ROOT-A HASH-A RESERVED-A \
-  EFI-B BOOT-B ROOT-B HASH-B RESERVED-B \
-  PRIVATE DATA-A DATA-B; do
+for part in "${partitions[@]}"; do
   # We create the DATA-B partition separately if we're using the split layout
   if [[ "${part}" == "DATA-B" ]]; then
     continue

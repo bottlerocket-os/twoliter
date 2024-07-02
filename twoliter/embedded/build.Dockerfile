@@ -202,8 +202,9 @@ ARG VARIANT_FLAVOR
 ARG GRUB_SET_PRIVATE_VAR
 ARG UEFI_SECURE_BOOT
 ARG SYSTEMD_NETWORKD
-ARG UNIFIED_CGROUP_HIERARCHY
 ARG XFS_DATA_PARTITION
+ARG IN_PLACE_UPDATES
+ARG HOST_CONTAINERS
 ARG FIPS
 
 USER builder
@@ -225,8 +226,9 @@ RUN \
    && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${UNIFIED_CGROUP_HIERARCHY:+%bcond_without unified_cgroup_hierarchy\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}"
+   && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${IN_PLACE_UPDATES:+%bcond_without in_place_updates\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Creates an RPM repository from packages created in Section 1 and kits from Section 2.
@@ -330,6 +332,7 @@ ARG KERNEL_PARAMETERS
 ARG GRUB_SET_PRIVATE_VAR
 ARG XFS_DATA_PARTITION
 ARG UEFI_SECURE_BOOT
+ARG IN_PLACE_UPDATES
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
     KERNEL_PARAMETERS=${KERNEL_PARAMETERS}
@@ -365,9 +368,10 @@ RUN --mount=target=/host \
       --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
       --partition-plan="${PARTITION_PLAN}" \
       --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
-      ${XFS_DATA_PARTITION:+--xfs-data-partition=yes} \
+      ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
       ${GRUB_SET_PRIVATE_VAR:+--with-grub-set-private-var=yes} \
-      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} && \
+      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
+      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
     rm -rf /local/rpms && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
@@ -469,6 +473,7 @@ ARG PARTITION_PLAN
 ARG OS_IMAGE_PUBLISH_SIZE_GIB
 ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG UEFI_SECURE_BOOT
+ARG IN_PLACE_UPDATES
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
 
@@ -502,7 +507,8 @@ RUN --mount=target=/host \
       --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
       --partition-plan="${PARTITION_PLAN}" \
       --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
-      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} && \
+      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
+      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
     rm /bypass && \
