@@ -203,6 +203,7 @@ ARG GRUB_SET_PRIVATE_VAR
 ARG UEFI_SECURE_BOOT
 ARG SYSTEMD_NETWORKD
 ARG XFS_DATA_PARTITION
+ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
 ARG HOST_CONTAINERS
 ARG FIPS
@@ -227,6 +228,7 @@ RUN \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${EROFS_ROOT_PARTITION:+%bcond_without erofs_root_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${IN_PLACE_UPDATES:+%bcond_without in_place_updates\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}"
 
@@ -331,6 +333,7 @@ ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG KERNEL_PARAMETERS
 ARG GRUB_SET_PRIVATE_VAR
 ARG XFS_DATA_PARTITION
+ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
@@ -369,6 +372,7 @@ RUN --mount=target=/host \
       --partition-plan="${PARTITION_PLAN}" \
       --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
       ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
+      ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${GRUB_SET_PRIVATE_VAR:+--with-grub-set-private-var=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
       ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
@@ -473,6 +477,7 @@ ARG PARTITION_PLAN
 ARG OS_IMAGE_PUBLISH_SIZE_GIB
 ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG UEFI_SECURE_BOOT
+ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
@@ -507,6 +512,7 @@ RUN --mount=target=/host \
       --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
       --partition-plan="${PARTITION_PLAN}" \
       --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
+      ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
       ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \

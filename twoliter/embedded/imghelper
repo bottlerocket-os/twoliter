@@ -321,6 +321,28 @@ mkfs_data_xfs() {
   dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
 }
 
+mkfs_root_erofs() {
+  local root_mount root_image selinux_file_contexts
+  root_mount="${1:?}"
+  root_image="${2:?}"
+  selinux_file_contexts="${3:?}"
+  # Ensure the root mount directory is not writable, to avoid permission errors
+  # when interacting with the root inode at runtime.
+  chmod 555 "${root_mount}"
+  # mkfs.erofs optimizations:
+  #  --all-root: use same UID/GID for all files
+  #          -T: use same mtime for all files
+  # -z lz4hc,12: lz4 for fast decompression, lz4hc level 12 for max compression
+  #   -C 262144: use physical clusters up to 256 KiB to align with EBS I/O size
+  mkfs.erofs \
+    --file-contexts="${selinux_file_contexts}" \
+    --all-root \
+    -T "$(stat -c '%Y' "${root_mount}/root")" \
+    -z lz4hc,12 \
+    -C 262144 \
+    "${root_image}" "${root_mount}"
+}
+
 check_image_size() {
   local image part_mib image_size part_bytes
   image="${1:?}"
