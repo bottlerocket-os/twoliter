@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.2...HEAD
+
+## [0.4.2] - 2024-07-11
+
+### Added
+
+- Add support for crane family of tools for publishing and fetching kits ([#305], [#317])
+- Add additional image feature flags ([#318])
+
+### Changed
+
+- Update application inventory generation to accommodate kits ([#310])
+- Share file descriptors to the build container to speed up directory I/O ([#302])
+- Combine build and repack dockerfiles ([#302])
+- Move updater wave default schedules into pubsys ([#321])
+- Drop support for cgroup feature flags ([#318])
+
+[#302]: https://github.com/bottlerocket-os/twoliter/pull/302
+[#305]: https://github.com/bottlerocket-os/twoliter/pull/305
+[#310]: https://github.com/bottlerocket-os/twoliter/pull/310
+[#317]: https://github.com/bottlerocket-os/twoliter/pull/317
+[#318]: https://github.com/bottlerocket-os/twoliter/pull/318
+[#321]: https://github.com/bottlerocket-os/twoliter/pull/321
+
+[0.4.2]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.1...v0.4.2
 
 ## [0.4.1] - 2024-06-19
 
