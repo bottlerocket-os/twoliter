@@ -756,7 +756,6 @@ dependencies = [
  "rand",
  "regex",
  "reqwest",
- "semver",
  "serde",
  "serde_json",
  "serde_plain",
@@ -772,10 +771,6 @@ dependencies = [
 [[package]]
 name = "buildsys-config"
 version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
-]
 
 [[package]]
 name = "bumpalo"
@@ -1117,17 +1112,6 @@ name = "debug-ignore"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffe7ed1d93f4553003e20b629abe9085e1e81b1429520f897f8f8860bc6dfc21"
-
-[[package]]
-name = "delegate"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "082a24a9967533dc5d743c602157637116fc1b52806d694a5a45e6f32567fcdd"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "deranged"
@@ -2107,16 +2091,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b93853da6d84c2e3c7d730d6473e8817692dd89be387eb01b94d7f108ecb5b8c"
 
 [[package]]
-name = "non-empty-string"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55cf0f4060e345ae505219853da9ca1150564158a648a6aa6a528f0d5794bb33"
-dependencies = [
- "delegate",
- "serde",
-]
-
-[[package]]
 name = "nonzero_ext"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2185,6 +2159,7 @@ name = "oci-cli-wrapper"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "regex",
  "serde",
  "serde_json",
  "snafu 0.8.2",
@@ -2434,7 +2409,6 @@ dependencies = [
  "inotify",
  "log",
  "nix",
- "regex",
  "tokio",
  "uds",
 ]
@@ -2494,7 +2468,6 @@ dependencies = [
 name = "pubsys"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-ebs",
@@ -2505,7 +2478,6 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "buildsys",
- "buildsys-config",
  "bytes",
  "chrono",
  "clap",
@@ -2518,10 +2490,9 @@ dependencies = [
  "log",
  "nonzero_ext",
  "num_cpus",
+ "oci-cli-wrapper",
  "parse-datetime",
  "pubsys-config",
- "regex",
- "reqwest",
  "semver",
  "serde",
  "serde_json",
@@ -3865,7 +3836,6 @@ version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-recursion",
- "async-trait",
  "async-walkdir",
  "base64 0.22.0",
  "buildsys",
@@ -3876,9 +3846,7 @@ dependencies = [
  "filetime",
  "flate2",
  "futures",
- "hex",
  "log",
- "non-empty-string",
  "oci-cli-wrapper",
  "olpc-cjson",
  "pipesys",
@@ -3896,7 +3864,6 @@ dependencies = [
  "tuftool",
  "unplug",
  "uuid",
- "which",
 ]
 
 [[package]]

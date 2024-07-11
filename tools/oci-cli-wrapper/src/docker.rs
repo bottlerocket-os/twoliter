@@ -1,13 +1,14 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use snafu::ResultExt;
+use regex::Regex;
+use snafu::{OptionExt, ResultExt};
 use std::fs::File;
 use tar::Archive;
 use tempfile::NamedTempFile;
 
 use crate::cli::CommandLine;
-use crate::{error, ConfigView, ImageTool, Result};
+use crate::{error, ConfigView, DockerArchitecture, ImageTool, Result};
 
 pub struct DockerCLI {
     pub(crate) cli: CommandLine,
@@ -67,5 +68,86 @@ impl ImageTool for DockerCLI {
             )
             .await?;
         serde_json::from_slice(bytes.as_slice()).context(error::ConfigDeserializeSnafu)
+    }
+
+    async fn push_oci_archive(&self, path: &Path, uri: &str) -> Result<()> {
+        let out = self
+            .cli
+            .output(
+                &["load", format!("--input={}", path.display()).as_str()],
+                format!("could not load archive from {}", path.display()),
+            )
+            .await?;
+        let out = String::from_utf8_lossy(&out);
+        let digest_expression =
+            Regex::new("(?<digest>sha256:[0-9a-f]{64})").context(error::RegexSnafu)?;
+        let caps = digest_expression
+            .captures(&out)
+            .context(error::NoDigestSnafu)?;
+        let digest = &caps["digest"];
+
+        self.cli
+            .output(
+                &["tag", digest, uri],
+                format!("could not tag image as {uri}"),
+            )
+            .await?;
+
+        self.cli
+            .spawn(&["push", uri], format!("failed to push image '{uri}'"))
+            .await?;
+
+        Ok(())
+    }
+
+    async fn push_multi_platform_manifest(
+        &self,
+        platform_images: Vec<(DockerArchitecture, String)>,
+        uri: &str,
+    ) -> Result<()> {
+        let images: Vec<&str> = platform_images
+            .iter()
+            .map(|(_, image)| image.as_str())
+            .collect();
+
+        let mut manifest_create_args = vec!["manifest", "create", uri];
+        manifest_create_args.extend_from_slice(&images);
+        self.cli
+            .output(
+                &manifest_create_args,
+                format!("could not create manifest list {uri}"),
+            )
+            .await?;
+
+        for (arch, image) in platform_images.iter() {
+            self.cli
+                .output(
+                    &[
+                        "manifest",
+                        "annotate",
+                        format!("--arch={}", arch).as_str(),
+                        uri,
+                        image,
+                    ],
+                    format!("could not annotate manifest {uri} for arch {arch}"),
+                )
+                .await?;
+        }
+
+        self.cli
+            .output(
+                &["manifest", "push", uri],
+                format!("could not push manifest to {uri}"),
+            )
+            .await?;
+
+        self.cli
+            .output(
+                &["manifest", "rm", uri],
+                format!("could not delete manifest {uri}"),
+            )
+            .await?;
+
+        Ok(())
     }
 }

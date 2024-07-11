@@ -14,7 +14,6 @@ env_logger = "0.11.3"
 futures = "0.3.28"
 log = "0.4.20"
 nix = { version = "0.28.0", features = ["fs"] }
-regex = { version = "1.9.5", features = ["std"], default-features = false }
 tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

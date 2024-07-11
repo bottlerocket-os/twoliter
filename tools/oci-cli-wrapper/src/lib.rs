@@ -11,6 +11,7 @@
 //!     crane. The image needs to be pulled locally in order for docker to inspect the manifest and extract
 //!     metadata. In addition, in order to operate with OCI image format, the containerd-snapshotter
 //!     feature has to be enabled in the docker daemon
+use std::fmt::{Display, Formatter};
 use std::{collections::HashMap, env, path::Path, rc::Rc};
 
 use async_trait::async_trait;
@@ -29,10 +30,18 @@ mod docker;
 pub trait ImageTool {
     /// Pull an image archive to disk
     async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()>;
-    /// Fetch the manifest
-    async fn get_manifest(&self, uri: &str) -> Result<Vec<u8>>;
     /// Fetch the image config
     async fn get_config(&self, uri: &str) -> Result<ConfigView>;
+    /// Fetch the manifest
+    async fn get_manifest(&self, uri: &str) -> Result<Vec<u8>>;
+    /// Push a single-arch image in oci archive format
+    async fn push_oci_archive(&self, path: &Path, uri: &str) -> Result<()>;
+    /// Push the multi-arch kit manifest list
+    async fn push_multi_platform_manifest(
+        &self,
+        platform_images: Vec<(DockerArchitecture, String)>,
+        uri: &str,
+    ) -> Result<()>;
 }
 
 /// Auto-select the container tool to use by environment variable
@@ -64,6 +73,36 @@ pub fn image_tool() -> Result<Rc<dyn ImageTool>> {
             path: which("docker").context(error::NoneFoundSnafu)?,
         },
     }))
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DockerArchitecture {
+    Amd64,
+    Arm64,
+}
+
+impl TryFrom<&str> for DockerArchitecture {
+    type Error = error::Error;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        match value {
+            "x86_64" | "amd64" => Ok(DockerArchitecture::Amd64),
+            "aarch64" | "arm64" => Ok(DockerArchitecture::Arm64),
+            _ => Err(error::Error::InvalidArchitecture {
+                value: value.to_string(),
+            }),
+        }
+    }
+}
+
+impl Display for DockerArchitecture {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Amd64 => "amd64",
+            Self::Arm64 => "arm64",
+        })
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -103,8 +142,17 @@ pub mod error {
         #[snafu(display("Failed to deserialize image config: {source}"))]
         ConfigDeserialize { source: serde_json::Error },
 
+        #[snafu(display("Failed to create temporary directory for crane push: {source}"))]
+        CraneTemp { source: std::io::Error },
+
         #[snafu(display("Failed to create temporary directory for docker save: {source}"))]
         DockerTemp { source: std::io::Error },
+
+        #[snafu(display("invalid architecture '{value}'"))]
+        InvalidArchitecture { value: String },
+
+        #[snafu(display("No digest returned by `docker load`"))]
+        NoDigest,
 
         #[snafu(display(
             "Unable to find any supported container image tool, please install docker or crane: {}",
@@ -124,6 +172,9 @@ pub mod error {
             program: PathBuf,
             args: Vec<String>,
         },
+
+        #[snafu(display("Failed to parse kit filename: {}", source))]
+        Regex { source: regex::Error },
 
         #[snafu(display("Unsupported container image tool '{}'", name))]
         Unsupported { name: String },
