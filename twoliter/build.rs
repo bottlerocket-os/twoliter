@@ -39,6 +39,10 @@ fn main() {
     paths.copy_file("rpm2migrations");
     paths.copy_file("metadata.spec");
     paths.copy_file("ocihelper");
+    paths.copy_file("waves/accelerated-waves.toml");
+    paths.copy_file("waves/default-waves.toml");
+    paths.copy_file("waves/ohno.toml");
+    paths.copy_file("waves/slow-roll.toml");
 
     // Create tarball in memory.
     println!("Starting tarball creation at {:?}", SystemTime::now());
@@ -102,6 +106,12 @@ where
 {
     let source = source.as_ref();
     let dest = dest.as_ref();
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).expect(&format!(
+            "Unable to create destination directory '{}'",
+            parent.display()
+        ));
+    }
     fs::copy(source, dest).expect(&format!(
         "Unable to copy `{}' to '{}'",
         source.display(),
