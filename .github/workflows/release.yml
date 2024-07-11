@@ -42,7 +42,7 @@ permissions:
 on:
   push:
     tags:
-      - '*-?v[0-9]+*'
+      - "*-?v[0-9]+*"
 
 jobs:
   # Create the Github Release™ so the packages have something to be uploaded to
@@ -60,7 +60,7 @@ jobs:
           submodules: recursive
       - name: Install cargo-dist
         run: |
-          cargo install \
+          cargo install --locked \
             --git "https://github.com/webern/cargo-dist" \
             --rev "3dcbe823db0c4068f38db790d996a4af54e68b3e"
       - id: create-release
@@ -97,12 +97,12 @@ jobs:
         include:
           - dist-args: "--artifacts=local --target=x86_64-unknown-linux-musl"
             install-dist: |
-              cargo install \
+              cargo install --locked \
                 --git "https://github.com/webern/cargo-dist" \
                 --rev "3dcbe823db0c4068f38db790d996a4af54e68b3e"
           - dist-args: "--artifacts=local --target=aarch64-unknown-linux-musl"
-            install-dist:  |
-              cargo install \
+            install-dist: |
+              cargo install --locked \
                 --git "https://github.com/webern/cargo-dist" \
                 --rev "3dcbe823db0c4068f38db790d996a4af54e68b3e"
     runs-on:
