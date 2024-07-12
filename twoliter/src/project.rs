@@ -77,7 +77,10 @@ impl Project {
     /// Recursively search for a file named `Twoliter.toml` starting in `dir`. If it is not found,
     /// move up (i.e. `cd ..`) until it is found. Return an error if there is no parent directory.
     #[async_recursion]
-    pub(crate) async fn find_and_load<P: AsRef<Path> + Send>(dir: P) -> Result<Self> {
+    pub(crate) async fn find_and_load<P>(dir: P) -> Result<Self>
+    where
+        P: Send + AsRef<Path>,
+    {
         let dir = dir.as_ref();
         trace!("Looking for Twoliter.toml in '{}'", dir.display());
         ensure!(

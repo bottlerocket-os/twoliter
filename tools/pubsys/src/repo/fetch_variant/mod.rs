@@ -261,11 +261,6 @@ mod error {
         #[snafu(display("Target names are not set."))]
         MissingTargetNames,
 
-        #[snafu(display("Output directory does not exist at '{}'", path.display()))]
-        MissingOutdir {
-            path: PathBuf,
-        },
-
         #[snafu(display("Failed to move target: {}", source))]
         MoveTarget {
             source: io::Error,

@@ -157,7 +157,7 @@ impl KitBuildArgs {
         args.build_arg("VERSION_ID", &self.version_id);
         args.build_arg("EXTERNAL_KIT_METADATA", &self.external_kit_metadata);
         args.build_arg("VENDOR", &self.vendor);
-        args.build_arg("LOCAL_KIT_DEPENDENCIES", &self.local_kits.join(" "));
+        args.build_arg("LOCAL_KIT_DEPENDENCIES", self.local_kits.join(" "));
         args
     }
 }
