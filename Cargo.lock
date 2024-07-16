@@ -2167,6 +2167,7 @@ name = "oci-cli-wrapper"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "log",
  "regex",
  "serde",
  "serde_json",

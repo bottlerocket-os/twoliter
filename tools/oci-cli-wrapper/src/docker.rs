@@ -57,13 +57,7 @@ impl ImageTool for DockerCLI {
         let bytes = self
             .cli
             .output(
-                &[
-                    "image",
-                    "inspect",
-                    uri,
-                    "--format",
-                    "\"{{ json .Config }}\"",
-                ],
+                &["image", "inspect", uri, "--format", "{{ json .Config }}"],
                 format!("failed to fetch image config from {}", uri),
             )
             .await?;
