@@ -1,11 +1,10 @@
 use crate::Args;
 use clap::Parser;
 use log::{debug, info, trace};
-use oci_cli_wrapper::{image_tool, DockerArchitecture, ImageTool};
+use oci_cli_wrapper::{DockerArchitecture, ImageTool};
 use pubsys_config::InfraConfig;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::path::PathBuf;
-use std::rc::Rc;
 
 /// Takes a local kit built using buildsys and publishes it to a vendor specified in Infra.toml
 #[derive(Debug, Parser)]
@@ -28,20 +27,20 @@ pub(crate) struct PublishKitArgs {
 }
 
 pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Result<()> {
-    let image_tool = image_tool().context(error::ImageToolSnafu)?;
+    let image_tool = ImageTool::from_environment().context(error::ImageToolSnafu)?;
 
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
     trace!("Parsed infra config: {:?}", infra_config);
 
-    publish_kit(infra_config, publish_kit_args, image_tool).await
+    publish_kit(infra_config, publish_kit_args, &image_tool).await
 }
 
 async fn publish_kit(
     infra_config: InfraConfig,
     publish_kit_args: &PublishKitArgs,
-    image_tool: Rc<dyn ImageTool>,
+    image_tool: &ImageTool,
 ) -> Result<()> {
     // Fetch the vendor container registry uri
     let vendor = infra_config

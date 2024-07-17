@@ -3,7 +3,7 @@ use crate::project::{Image, Project, ValidIdentifier, Vendor};
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use base64::Engine;
-use oci_cli_wrapper::{image_tool, DockerArchitecture, ImageTool};
+use oci_cli_wrapper::{DockerArchitecture, ImageTool};
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
 use semver::Version;
 use serde::de::Error;
@@ -16,7 +16,6 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::mem::take;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use tar::Archive as TarArchive;
 use tokio::fs::read_to_string;
 
@@ -40,13 +39,9 @@ pub(crate) struct LockedImage {
 }
 
 impl LockedImage {
-    pub async fn new(
-        image_tool: Rc<dyn ImageTool>,
-        vendor: &Vendor,
-        image: &Image,
-    ) -> Result<Self> {
+    pub async fn new(image_tool: &ImageTool, vendor: &Vendor, image: &Image) -> Result<Self> {
         let source = format!("{}/{}:v{}", vendor.registry, image.name, image.version);
-        let manifest_bytes = image_tool.as_ref().get_manifest(source.as_str()).await?;
+        let manifest_bytes = image_tool.get_manifest(source.as_str()).await?;
 
         // We calculate a 'digest' of the manifest to use as our unique id
         let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
@@ -188,13 +183,12 @@ impl OCIArchive {
         self.cache_dir.join(self.digest.replace(':', "-"))
     }
 
-    async fn pull_image(&self, image_tool: Rc<dyn ImageTool>) -> Result<()> {
+    async fn pull_image(&self, image_tool: &ImageTool) -> Result<()> {
         let digest_uri = self.image.digest_uri(self.digest.as_str());
         let oci_archive_path = self.archive_path();
         if !oci_archive_path.exists() {
             create_dir_all(&oci_archive_path).await?;
             image_tool
-                .as_ref()
                 .pull_oci_image(oci_archive_path.as_path(), digest_uri.as_str())
                 .await?;
         }
@@ -312,20 +306,15 @@ impl Lock {
 
     /// Fetches all external kits defined in a Twoliter.lock to the build directory
     pub(crate) async fn fetch(&self, project: &Project, arch: &str) -> Result<()> {
-        let image_tool = image_tool()?;
+        let image_tool = ImageTool::from_environment()?;
         let target_dir = project.external_kits_dir();
         create_dir_all(&target_dir).await.context(format!(
             "failed to create external-kits directory at {}",
             target_dir.display()
         ))?;
         for image in self.kit.iter() {
-            self.extract_kit(
-                image_tool.clone(),
-                &project.external_kits_dir(),
-                image,
-                arch,
-            )
-            .await?;
+            self.extract_kit(&image_tool, &project.external_kits_dir(), image, arch)
+                .await?;
         }
         let mut kit_list = Vec::new();
         let mut ser =
@@ -357,7 +346,7 @@ impl Lock {
 
     async fn get_manifest(
         &self,
-        image_tool: Rc<dyn ImageTool>,
+        image_tool: &ImageTool,
         image: &LockedImage,
         arch: &str,
     ) -> Result<ManifestView> {
@@ -378,7 +367,7 @@ impl Lock {
 
     async fn extract_kit<P>(
         &self,
-        image_tool: Rc<dyn ImageTool>,
+        image_tool: &ImageTool,
         path: P,
         image: &LockedImage,
         arch: &str,
@@ -394,11 +383,11 @@ impl Lock {
         create_dir_all(&cache_path).await?;
 
         // First get the manifest for the specific requested architecture
-        let manifest = self.get_manifest(image_tool.clone(), image, arch).await?;
+        let manifest = self.get_manifest(image_tool, image, arch).await?;
         let oci_archive = OCIArchive::new(image, manifest.digest.as_str(), &cache_path)?;
 
         // Checks for the saved image locally, or else pulls and saves it
-        oci_archive.pull_image(image_tool.clone()).await?;
+        oci_archive.pull_image(image_tool).await?;
 
         // Checks if this archive has already been extracted by checking a digest file
         // otherwise cleans up the path and unpacks the archive
@@ -411,7 +400,7 @@ impl Lock {
         let vendor_table = project.vendor();
         let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
         let mut locked: Vec<LockedImage> = Vec::new();
-        let image_tool = image_tool()?;
+        let image_tool = ImageTool::from_environment()?;
 
         let mut remaining: Vec<Image> = project.kits();
         let mut sdk_set: HashSet<Image> = HashSet::new();
@@ -440,8 +429,8 @@ impl Lock {
                     (image.name.clone(), image.vendor.clone()),
                     image.version.clone(),
                 );
-                let locked_image = LockedImage::new(image_tool.clone(), vendor, image).await?;
-                let kit = Self::find_kit(image_tool.clone(), vendor, &locked_image).await?;
+                let locked_image = LockedImage::new(&image_tool, vendor, image).await?;
+                let kit = Self::find_kit(&image_tool, vendor, &locked_image).await?;
                 locked.push(locked_image);
                 sdk_set.insert(kit.sdk);
                 for dep in kit.kits {
@@ -470,13 +459,13 @@ impl Lock {
             schema_version: project.schema_version(),
             release_version: project.release_version().to_string(),
             digest: project.digest()?,
-            sdk: LockedImage::new(image_tool, vendor, sdk).await?,
+            sdk: LockedImage::new(&image_tool, vendor, sdk).await?,
             kit: locked,
         })
     }
 
     async fn find_kit(
-        image_tool: Rc<dyn ImageTool>,
+        image_tool: &ImageTool,
         vendor: &Vendor,
         image: &LockedImage,
     ) -> Result<ImageMetadata> {
@@ -487,7 +476,7 @@ impl Lock {
             let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
 
             // Now we want to fetch the metadata from the OCI image config
-            let config = image_tool.as_ref().get_config(image_uri.as_str()).await?;
+            let config = image_tool.get_config(image_uri.as_str()).await?;
             let encoded = config
                 .labels
                 .get("dev.bottlerocket.kit.v1")

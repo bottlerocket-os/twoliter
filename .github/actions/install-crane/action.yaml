@@ -1,0 +1,45 @@
+name: "Install crane"
+description: "Installs crane for use in testing."
+inputs:
+  crane-version:
+    description: "Version of crane to install"
+    required: false
+    default: latest
+  install-dir:
+    description: "Directory to install crane"
+    required: false
+    default: $HOME/.crane
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: |
+        mkdir -p ${{ inputs.install-dir }}
+
+        VERSION=${{ inputs.crane-version }}
+        if [[ "${VERSION}" == "latest" ]]; then
+          VERSION=$(gh release list \
+            --exclude-pre-releases \
+            -R google/go-containerregistry \
+            --json name \
+            | jq -r '.[0].name')
+        fi
+
+        case ${{ runner.arch }} in
+          X64)
+            ARCH=x86_64
+            ;;
+          ARM64)
+            ARCH=arm64
+            ;;
+        esac
+
+        ARTIFACT_NAME="go-containerregistry_Linux_${ARCH}.tar.gz"
+        gh release download "${VERSION}" \
+          -R google/go-containerregistry \
+          -p "${ARTIFACT_NAME}" \
+          --output - \
+          | tar -zxvf - -C "${{ inputs.install-dir }}" crane
+
+        echo "${{ inputs.install-dir }}" >> "${GITHUB_PATH}"

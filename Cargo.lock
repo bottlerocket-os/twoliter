@@ -1834,6 +1834,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration-tests"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "twoliter",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2167,6 +2175,8 @@ name = "oci-cli-wrapper"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "log",
+ "olpc-cjson",
  "regex",
  "serde",
  "serde_json",

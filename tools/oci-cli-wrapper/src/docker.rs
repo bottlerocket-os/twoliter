@@ -8,14 +8,15 @@ use tar::Archive;
 use tempfile::NamedTempFile;
 
 use crate::cli::CommandLine;
-use crate::{error, ConfigView, DockerArchitecture, ImageTool, Result};
+use crate::{error, ConfigView, DockerArchitecture, ImageToolImpl, Result};
 
+#[derive(Debug)]
 pub struct DockerCLI {
     pub(crate) cli: CommandLine,
 }
 
 #[async_trait]
-impl ImageTool for DockerCLI {
+impl ImageToolImpl for DockerCLI {
     async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()> {
         // First we pull the image to local daemon
         self.cli
@@ -57,13 +58,7 @@ impl ImageTool for DockerCLI {
         let bytes = self
             .cli
             .output(
-                &[
-                    "image",
-                    "inspect",
-                    uri,
-                    "--format",
-                    "\"{{ json .Config }}\"",
-                ],
+                &["image", "inspect", uri, "--format", "{{ json .Config }}"],
                 format!("failed to fetch image config from {}", uri),
             )
             .await?;

@@ -7,15 +7,16 @@ use tar::Archive as TarArchive;
 use tempfile::TempDir;
 
 use crate::{
-    cli::CommandLine, error, ConfigView, DockerArchitecture, ImageTool, ImageView, Result,
+    cli::CommandLine, error, ConfigView, DockerArchitecture, ImageToolImpl, ImageView, Result,
 };
 
+#[derive(Debug)]
 pub struct CraneCLI {
     pub(crate) cli: CommandLine,
 }
 
 #[async_trait]
-impl ImageTool for CraneCLI {
+impl ImageToolImpl for CraneCLI {
     async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()> {
         let archive_path = path.to_string_lossy();
         self.cli

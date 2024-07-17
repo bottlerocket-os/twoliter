@@ -21,8 +21,12 @@ fmt:
 test:
 	cargo test --release --locked
 
+.PHONY: integ
+integ:
+	cargo test --manifest-path tests/integration-tests/Cargo.toml -- --include-ignored
+
 .PHONY: check
-check: fmt clippy deny test
+check: fmt clippy deny test integ
 
 .PHONY: build
 build: check

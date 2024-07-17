@@ -4,12 +4,21 @@ use tokio::process::Command;
 
 use crate::{error, Result};
 
+#[derive(Debug)]
 pub(crate) struct CommandLine {
     pub(crate) path: PathBuf,
 }
 
 impl CommandLine {
     pub(crate) async fn output(&self, args: &[&str], error_msg: String) -> Result<Vec<u8>> {
+        log::debug!(
+            "Executing '{}' with args [{}]",
+            self.path.display(),
+            args.iter()
+                .map(|arg| format!("'{}'", arg))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         let output = Command::new(&self.path)
             .args(args)
             .output()
@@ -23,10 +32,22 @@ impl CommandLine {
                 args: args.iter().map(|x| x.to_string()).collect::<Vec<_>>()
             }
         );
+        log::debug!(
+            "stdout: {}",
+            String::from_utf8_lossy(&output.stdout).to_string()
+        );
         Ok(output.stdout)
     }
 
     pub(crate) async fn spawn(&self, args: &[&str], error_msg: String) -> Result<()> {
+        log::debug!(
+            "Executing '{}' with args [{}]",
+            self.path.display(),
+            args.iter()
+                .map(|arg| format!("'{}'", arg))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         let status = Command::new(&self.path)
             .args(args)
             .spawn()
