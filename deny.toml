@@ -64,10 +64,6 @@ skip = [
     { name = "base64" },
     # several dependencies are using an old version of bitflags
     { name = "bitflags", version = "=1.3" },
-    # dependencies are using different versions of event-listener
-    { name = "event-listener", version = "=4" },
-    # dependencies are using different versions of event-listener-strategy
-    { name = "event-listener-strategy", version = "=0.4" },
     # multiple deps are using an older version of hashbrown
     { name = "hashbrown", version = "=0.12" },
     # multiple deps are using an older version of indexmap
@@ -76,8 +72,12 @@ skip = [
     { name = "heck", version = "=0.4" },
     # dependencies are using different versions of http
     { name = "http", version = "=0.2" },
+    # dependencies are using different versions of http-body
+    { name = "http-body", version = "=0.4" },
     # kube-client uses an older version of pem
     { name = "pem", version = "=1" },
+    # dependencies are using different versions of redox_syscall
+    { name = "redox_syscall", version = "=0.4" },
     # several dependencies are using an old version of serde_yaml
     { name = "serde_yaml", version = "=0.8" },
     # dependencies are using different versions of snafu

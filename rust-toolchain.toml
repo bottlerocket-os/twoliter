@@ -2,5 +2,5 @@
 # particular date of the nightly compiler, but we want builds to be reproducable, so we lock to a
 # specific, recent instance of nightly.
 [toolchain]
-channel = "nightly-2024-02-16"
+channel = "nightly-2024-07-11"
 profile = "default"

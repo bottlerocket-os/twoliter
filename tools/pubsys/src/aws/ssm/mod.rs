@@ -162,7 +162,7 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
         };
 
         let ssm_client = SsmClient::new(&client_config);
-        if ssm_clients.get(region).is_none() {
+        if !ssm_clients.contains_key(region) {
             ssm_clients.insert(region.clone(), ssm_client);
         }
 

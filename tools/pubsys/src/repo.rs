@@ -482,10 +482,8 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
         .repo
         .as_ref()
         .and_then(|repo_section| repo_section.get(&repo_args.repo))
-        .map(|repo| {
-            info!("Using repo '{}' from Infra.toml", repo_args.repo);
-            repo
-        }) {
+    {
+        info!("Using repo '{}' from Infra.toml", repo_args.repo);
         repo_config
     } else {
         info!(
