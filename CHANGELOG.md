@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.2...HEAD
 
+## [0.4.3] - 2024-07-17
+
+### Changes
+
+- Update rust nightly to newer version ([#325])
+- Fix image handling bugs in `twoliter update` ([#326])
+
+[#325]: https://github.com/bottlerocket-os/twoliter/pull/325
+[#326]: https://github.com/bottlerocket-os/twoliter/pull/326
+
+[0.4.3]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.2...v0.4.3
+
 ## [0.4.2] - 2024-07-11
 
 ### Added
