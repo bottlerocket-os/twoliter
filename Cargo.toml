@@ -16,6 +16,8 @@ members = [
     "tools/unplug",
     "tools/update-metadata",
     "twoliter",
+
+    "tests/integration-tests",
 ]
 
 [profile.release]

@@ -22,6 +22,10 @@ jobs:
       labels: bottlerocket_ubuntu-latest_16-core
     steps:
       - uses: actions/checkout@v3
+      - name: Install crane for testing
+        uses: ./.github/actions/install-crane
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo install cargo-deny --locked
       - run: cargo install cargo-make --locked
       - run: make build
