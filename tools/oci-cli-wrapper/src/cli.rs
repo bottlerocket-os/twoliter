@@ -4,6 +4,7 @@ use tokio::process::Command;
 
 use crate::{error, Result};
 
+#[derive(Debug)]
 pub(crate) struct CommandLine {
     pub(crate) path: PathBuf,
 }

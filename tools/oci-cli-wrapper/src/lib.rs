@@ -12,13 +12,14 @@
 //!     metadata. In addition, in order to operate with OCI image format, the containerd-snapshotter
 //!     feature has to be enabled in the docker daemon
 use std::fmt::{Display, Formatter};
-use std::{collections::HashMap, env, path::Path, rc::Rc};
+use std::{collections::HashMap, env, path::Path};
 
 use async_trait::async_trait;
 use cli::CommandLine;
 use crane::CraneCLI;
 use docker::DockerCLI;
-use serde::Deserialize;
+use olpc_cjson::CanonicalFormatter;
+use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use which::which;
 
@@ -26,8 +27,122 @@ mod cli;
 mod crane;
 mod docker;
 
+#[derive(Debug)]
+pub struct ImageTool {
+    image_tool_impl: Box<dyn ImageToolImpl>,
+}
+
+impl ImageTool {
+    /// Uses the container tool specified by the given tool name.
+    ///
+    /// The specified tool must be present in the unix search path.
+    fn from_tool_name(tool_name: &str) -> Result<Self> {
+        let image_tool_impl: Box<dyn ImageToolImpl> = match tool_name {
+            "docker" => Box::new(DockerCLI {
+                cli: CommandLine {
+                    path: which("docker").context(error::NotFoundSnafu { name: "docker" })?,
+                },
+            }),
+            tool @ ("crane" | "gcrane" | "krane") => Box::new(CraneCLI {
+                cli: CommandLine {
+                    path: which(tool).context(error::NotFoundSnafu { name: tool })?,
+                },
+            }),
+            _ => return error::UnsupportedSnafu { name: tool_name }.fail(),
+        };
+
+        Ok(Self { image_tool_impl })
+    }
+
+    /// Auto-selects the container tool based on unix search path.
+    ///
+    /// Uses `crane` if available, falling back to `docker` otherwise.
+    fn from_unix_search_path() -> Result<Self> {
+        let crane = which("krane").or(which("gcrane")).or(which("crane"));
+        let image_tool_impl: Box<dyn ImageToolImpl> = if let Ok(path) = crane {
+            Box::new(CraneCLI {
+                cli: CommandLine { path },
+            })
+        } else {
+            Box::new(DockerCLI {
+                cli: CommandLine {
+                    path: which("docker").context(error::NoneFoundSnafu)?,
+                },
+            })
+        };
+
+        Ok(Self { image_tool_impl })
+    }
+
+    /// Auto-select the container tool to use by environment variable
+    /// and-or auto detection.
+    ///
+    /// If TWOLITER_KIT_IMAGE_TOOL environment variable is set, uses that value.
+    /// Valid values are:
+    /// * docker
+    /// * crane | gcrane | krane
+    ///
+    /// Otherwise, searches $PATH, using `crane` if available and falling back to docker otherwise.
+    pub fn from_environment() -> Result<Self> {
+        if let Ok(name) = env::var("TWOLITER_KIT_IMAGE_TOOL") {
+            Self::from_tool_name(&name)
+        } else {
+            Self::from_unix_search_path()
+        }
+    }
+
+    pub fn new(image_tool_impl: Box<dyn ImageToolImpl>) -> Self {
+        Self { image_tool_impl }
+    }
+
+    /// Pull an image archive to disk
+    pub async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()> {
+        self.image_tool_impl.pull_oci_image(path, uri).await
+    }
+
+    /// Fetch the image config
+    pub async fn get_config(&self, uri: &str) -> Result<ConfigView> {
+        self.image_tool_impl.get_config(uri).await
+    }
+
+    /// Fetch the manifest
+    pub async fn get_manifest(&self, uri: &str) -> Result<Vec<u8>> {
+        let manifest_bytes = self.image_tool_impl.get_manifest(uri).await?;
+        let manifest_object: serde_json::Value =
+            serde_json::from_slice(&manifest_bytes).context(error::ManifestDeserializeSnafu)?;
+
+        let mut canonicalized_manifest = Vec::new();
+        let mut ser = serde_json::Serializer::with_formatter(
+            &mut canonicalized_manifest,
+            CanonicalFormatter::new(),
+        );
+
+        manifest_object
+            .serialize(&mut ser)
+            .context(error::ManifestCanonicalizeSnafu)?;
+
+        Ok(canonicalized_manifest)
+    }
+
+    /// Push a single-arch image in oci archive format
+    pub async fn push_oci_archive(&self, path: &Path, uri: &str) -> Result<()> {
+        self.image_tool_impl.push_oci_archive(path, uri).await
+    }
+
+    /// Push the multi-arch kit manifest list
+    pub async fn push_multi_platform_manifest(
+        &self,
+        platform_images: Vec<(DockerArchitecture, String)>,
+        uri: &str,
+    ) -> Result<()> {
+        self.image_tool_impl
+            .push_multi_platform_manifest(platform_images, uri)
+            .await
+    }
+}
+
 #[async_trait]
-pub trait ImageTool {
+pub trait ImageToolImpl: std::fmt::Debug {
     /// Pull an image archive to disk
     async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()>;
     /// Fetch the image config
@@ -42,37 +157,6 @@ pub trait ImageTool {
         platform_images: Vec<(DockerArchitecture, String)>,
         uri: &str,
     ) -> Result<()>;
-}
-
-/// Auto-select the container tool to use by environment variable
-/// and-or auto detection
-pub fn image_tool() -> Result<Rc<dyn ImageTool>> {
-    if let Ok(name) = env::var("TWOLITER_KIT_IMAGE_TOOL") {
-        return match name.as_str() {
-            "docker" => Ok(Rc::new(DockerCLI {
-                cli: CommandLine {
-                    path: which("docker").context(error::NotFoundSnafu { name: "docker" })?,
-                },
-            })),
-            tool @ ("crane" | "gcrane" | "krane") => Ok(Rc::new(CraneCLI {
-                cli: CommandLine {
-                    path: which(tool).context(error::NotFoundSnafu { name: tool })?,
-                },
-            })),
-            _ => error::UnsupportedSnafu { name }.fail(),
-        };
-    }
-    let crane = which("krane").or(which("gcrane")).or(which("crane"));
-    if let Ok(path) = crane {
-        return Ok(Rc::new(CraneCLI {
-            cli: CommandLine { path },
-        }));
-    };
-    Ok(Rc::new(DockerCLI {
-        cli: CommandLine {
-            path: which("docker").context(error::NoneFoundSnafu)?,
-        },
-    }))
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -150,6 +234,12 @@ pub mod error {
 
         #[snafu(display("invalid architecture '{value}'"))]
         InvalidArchitecture { value: String },
+
+        #[snafu(display("Failed to deserialize image manifest: {source}"))]
+        ManifestDeserialize { source: serde_json::Error },
+
+        #[snafu(display("Failed to canonicalize image manifest: {source}"))]
+        ManifestCanonicalize { source: serde_json::Error },
 
         #[snafu(display("No digest returned by `docker load`"))]
         NoDigest,
