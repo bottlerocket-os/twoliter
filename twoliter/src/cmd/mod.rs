@@ -140,6 +140,7 @@ mod test {
         let command = Fetch {
             project_path: Some(project_path.to_path_buf()),
             arch: arch.into(),
+            kit_override: None,
         };
         command.run().await.unwrap()
     }
