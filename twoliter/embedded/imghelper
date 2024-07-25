@@ -495,7 +495,7 @@ do_sign() {
   pesign -i "${what}" -o "${what}.signed" -s "${sign_key[@]}"
   mv "${what}.signed" "${what}"
   pesign -i "${what}" -l
-  pesigcheck -i "${what}" -n 0 -c "${cert}"
+  NSS_DISABLE_PKIX_VERIFY=1 pesigcheck -i "${what}" -n 0 -c "${cert}"
 }
 
 sign_shim() {
