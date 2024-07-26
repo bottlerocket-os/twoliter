@@ -574,7 +574,7 @@ generate_hmac() {
   local vmlinuz
   vmlinuz="${1:?}"
   openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" |
-    awk -v vmlinuz="${vmlinuz}" '{ print $2 "  " vmlinuz }' \
+    awk '{ print $2 "  vmlinuz" }' \
       >"${vmlinuz%/*}/.${vmlinuz##*/}.hmac"
 }
 
