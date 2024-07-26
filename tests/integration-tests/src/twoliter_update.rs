@@ -1,8 +1,6 @@
 use super::{run_command, test_projects_dir, TWOLITER_PATH};
 
 const EXPECTED_LOCKFILE: &str = r#"schema-version = 1
-release-version = "1.0.0"
-digest = "m/6DbBacnIBHMo34GCuzA4pAHzrnQJ2G/XJMMguZXjw="
 
 [sdk]
 name = "bottlerocket-sdk"
