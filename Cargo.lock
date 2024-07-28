@@ -3792,6 +3792,7 @@ dependencies = [
  "testsys",
  "tokio",
  "toml",
+ "tracing",
  "tuftool",
  "unplug",
  "uuid",

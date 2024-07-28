@@ -1,8 +1,10 @@
 use crate::common::fs::{create_dir_all, read, remove_dir_all, write};
 use crate::project::{Image, Project, ValidIdentifier, Vendor};
 use crate::schema_version::SchemaVersion;
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use base64::Engine;
+use futures::pin_mut;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use oci_cli_wrapper::{DockerArchitecture, ImageTool};
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
 use semver::Version;
@@ -11,13 +13,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Digest;
 use std::cmp::PartialEq;
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::mem::take;
 use std::path::{Path, PathBuf};
 use tar::Archive as TarArchive;
 use tokio::fs::read_to_string;
+use tracing::{debug, error, info, instrument, trace};
 
 const TWOLITER_LOCK: &str = "Twoliter.lock";
 
@@ -47,11 +50,18 @@ impl PartialEq for LockedImage {
 impl LockedImage {
     pub async fn new(image_tool: &ImageTool, vendor: &Vendor, image: &Image) -> Result<Self> {
         let source = format!("{}/{}:v{}", vendor.registry, image.name, image.version);
+        debug!("Pulling image manifest for locked image '{}'", source);
         let manifest_bytes = image_tool.get_manifest(source.as_str()).await?;
 
         // We calculate a 'digest' of the manifest to use as our unique id
         let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
         let digest = base64::engine::general_purpose::STANDARD.encode(digest.as_slice());
+        trace!(
+            "Calculated digest for locked image '{}': '{}'",
+            source,
+            digest
+        );
+
         Ok(Self {
             name: image.name.to_string(),
             version: image.version.clone(),
@@ -88,7 +98,7 @@ impl Hash for LockedImage {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct ImageMetadata {
     /// The name of the kit
     #[allow(dead_code)]
@@ -101,6 +111,69 @@ struct ImageMetadata {
     /// Any dependent kits
     #[serde(rename = "kit")]
     pub kits: Vec<Image>,
+}
+
+impl TryFrom<EncodedKitMetadata> for ImageMetadata {
+    type Error = anyhow::Error;
+
+    fn try_from(value: EncodedKitMetadata) -> Result<Self, Self::Error> {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(value.0)
+            .context("failed to decode kit metadata as base64")?;
+        serde_json::from_slice(bytes.as_slice()).context("failed to parse kit metadata json")
+    }
+}
+
+/// Encoded kit metadata, which is embedded in a label of the OCI image config.
+#[derive(Clone, Eq, PartialEq)]
+struct EncodedKitMetadata(String);
+
+impl EncodedKitMetadata {
+    #[instrument(level = "trace")]
+    async fn try_from_image(image_uri: &str, image_tool: &ImageTool) -> Result<Self> {
+        trace!(image_uri, "Extracting kit metadata from OCI image config");
+        let config = image_tool.get_config(image_uri).await?;
+        let kit_metadata = EncodedKitMetadata(
+            config
+                .labels
+                .get("dev.bottlerocket.kit.v1")
+                .context("no metadata stored on image, this image appears to not be a kit")?
+                .to_owned(),
+        );
+
+        trace!(
+            image_uri,
+            image_config = ?config,
+            ?kit_metadata,
+            "Kit metadata retrieved from image config"
+        );
+
+        Ok(kit_metadata)
+    }
+
+    /// Infallible method to provide debugging insights into encoded `ImageMetadata`
+    ///
+    /// Shows a `Debug` view of the encoded `ImageMetadata` if possible, otherwise shows
+    /// the encoded form.
+    fn try_debug_image_metadata(&self) -> String {
+        self.debug_image_metadata().unwrap_or_else(|| {
+            format!("<ImageMetadata(encoded) [{}]>", self.0.replace("\n", "\\n"))
+        })
+    }
+
+    fn debug_image_metadata(&self) -> Option<String> {
+        base64::engine::general_purpose::STANDARD
+            .decode(&self.0)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(bytes.as_slice()).ok())
+            .map(|metadata: ImageMetadata| format!("<ImageMetadata(decoded) [{:?}]>", metadata))
+    }
+}
+
+impl Debug for EncodedKitMetadata {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.try_debug_image_metadata())
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -189,7 +262,9 @@ impl OCIArchive {
         self.cache_dir.join(self.digest.replace(':', "-"))
     }
 
+    #[instrument(level = "trace", skip_all, fields(image = %self.image))]
     async fn pull_image(&self, image_tool: &ImageTool) -> Result<()> {
+        debug!("Pulling image '{}'", self.image);
         let digest_uri = self.image.digest_uri(self.digest.as_str());
         let oci_archive_path = self.archive_path();
         if !oci_archive_path.exists() {
@@ -197,10 +272,17 @@ impl OCIArchive {
             image_tool
                 .pull_oci_image(oci_archive_path.as_path(), digest_uri.as_str())
                 .await?;
+        } else {
+            debug!("Image '{}' already present -- no need to pull.", self.image);
         }
         Ok(())
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(image = %self.image, out_dir = %out_dir.as_ref().display()),
+    )]
     async fn unpack_layers<P>(&self, out_dir: P) -> Result<()>
     where
         P: AsRef<Path>,
@@ -213,10 +295,16 @@ impl OCIArchive {
                 digest_file.display()
             ))?;
             if digest == self.digest {
+                trace!(
+                    "Found existing digest file for image '{}' at '{}'",
+                    self.image,
+                    digest_file.display()
+                );
                 return Ok(());
             }
         }
 
+        debug!("Unpacking layers for image '{}'", self.image);
         remove_dir_all(path).await?;
         create_dir_all(path).await?;
         let index_bytes = read(self.archive_path().join("index.json")).await?;
@@ -224,6 +312,7 @@ impl OCIArchive {
             .context("failed to deserialize oci image index")?;
 
         // Read the manifest so we can get the layer digests
+        trace!(image = %self.image, "Extracting layer digests from image manifest");
         let digest = index
             .manifests
             .first()
@@ -237,6 +326,7 @@ impl OCIArchive {
             .context("failed to deserialize oci manifest")?;
 
         // Extract each layer into the target directory
+        trace!(image = %self.image, "Extracting image layers");
         for layer in manifest_layout.layers {
             let digest = layer.digest.to_string().replace(':', "/");
             let layer_blob = File::open(self.archive_path().join(format!("blobs/{digest}")))
@@ -271,28 +361,38 @@ pub(crate) struct Lock {
 
 #[allow(dead_code)]
 impl Lock {
+    #[instrument(level = "trace", skip(project))]
     pub(crate) async fn create(project: &Project) -> Result<Self> {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
+
+        info!("Resolving project references to create lock file");
         let lock_state = Self::resolve(project).await?;
         let lock_str = toml::to_string(&lock_state).context("failed to serialize lock file")?;
+
+        debug!("Writing new lock file to '{}'", lock_file_path.display());
         write(&lock_file_path, lock_str)
             .await
             .context("failed to write lock file")?;
         Ok(lock_state)
     }
 
+    #[instrument(level = "trace", skip(project))]
     pub(crate) async fn load(project: &Project) -> Result<Self> {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
         ensure!(
             lock_file_path.exists(),
             "Twoliter.lock does not exist, please run `twoliter update` first"
         );
-        let lock_state = Self::resolve(project).await?;
+        debug!("Loading existing lockfile '{}'", lock_file_path.display());
         let lock_str = read_to_string(&lock_file_path)
             .await
             .context("failed to read lockfile")?;
         let lock: Self =
             toml::from_str(lock_str.as_str()).context("failed to deserialize lockfile")?;
+
+        info!("Resolving project references to check against lock file");
+        let lock_state = Self::resolve(project).await?;
+
         ensure!(lock_state == lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
         Ok(lock)
     }
@@ -305,6 +405,7 @@ impl Lock {
     }
 
     /// Fetches all external kits defined in a Twoliter.lock to the build directory
+    #[instrument(level = "trace", skip_all)]
     pub(crate) async fn fetch(&self, project: &Project, arch: &str) -> Result<()> {
         let image_tool = ImageTool::from_environment()?;
         let target_dir = project.external_kits_dir();
@@ -312,6 +413,11 @@ impl Lock {
             "failed to create external-kits directory at {}",
             target_dir.display()
         ))?;
+
+        info!(
+            dependencies = ?self.kit.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "Extracting kit dependencies."
+        );
         for image in self.kit.iter() {
             self.extract_kit(&image_tool, &project.external_kits_dir(), image, arch)
                 .await?;
@@ -344,6 +450,7 @@ impl Lock {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(image), fields(image = %image))]
     async fn get_manifest(
         &self,
         image_tool: &ImageTool,
@@ -365,6 +472,11 @@ impl Lock {
             ))
     }
 
+    #[instrument(
+        level = "trace",
+        skip(image),
+        fields(image = %image, path = %path.as_ref().display())
+    )]
     async fn extract_kit<P>(
         &self,
         image_tool: &ImageTool,
@@ -375,6 +487,11 @@ impl Lock {
     where
         P: AsRef<Path>,
     {
+        info!(
+            "Extracting kit '{}' to '{}'",
+            image,
+            path.as_ref().display()
+        );
         let vendor = image.vendor.clone();
         let name = image.name.clone();
         let target_path = path.as_ref().join(format!("{vendor}/{name}/{arch}"));
@@ -396,6 +513,7 @@ impl Lock {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(project))]
     async fn resolve(project: &Project) -> Result<Self> {
         let vendor_table = project.vendor();
         let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
@@ -411,6 +529,7 @@ impl Lock {
         while !remaining.is_empty() {
             let working_set: Vec<_> = take(&mut remaining);
             for image in working_set.iter() {
+                debug!(%image, "Resolving kit '{}'", image.name);
                 if let Some(version) = known.get(&(image.name.clone(), image.vendor.clone())) {
                     let name = image.name.clone();
                     let left_version = image.version.clone();
@@ -418,6 +537,10 @@ impl Lock {
                     ensure!(
                         image.version == *version,
                         "cannot have multiple versions of the same kit ({name}-{left_version}@{vendor} != {name}-{version}@{vendor}",
+                    );
+                    debug!(
+                        ?image,
+                        "Skipping kit '{}' as it has already been resolved", image.name
                     );
                     continue;
                 }
@@ -438,12 +561,14 @@ impl Lock {
                 }
             }
         }
+
+        debug!(?sdk_set, "Resolving workspace SDK");
         ensure!(
             sdk_set.len() <= 1,
             "cannot use multiple sdks (found sdk: {})",
             sdk_set
                 .iter()
-                .map(|x| format!("{}-{}@{}", x.name, x.version, x.vendor))
+                .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -462,38 +587,71 @@ impl Lock {
         })
     }
 
+    #[instrument(level = "trace", skip(image), fields(image = %image))]
     async fn find_kit(
         image_tool: &ImageTool,
         vendor: &Vendor,
         image: &LockedImage,
     ) -> Result<ImageMetadata> {
+        debug!(kit_image = %image, "Searching for kit");
         let manifest_list: ManifestListView = serde_json::from_slice(image.manifest.as_slice())
             .context("failed to deserialize manifest list")?;
-        let mut encoded_metadata: Option<String> = None;
-        for manifest in manifest_list.manifests.iter() {
-            let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
+        trace!(manifest_list = ?manifest_list, "Deserialized manifest list");
+        debug!("Extracting kit metadata from OCI image");
+        let embedded_kit_metadata =
+            stream::iter(manifest_list.manifests).then(|manifest| async move {
+                let image_uri = format!("{}/{}@{}", vendor.registry, image.name, manifest.digest);
+                EncodedKitMetadata::try_from_image(&image_uri, image_tool).await
+            });
+        pin_mut!(embedded_kit_metadata);
 
-            // Now we want to fetch the metadata from the OCI image config
-            let config = image_tool.get_config(image_uri.as_str()).await?;
-            let encoded = config
-                .labels
-                .get("dev.bottlerocket.kit.v1")
-                .context("no metadata stored on image, this image appears to not be a kit")?;
-            if let Some(metadata) = encoded_metadata.as_ref() {
-                ensure!(
-                    encoded == metadata,
-                    "metadata does match between images in manifest list"
+        let canonical_metadata = embedded_kit_metadata
+            .try_next()
+            .await?
+            .context(format!("could not find metadata for kit {}", image))?;
+
+        trace!("Checking that all manifests refer to the same kit.");
+        while let Some(kit_metadata) = embedded_kit_metadata.try_next().await? {
+            if kit_metadata != canonical_metadata {
+                error!(
+                    ?canonical_metadata,
+                    ?kit_metadata,
+                    "Mismatched kit metadata in manifest list"
                 );
-            } else {
-                encoded_metadata = Some(encoded.clone());
+                bail!("Metadata does not match between images in manifest list");
             }
         }
-        let encoded =
-            encoded_metadata.context(format!("could not find metadata for kit {}", image))?;
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded.as_str())
-            .context("malformed kit metadata detected")?;
 
-        serde_json::from_slice(decoded.as_slice()).context("malformed kit metadata json")
+        canonical_metadata
+            .try_into()
+            .context("Failed to decode and parse kit metadata")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_try_debug_image_metadata_succeeds() {
+        // Given a valid encoded metadata string,
+        // When we attempt to decode it for debugging,
+        // Then the debug string is marked as having been decoded.
+        let encoded = EncodedKitMetadata(
+            "eyJraXQiOltdLCJuYW1lIjoiYm90dGxlcm9ja2V0LWNvcmUta2l0Iiwic2RrIjp7ImRpZ2VzdCI6ImlyY09EUl\
+            d3ZmxjTTdzaisrMmszSk5RWkovb3ZDUVRpUlkrRFpvaGdrNlk9IiwibmFtZSI6InRoYXItYmUtYmV0YS1zZGsiL\
+            CJzb3VyY2UiOiJwdWJsaWMuZWNyLmF3cy91MWczYzh6NC90aGFyLWJlLWJldGEtc2RrOnYwLjQzLjAiLCJ2ZW5k\
+            b3IiOiJib3R0bGVyb2NrZXQtbmV3IiwidmVyc2lvbiI6IjAuNDMuMCJ9LCJ2ZXJzaW9uIjoiMi4wLjAifQo="
+            .to_string()
+        );
+        assert!(encoded.debug_image_metadata().is_some());
+    }
+
+    #[test]
+    fn test_try_debug_image_metadata_fails() {
+        // Given an invalid encoded metadata string,
+        // When we attempt to decode it for debugging,
+        // Then the debug string is marked as remaining encoded.
+        let junk_data = EncodedKitMetadata("abcdefghijklmnophello".to_string());
+        assert!(junk_data.debug_image_metadata().is_none());
     }
 }
