@@ -414,7 +414,7 @@ sbsetup_aws_profile() {
     val="${var,,}"
     val="${HOME}/.aws/${val//_/-}.env"
     [[ -s "${val}" ]] || continue
-    declare -x "${var}=$(cat "${val}")"
+    declare -g -x "${var}=$(cat "${val}")"
   done
   # Verify that AWS credentials are functional.
   aws sts get-caller-identity
