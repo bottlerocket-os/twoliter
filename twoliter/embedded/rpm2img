@@ -196,7 +196,19 @@ if [[ -n "${CORE_KIT_VERSION}" && -n "${CORE_KIT_VENDOR}" ]]; then
   CORE_KIT_GIT_SHA="$(dnf --repofrompath \
     core-kit,file://"${CORE_KIT_PATH}" \
     --repo=core-kit repoquery \
-    --queryformat '%{Release}' 2>/dev/null | awk '/^1/{print $1}' | cut -d '.' -f 3)"
+    --queryformat '%{Buildtime} %{Release}' 2>/dev/null | \
+    sort -k 1,2 | \
+    awk -F '.' 'END {print $--NF}')"
+  if [[ -z "${CORE_KIT_GIT_SHA}" ]]; then
+    echo "Could not find Git sha for bottlerocket-core-kit" >&2
+    exit 1
+  fi
+  # If the Git sha contains whitespace, we may have accidentally grabbed multiple
+  if [[ "${CORE_KIT_GIT_SHA}" =~ [[:space:]] ]]; then
+    echo "Extracted invalid Git sha from bottlerocket-core-kit: '${CORE_KIT_GIT_SHA}'" >&2
+    exit 1
+  fi
+
   # Query the bottlerocket-core-kit repo of RPMs for all package names.
   CORE_KIT_INVENTORY_QUERY="%{NAME}"
   # shellcheck disable=SC2312 # Array is validated elsewhere.
