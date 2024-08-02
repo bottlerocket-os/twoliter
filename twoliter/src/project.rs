@@ -4,19 +4,16 @@ use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
 use async_walkdir::WalkDir;
-use base64::Engine;
 use buildsys_config::{EXTERNAL_KIT_DIRECTORY, EXTERNAL_KIT_METADATA};
 use futures::stream::StreamExt;
 use log::{debug, info, trace, warn};
 use semver::Version;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use toml::Table;
 
@@ -200,38 +197,6 @@ impl Project {
         // Provide a predictable ordering.
         modules.sort();
         Ok(modules)
-    }
-
-    /// Returns a base64 encoded sha256 hash of the contents of the Project structure.
-    /// Used for verifying if a change would occure in Twoliter.lock
-    pub(crate) fn digest(&self) -> Result<String> {
-        let mut hash = Sha256::default();
-        hash.write(self.release_version.as_bytes())
-            .context("failed to encode release version in hash")?;
-        for (key, value) in self.vendor.iter() {
-            hash.write(key.to_string().as_bytes())
-                .context("failed to encode vendor name in hash")?;
-            hash.write(value.registry.as_bytes())
-                .context("failed to encode vendor registry in hash")?;
-        }
-        if let Some(sdk) = self.sdk.as_ref() {
-            hash.write(sdk.name.to_string().as_bytes())
-                .context("failed to encode sdk name in hash")?;
-            hash.write(sdk.version.to_string().as_bytes())
-                .context("failed to encode sdk version in hash")?;
-            hash.write(sdk.vendor.to_string().as_bytes())
-                .context("failed to encode sdk vendor in hash")?;
-        }
-        for kit in self.kit.iter() {
-            hash.write(kit.name.to_string().as_bytes())
-                .context("failed to encode kit name in hash")?;
-            hash.write(kit.version.to_string().as_bytes())
-                .context("failed to encode kit version in hash")?;
-            hash.write(kit.vendor.to_string().as_bytes())
-                .context("failed to encode kit vendor in hash")?;
-        }
-        let project_hash = hash.finalize();
-        Ok(base64::engine::general_purpose::STANDARD.encode(project_hash.as_slice()))
     }
 }
 

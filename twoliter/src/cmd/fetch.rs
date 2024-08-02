@@ -10,6 +10,7 @@ pub(crate) struct Fetch {
     #[clap(long = "project-path")]
     pub(crate) project_path: Option<PathBuf>,
 
+    /// Architecture of images to fetch
     #[clap(long = "arch", default_value = "x86_64")]
     pub(crate) arch: String,
 }

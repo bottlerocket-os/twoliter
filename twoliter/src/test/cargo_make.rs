@@ -14,8 +14,6 @@ async fn test_cargo_make() {
     let vendor = project.vendor().get(&vendor_id).unwrap();
     let lock = Lock {
         schema_version: project.schema_version(),
-        release_version: project.release_version().to_string(),
-        digest: project.digest().unwrap(),
         kit: Vec::new(),
         sdk: LockedImage {
             name: "my-bottlerocket-sdk".to_string(),

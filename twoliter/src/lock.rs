@@ -1,4 +1,4 @@
-use crate::common::fs::{create_dir_all, read, remove_dir_all, remove_file, write};
+use crate::common::fs::{create_dir_all, read, remove_dir_all, write};
 use crate::project::{Image, Project, ValidIdentifier, Vendor};
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
@@ -22,7 +22,7 @@ use tokio::fs::read_to_string;
 const TWOLITER_LOCK: &str = "Twoliter.lock";
 
 /// Represents a locked dependency on an image
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct LockedImage {
     /// The name of the dependency
     pub name: String,
@@ -36,6 +36,12 @@ pub(crate) struct LockedImage {
     pub digest: String,
     #[serde(skip)]
     pub(crate) manifest: Vec<u8>,
+}
+
+impl PartialEq for LockedImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source && self.digest == other.digest
+    }
 }
 
 impl LockedImage {
@@ -252,48 +258,42 @@ impl OCIArchive {
 }
 
 /// Represents the structure of a `Twoliter.lock` lock file.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Lock {
     /// The version of the Twoliter.toml this was generated from
     pub schema_version: SchemaVersion<1>,
-    /// The workspace release version
-    pub release_version: String,
     /// The resolved bottlerocket sdk
     pub sdk: LockedImage,
     /// Resolved kit dependencies
     pub kit: Vec<LockedImage>,
-    /// sha256 digest of the Project this was generated from
-    pub digest: String,
 }
 
 #[allow(dead_code)]
 impl Lock {
-    pub(crate) async fn load(project: &Project) -> Result<Self> {
-        let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
-        if lock_file_path.exists() {
-            let lock_str = read_to_string(&lock_file_path)
-                .await
-                .context("failed to read lockfile")?;
-            let lock: Self =
-                toml::from_str(lock_str.as_str()).context("failed to deserialize lockfile")?;
-            // The digests must match, if changes are needed twoliter
-            ensure!(lock.digest == project.digest()?, "changes have occurred to Twoliter.toml that require an update to Twoliter.lock, if intentional please run twoliter update");
-            return Ok(lock);
-        }
-        Self::create(project).await
-    }
-
     pub(crate) async fn create(project: &Project) -> Result<Self> {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
-        if lock_file_path.exists() {
-            remove_file(&lock_file_path).await?;
-        }
-        let lock = Self::resolve(project).await?;
-        let lock_str = toml::to_string(&lock).context("failed to serialize lock file")?;
+        let lock_state = Self::resolve(project).await?;
+        let lock_str = toml::to_string(&lock_state).context("failed to serialize lock file")?;
         write(&lock_file_path, lock_str)
             .await
             .context("failed to write lock file")?;
+        Ok(lock_state)
+    }
+
+    pub(crate) async fn load(project: &Project) -> Result<Self> {
+        let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
+        ensure!(
+            lock_file_path.exists(),
+            "Twoliter.lock does not exist, please run `twoliter update` first"
+        );
+        let lock_state = Self::resolve(project).await?;
+        let lock_str = read_to_string(&lock_file_path)
+            .await
+            .context("failed to read lockfile")?;
+        let lock: Self =
+            toml::from_str(lock_str.as_str()).context("failed to deserialize lockfile")?;
+        ensure!(lock_state == lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
         Ok(lock)
     }
 
@@ -457,8 +457,6 @@ impl Lock {
         ))?;
         Ok(Self {
             schema_version: project.schema_version(),
-            release_version: project.release_version().to_string(),
-            digest: project.digest()?,
             sdk: LockedImage::new(&image_tool, vendor, sdk).await?,
             kit: locked,
         })
