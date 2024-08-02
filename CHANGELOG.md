@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.2...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.4...HEAD
+
+## [0.4.4] - 2024-08-02
+
+### Changes
+
+- Update cross to newer version ([#328])
+- Update testsys to v0.0.14 ([#341])
+- imghelper: remove full path from .vmlinuz.hmac ([#336])
+- imghelper: add ShellCheck exception to undo_sign() ([#336])
+- imghelper: hoist AWS vars into global environment ([#340])
+- TestSys: update log reader to use AsyncBufRead ([#341])
+- rpm2img: use latest rpm release for inventory ([#342])
+
+[#328]: https://github.com/bottlerocket-os/twoliter/pull/328
+[#336]: https://github.com/bottlerocket-os/twoliter/pull/336
+[#340]: https://github.com/bottlerocket-os/twoliter/pull/340
+[#341]: https://github.com/bottlerocket-os/twoliter/pull/341
+[#342]: https://github.com/bottlerocket-os/twoliter/pull/342
+
+[0.4.4]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.3...v0.4.4
 
 ## [0.4.3] - 2024-07-17
 
