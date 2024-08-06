@@ -190,6 +190,10 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         println!("cargo:rerun-if-changed={}", f.display());
     }
 
+    if args.common.cicd_hack {
+        return Ok(());
+    }
+
     DockerBuild::new_package(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
         .build()
@@ -209,6 +213,10 @@ fn build_kit(args: BuildKitArgs) -> Result<()> {
         &args.common.cargo_metadata_path,
     )
     .context(error::ManifestParseSnafu)?;
+
+    if args.common.cicd_hack {
+        return Ok(());
+    }
 
     DockerBuild::new_kit(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
@@ -232,6 +240,10 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
 
     supported_arch(manifest.info(), args.common.arch)?;
 
+    if args.common.cicd_hack {
+        return Ok(());
+    }
+
     DockerBuild::new_variant(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
         .build()
@@ -248,6 +260,10 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
     .context(error::ManifestParseSnafu)?;
 
     supported_arch(manifest.info(), args.common.arch)?;
+
+    if args.common.cicd_hack {
+        return Ok(());
+    }
 
     DockerBuild::repack_variant(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
