@@ -2,12 +2,12 @@ use crate::common::fs;
 use anyhow::{Context, Result};
 use filetime::{set_file_handle_times, set_file_mtime, FileTime};
 use flate2::read::ZlibDecoder;
-use log::debug;
 use std::path::Path;
 use tar::Archive;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Handle;
+use tracing::debug;
 
 const TAR_GZ_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tools.tar.gz"));
 const BOTTLEROCKET_VARIANT: &[u8] =

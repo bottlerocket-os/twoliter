@@ -1,6 +1,7 @@
 use anyhow::{ensure, Context, Result};
-use log::{self, debug, LevelFilter};
+use log::{self, LevelFilter};
 use tokio::process::Command;
+use tracing::{debug, instrument};
 
 /// This is passed as an environment variable to Buildsys. Buildsys tells Cargo to watch this
 /// environment variable for changes. So if we have a breaking change to the way Buildsys and/or
@@ -10,6 +11,7 @@ pub(crate) const BUILDSYS_OUTPUT_GENERATION_ID: u32 = 1;
 
 /// Run a `tokio::process::Command` and return a `Result` letting us know whether or not it worked.
 /// Pipes stdout/stderr when logging `LevelFilter` is more verbose than `Warn`.
+#[instrument(level = "trace", skip(cmd))]
 pub(crate) async fn exec_log(cmd: &mut Command) -> Result<()> {
     let quiet = matches!(
         log::max_level(),
@@ -22,6 +24,7 @@ pub(crate) async fn exec_log(cmd: &mut Command) -> Result<()> {
 /// Run a `tokio::process::Command` and return a `Result` letting us know whether or not it worked.
 /// `quiet` determines whether or not the command output will be piped to `stdout/stderr`. When
 /// `quiet=true`, no output will be shown and will be returned instead.
+#[instrument(level = "trace")]
 pub(crate) async fn exec(cmd: &mut Command, quiet: bool) -> Result<Option<String>> {
     debug!("Running: {:?}", cmd);
     Ok(if quiet {
@@ -73,7 +76,9 @@ pub(crate) mod fs {
     use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
     use tokio::fs;
+    use tracing::instrument;
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn canonicalize(path: impl AsRef<Path>) -> Result<PathBuf> {
         fs::canonicalize(path.as_ref()).await.context(format!(
             "Unable to canonicalize '{}'",
@@ -81,6 +86,11 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(from = %from.as_ref().display(), to = %to.as_ref().display())
+    )]
     pub(crate) async fn copy<P1, P2>(from: P1, to: P2) -> Result<u64>
     where
         P1: AsRef<Path>,
@@ -95,6 +105,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn create_dir(path: impl AsRef<Path>) -> Result<()> {
         fs::create_dir(path.as_ref()).await.context(format!(
             "Unable to create directory '{}'",
@@ -102,6 +113,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
         fs::create_dir_all(path.as_ref()).await.context(format!(
             "Unable to create directory '{}'",
@@ -109,6 +121,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn metadata(path: impl AsRef<Path>) -> Result<Metadata> {
         fs::metadata(path.as_ref()).await.context(format!(
             "Unable to read metadata for '{}'",
@@ -116,12 +129,14 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
         fs::read(path.as_ref())
             .await
             .context(format!("Unable to read from '{}'", path.as_ref().display()))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
         fs::read_to_string(path.as_ref()).await.context(format!(
             "Unable to read the following file as a string '{}'",
@@ -129,6 +144,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn remove_dir(path: impl AsRef<Path>) -> Result<()> {
         fs::remove_dir(path.as_ref()).await.context(format!(
             "Unable to remove directory (remove_dir) '{}'",
@@ -136,6 +152,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
         match fs::remove_dir_all(path.as_ref()).await {
             Ok(_) => Ok(()),
@@ -152,6 +169,11 @@ pub(crate) mod fs {
         }
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(from = %from.as_ref().display(), to = %to.as_ref().display())
+    )]
     pub(crate) async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
         let from = from.as_ref();
         let to = to.as_ref();
@@ -162,6 +184,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip(path), fields(path = %path.as_ref().display()))]
     pub(crate) async fn remove_file(path: impl AsRef<Path>) -> Result<()> {
         fs::remove_file(path.as_ref()).await.context(format!(
             "Unable to remove file '{}'",
@@ -169,6 +192,7 @@ pub(crate) mod fs {
         ))
     }
 
+    #[instrument(level = "trace", skip_all, fields(path = %path.as_ref().display()))]
     pub(crate) async fn write<P, C>(path: P, contents: C) -> Result<()>
     where
         P: AsRef<Path>,

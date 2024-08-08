@@ -6,7 +6,6 @@ use async_recursion::async_recursion;
 use async_walkdir::WalkDir;
 use buildsys_config::{EXTERNAL_KIT_DIRECTORY, EXTERNAL_KIT_METADATA};
 use futures::stream::StreamExt;
-use log::{debug, info, trace, warn};
 use semver::Version;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -16,10 +15,12 @@ use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use toml::Table;
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
 /// found (this is the same as `user_path` if provided).
+#[instrument(level = "trace")]
 pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<Project> {
     let project = match user_path {
         None => Project::find_and_load(".").await?,
@@ -268,6 +269,12 @@ pub(crate) struct Image {
     pub name: ValidIdentifier,
     pub version: Version,
     pub vendor: ValidIdentifier,
+}
+
+impl Display for Image {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}@{}", self.name, self.version, self.vendor)
+    }
 }
 
 /// This is used to `Deserialize` a project, then run validation code before returning a valid

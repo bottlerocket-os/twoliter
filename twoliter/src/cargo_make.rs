@@ -1,8 +1,8 @@
 use crate::common::{exec_log, BUILDSYS_OUTPUT_GENERATION_ID};
 use anyhow::{bail, Result};
-use log::trace;
 use std::path::PathBuf;
 use tokio::process::Command;
+use tracing::trace;
 
 /// A struct used to invoke `cargo make` tasks with `twoliter`'s `Makefile.toml`.
 /// ```rust
