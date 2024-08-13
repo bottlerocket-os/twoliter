@@ -45,6 +45,9 @@ pub(crate) enum Error {
     #[snafu(display("Failed to delete file '{}': {}", path.display(), source))]
     ExternalFileDelete { path: PathBuf, source: io::Error },
 
+    #[snafu(display("Failed to set modification time for file '{}': {}", path.display(), source))]
+    SetMtime { path: PathBuf, source: io::Error },
+
     #[snafu(display("Failed to get path segments from URL '{}'", url))]
     UrlPathSegments { url: String },
 }

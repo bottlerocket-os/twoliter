@@ -41,6 +41,12 @@ pub(crate) enum Error {
         source: std::io::Error,
     },
 
+    #[snafu(display("Failed to set modification time for file '{}': {}", path.display(), source))]
+    SetMtime {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
     #[snafu(display("Failed to write contents to '{}': {}", path.display(), source))]
     WriteFile {
         path: PathBuf,

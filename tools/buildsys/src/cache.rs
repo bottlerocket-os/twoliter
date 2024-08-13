@@ -14,6 +14,7 @@ pub(crate) mod error;
 use error::Result;
 
 use buildsys::manifest;
+use filetime::{set_file_mtime, FileTime};
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use sha2::{Digest, Sha512};
 use snafu::{ensure, OptionExt, ResultExt};
@@ -48,7 +49,7 @@ impl LookasideCache {
     }
 
     /// Fetch files stored out-of-tree and ensure they match the stored hash.
-    pub(crate) fn fetch(&self, files: &[manifest::ExternalFile]) -> Result<()> {
+    pub(crate) fn fetch(&self, files: &[manifest::ExternalFile], mtime: FileTime) -> Result<()> {
         for f in files {
             let url_file_name = Self::extract_file_name(&f.url)?;
             let path = &f.path.as_ref().unwrap_or(&url_file_name);
@@ -86,6 +87,7 @@ impl LookasideCache {
                 Ok(_) => {
                     fs::rename(&tmp, path)
                         .context(error::ExternalFileRenameSnafu { path: &tmp })?;
+                    set_file_mtime(path, mtime).context(error::SetMtimeSnafu { path })?;
                     continue;
                 }
                 Err(e) => {
@@ -96,6 +98,7 @@ impl LookasideCache {
                         self.fetch_file(&f.url, &tmp, hash)?;
                         fs::rename(&tmp, path)
                             .context(error::ExternalFileRenameSnafu { path: &tmp })?;
+                        set_file_mtime(path, mtime).context(error::SetMtimeSnafu { path })?;
                     } else {
                         // we failed to fetch from the lookaside cache, and we cannot fall back to
                         // upstream sources, so we should not continue, we need to return the error
