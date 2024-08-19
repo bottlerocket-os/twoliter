@@ -29,19 +29,19 @@ serde_json = "1"
 sha2 = "0.10"
 tar = "0.4"
 tempfile = "3"
-tokio = { version = "1", default-features = false, features = ["fs", "macros", "process", "rt-multi-thread"] }
+tokio = { version = "1", features = ["fs", "macros", "process", "rt-multi-thread"] }
 toml = "0.8"
 tracing = { version = "0.1", features = ["log"] }
 uuid = { version = "1", features = [ "v4" ] }
 
 # Binary dependencies. These are binaries that we want to embed in the Twoliter binary.
-buildsys = { version = "0.1.0", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }
-pipesys = { version = "0.1.0", artifact = [ "bin:pipesys" ], path = "../tools/pipesys" }
-pubsys = { version = "0.1.0", artifact = [ "bin:pubsys" ], path = "../tools/pubsys" }
-pubsys-setup = { version = "0.1.0", artifact = [ "bin:pubsys-setup" ], path = "../tools/pubsys-setup" }
-testsys = { version = "0.1.0", artifact = [ "bin:testsys" ], path = "../tools/testsys" }
+buildsys = { version = "0.1", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }
+pipesys = { version = "0.1", artifact = [ "bin:pipesys" ], path = "../tools/pipesys" }
+pubsys = { version = "0.1", artifact = [ "bin:pubsys" ], path = "../tools/pubsys" }
+pubsys-setup = { version = "0.1", artifact = [ "bin:pubsys-setup" ], path = "../tools/pubsys-setup" }
+testsys = { version = "0.1", artifact = [ "bin:testsys" ], path = "../tools/testsys" }
 tuftool = { version = "0.10", artifact = [ "bin:tuftool" ] }
-unplug = { version = "0.1.0", artifact = [ "bin:unplug" ], path = "../tools/unplug" }
+unplug = { version = "0.1", artifact = [ "bin:unplug" ], path = "../tools/unplug" }
 
 [build-dependencies]
 bytes = "1"
