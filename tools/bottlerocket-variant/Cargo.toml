@@ -9,6 +9,6 @@ publish = false
 exclude = ["README.md"]
 
 [dependencies]
-serde = "1"
-snafu = "0.8"
+serde.workspace = true
+snafu.workspace = true
 

@@ -10,28 +10,28 @@ edition = "2021"
 publish = false
 
 [dependencies]
-async-trait = "0.1"
-aws-config = "1"
-aws-sdk-ec2 = "1"
-base64 = "0.22"
-bottlerocket-types = { git = "https://github.com/bottlerocket-os/bottlerocket-test-system", version = "0.0.14", tag = "v0.0.14" }
-bottlerocket-variant = { version = "0.1", path = "../bottlerocket-variant" }
-clap = { version = "4", features = ["derive", "env"] }
-env_logger = "0.11"
-futures = "0.3"
-handlebars = "5"
-log = "0.4"
-maplit = "1"
-testsys-model = { git = "https://github.com/bottlerocket-os/bottlerocket-test-system", version = "0.0.14", tag = "v0.0.14" }
-pubsys-config = { path = "../pubsys-config/", version = "0.1" }
-fastrand = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_plain = "1"
-serde_yaml = "0.9"
-snafu = "0.8"
-term_size = "0.3"
-testsys-config = { path = "../testsys-config/", version = "0.1" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
-unescape = "0.1"
-url = "2"
+async-trait.workspace = true
+aws-config.workspace = true
+aws-sdk-ec2.workspace = true
+base64.workspace = true
+bottlerocket-types.workspace = true
+bottlerocket-variant.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+env_logger.workspace = true
+futures.workspace = true
+handlebars.workspace = true
+log.workspace = true
+maplit.workspace = true
+testsys-model.workspace = true
+pubsys-config.workspace = true
+fastrand.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_plain.workspace = true
+serde_yaml.workspace = true
+snafu.workspace = true
+term_size.workspace = true
+testsys-config.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
+unescape.workspace = true
+url.workspace = true

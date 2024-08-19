@@ -7,14 +7,14 @@ edition = "2021"
 publish = false
 
 [dependencies]
-anyhow = "1.0.75"
-clap = { version = "4", features = ["derive"] }
-daemonize = "0.5.0"
-env_logger = "0.11.3"
-futures = "0.3.28"
-log = "0.4.20"
-nix = { version = "0.28.0", features = ["fs"] }
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
+daemonize.workspace = true
+env_logger.workspace = true
+futures.workspace = true
+log.workspace = true
+nix = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 inotify = "0.10.2"

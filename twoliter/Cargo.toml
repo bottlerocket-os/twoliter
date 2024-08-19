@@ -10,43 +10,43 @@ keywords = ["twoliter", "bottlerocket"]
 exclude = ["/design", "/target", "/dockerfiles", "/scripts"]
 
 [dependencies]
-anyhow = "1"
-async-recursion = "1"
-async-walkdir = "1"
-base64 = "0.22"
-buildsys-config = { version = "0.1", path = "../tools/buildsys-config" }
-clap = { version = "4", features = ["derive", "env", "std"] }
-env_logger = "0.11"
-filetime = "0.2"
-flate2 = "1"
-futures= "0.3"
-log = "0.4"
-oci-cli-wrapper = { version = "0.1", path = "../tools/oci-cli-wrapper" }
-olpc-cjson = "0.1"
-semver = { version = "1", features = ["serde"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-tar = "0.4"
-tempfile = "3"
-tokio = { version = "1", features = ["fs", "macros", "process", "rt-multi-thread"] }
-toml = "0.8"
-tracing = { version = "0.1", features = ["log"] }
-uuid = { version = "1", features = [ "v4" ] }
+anyhow.workspace = true
+async-recursion.workspace = true
+async-walkdir.workspace = true
+base64.workspace = true
+buildsys-config.workspace = true
+clap = { workspace = true, features = ["derive", "env", "std"] }
+env_logger.workspace = true
+filetime.workspace = true
+flate2.workspace = true
+futures.workspace = true
+log.workspace = true
+oci-cli-wrapper.workspace = true
+olpc-cjson.workspace = true
+semver = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "process", "rt-multi-thread"] }
+toml.workspace = true
+tracing = { workspace = true, features = ["log"] }
+uuid = { workspace = true, features = ["v4"] }
 
-# Binary dependencies. These are binaries that we want to embed in the Twoliter binary.
-buildsys = { version = "0.1", artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ], path = "../tools/buildsys" }
-pipesys = { version = "0.1", artifact = [ "bin:pipesys" ], path = "../tools/pipesys" }
-pubsys = { version = "0.1", artifact = [ "bin:pubsys" ], path = "../tools/pubsys" }
-pubsys-setup = { version = "0.1", artifact = [ "bin:pubsys-setup" ], path = "../tools/pubsys-setup" }
-testsys = { version = "0.1", artifact = [ "bin:testsys" ], path = "../tools/testsys" }
-tuftool = { version = "0.10", artifact = [ "bin:tuftool" ] }
-unplug = { version = "0.1", artifact = [ "bin:unplug" ], path = "../tools/unplug" }
+# Binary dependencies. These are binaries that we want to embed in the Twoliter binary
+buildsys = { workspace = true }
+pipesys = { workspace = true }
+pubsys = { workspace = true }
+pubsys-setup = { workspace = true }
+testsys = { workspace = true }
+tuftool = { workspace = true }
+unplug = { workspace = true }
 
 [build-dependencies]
-bytes = "1"
-flate2 = "1"
-tar = "0.4"
+bytes.workspace = true
+flate2.workspace = true
+tar.workspace = true
 
 [features]
 default = ["integ-tests"]

@@ -9,5 +9,5 @@ publish = false
 exclude = ["README.md"]
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-snafu = { version = "0.8", features = ["backtraces-impl-backtrace-crate"] }
+chrono = { workspace = true, features = ["clock", "std"] }
+snafu = { workspace = true, features = ["backtraces-impl-backtrace-crate"] }

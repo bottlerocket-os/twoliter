@@ -7,45 +7,45 @@ edition = "2021"
 publish = false
 
 [dependencies]
-aws-config = "1"
-aws-credential-types = "1"
-aws-sdk-ebs = "1"
-aws-sdk-ec2 = "1"
-aws-sdk-kms = "1"
-aws-sdk-ssm = "1"
-aws-sdk-sts = "1"
-aws-smithy-types = "1"
-aws-types = "1"
-buildsys = { path = "../buildsys", version = "0.1" }
-bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-clap = { version = "4", features = ["derive"] }
-coldsnap = { version = "0.6", default-features = false, features = ["aws-sdk-rust-rustls"] }
-duct = "0.13"
-futures = "0.3"
-governor = "0.6"
-indicatif = "0.17"
-lazy_static = "1"
-log = "0.4"
-nonzero_ext = "0.3"
-num_cpus = "1"
-oci-cli-wrapper = { path = "../oci-cli-wrapper", version = "0.1" }
-parse-datetime = { path = "../parse-datetime", version = "0.1" }
-pubsys-config = { path = "../pubsys-config/", version = "0.1" }
-semver = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_plain = "1"
-simplelog = "0.12"
-snafu = "0.8"
-tabled = "0.10"
-tempfile = "3"
-tinytemplate = "1"
-tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["time"] }
-toml = "0.8"
-tough = { version = "0.17", features = ["http"] }
-tough-kms = "0.9"
-tough-ssm = "0.12"
-update-metadata = { path = "../update-metadata/", version = "0.1" }
-url = { version = "2", features = ["serde"] }
+aws-config.workspace = true
+aws-credential-types.workspace = true
+aws-sdk-ebs.workspace = true
+aws-sdk-ec2.workspace = true
+aws-sdk-kms.workspace = true
+aws-sdk-ssm.workspace = true
+aws-sdk-sts.workspace = true
+aws-smithy-types.workspace = true
+aws-types.workspace = true
+buildsys.workspace = true
+bytes.workspace = true
+chrono = { workspace = true, features = ["clock", "std"] }
+clap = { workspace = true, features = ["derive"] }
+coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
+duct.workspace = true
+futures.workspace = true
+governor.workspace = true
+indicatif.workspace = true
+lazy_static.workspace = true
+log.workspace = true
+nonzero_ext.workspace = true
+num_cpus.workspace = true
+oci-cli-wrapper.workspace = true
+parse-datetime.workspace = true
+pubsys-config.workspace = true
+semver.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_plain.workspace = true
+simplelog.workspace = true
+snafu.workspace = true
+tabled.workspace = true
+tempfile.workspace = true
+tinytemplate.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true, features = ["time"] }
+toml.workspace = true
+tough = { workspace = true, features = ["http"] }
+tough-kms.workspace = true
+tough-ssm.workspace = true
+update-metadata.workspace = true
+url = { workspace = true, features = ["serde"] }
