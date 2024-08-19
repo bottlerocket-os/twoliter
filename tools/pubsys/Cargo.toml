@@ -43,6 +43,7 @@ tabled.workspace = true
 tempfile.workspace = true
 tinytemplate.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tokio-retry.workspace = true
 tokio-stream = { workspace = true, features = ["time"] }
 toml.workspace = true
 tough = { workspace = true, features = ["http"] }

@@ -22,6 +22,15 @@ use nonzero_ext::nonzero;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
+    RetryIf,
+};
+
+// SSM validation may retry if it fails for any reason.
+// These parameters control the exponential backoff and number of retries.
+const SSM_VALIDATION_RETRY_EXP_BASE_MILLIS: u64 = 2_000;
+const SSM_VALIDATION_NUM_RETRIES: usize = 3;
 
 // Configures the rate limit used for SSM parameter fetching.
 // SSM service quotas are provided on https://docs.aws.amazon.com/general/latest/gr/ssm.html
@@ -430,7 +439,36 @@ pub(crate) async fn set_parameters(
 }
 
 /// Fetch the given parameters, and ensure the live values match the given values
+///
+/// Retries validation up to 3 times on any failure, using exponential backoff.
 pub(crate) async fn validate_parameters(
+    expected_parameters: &SsmParameters,
+    ssm_clients: &HashMap<Region, SsmClient>,
+) -> Result<()> {
+    let retry_strategy = ExponentialBackoff::from_millis(SSM_VALIDATION_RETRY_EXP_BASE_MILLIS)
+        .map(jitter)
+        .enumerate()
+        .map(|(attempt, d)| {
+            if attempt > 0 {
+                error!("Retrying: attempt = {}", attempt + 1,);
+            }
+            d
+        })
+        .take(SSM_VALIDATION_NUM_RETRIES);
+
+    RetryIf::spawn(
+        retry_strategy,
+        || async { validate_parameters_inner(expected_parameters, ssm_clients).await },
+        |e: &'_ Error| {
+            error!("Failed to validate SSM parameters: {}", e);
+            true
+        },
+    )
+    .await
+}
+
+/// Fetch the given parameters, and ensure the live values match the given values
+async fn validate_parameters_inner(
     expected_parameters: &SsmParameters,
     ssm_clients: &HashMap<Region, SsmClient>,
 ) -> Result<()> {
