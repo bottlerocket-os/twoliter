@@ -1,6 +1,7 @@
 //! The ssm module owns the getting and setting of parameters in SSM.
 
 use super::{SsmKey, SsmParameters};
+use async_stream::stream;
 use aws_sdk_ssm::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_ssm::operation::{
     get_parameters::{GetParametersError, GetParametersOutput},
@@ -8,16 +9,57 @@ use aws_sdk_ssm::operation::{
 };
 use aws_sdk_ssm::{config::Region, types::ParameterType, Client as SsmClient};
 use futures::future::{join, ready};
+use futures::pin_mut;
 use futures::stream::{self, FuturesUnordered, StreamExt};
+use governor::Jitter;
+use governor::{
+    clock::DefaultClock, middleware::NoOpMiddleware, state::keyed::DefaultKeyedStateStore, Quota,
+    RateLimiter,
+};
+use lazy_static::lazy_static;
 use log::{debug, error, info, trace, warn};
+use nonzero_ext::nonzero;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+// Configures the rate limit used for SSM parameter fetching.
+// SSM service quotas are provided on https://docs.aws.amazon.com/general/latest/gr/ssm.html
+// This rate limiter applies to SSM:
+// * GetParameter
+// * GetParameters
+// * GetParametersByPath
+const GET_PARAMETERS_RATE_LIMIT_PER_SEC: u32 = 40;
+// Configures the maximum "token bucket" size for the SSM rate limiter.
+const GET_PARAMETERS_BURST_LIMIT: u32 = 20;
+type RegionKeyRateLimiter =
+    RateLimiter<Region, DefaultKeyedStateStore<Region>, DefaultClock, NoOpMiddleware>;
+
+lazy_static! {
+    static ref GET_PARAMETERS_MAX_JITTER: Jitter = Jitter::up_to(Duration::from_millis(20));
+    static ref GET_PARAMETERS_RATE_LIMITER: RegionKeyRateLimiter = RateLimiter::keyed(
+        Quota::per_second(nonzero!(GET_PARAMETERS_RATE_LIMIT_PER_SEC))
+            .allow_burst(nonzero!(GET_PARAMETERS_BURST_LIMIT))
+    );
+}
+
+/// Async throttling function to be called before calling SSM GetParameter* functions.
+///
+/// Returns when the rate limit is satisfied.
+pub async fn rate_limit_ssm_get_parameters(region: &Region) {
+    if let Err(e) = GET_PARAMETERS_RATE_LIMITER.check_key(region) {
+        debug!(
+            "SSM GetParameters in '{}' rate-limited until {:?}",
+            region,
+            e.earliest_possible()
+        );
+        GET_PARAMETERS_RATE_LIMITER
+            .until_key_ready_with_jitter(region, *GET_PARAMETERS_MAX_JITTER)
+            .await;
+    }
+}
+
 /// Fetches the values of the given SSM keys using the given clients
-// TODO: We can batch GET requests so throttling is less likely here, but if we need to handle
-// hundreds of parameters for a given build, we could use the throttling logic from
-// `set_parameters`
 pub(crate) async fn get_parameters<K>(
     requested: &[K],
     clients: &HashMap<Region, SsmClient>,
@@ -39,13 +81,22 @@ where
     for (region, names) in regional_names {
         // At most 10 parameters can be requested at a time.
         for names_chunk in names.chunks(10) {
-            trace!("Requesting {:?} in {}", names_chunk, region);
             let ssm_client = &clients[&region];
             let len = names_chunk.len();
-            let get_future = ssm_client
-                .get_parameters()
-                .set_names((!names_chunk.is_empty()).then_some(names_chunk.to_vec().clone()))
-                .send();
+
+            let get_future = {
+                let names_chunk = names_chunk.to_vec();
+                let region = region.clone();
+                async move {
+                    rate_limit_ssm_get_parameters(&region).await;
+                    trace!("Requesting {:?} in {}", names_chunk, region);
+                    ssm_client
+                        .get_parameters()
+                        .set_names((!names_chunk.is_empty()).then_some(names_chunk))
+                        .send()
+                        .await
+                }
+            };
 
             // Store the region so we can include it in errors and the output map
             let info_future = ready((region.clone(), len));
@@ -169,16 +220,24 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
     info!("Retrieving SSM parameters in {}", region.to_string());
     let mut parameters = HashMap::new();
 
-    // Send the request
-    let mut get_future = client
-        .get_parameters_by_path()
-        .path(ssm_prefix)
-        .recursive(true)
-        .into_paginator()
-        .send();
+    let paginated_response_stream = stream! {
+        let mut paginated_request = client
+            .get_parameters_by_path()
+            .path(ssm_prefix)
+            .recursive(true)
+            .into_paginator()
+            .send();
+        while let Some(page) = {
+            rate_limit_ssm_get_parameters(region).await;
+            paginated_request.next().await
+        } {
+            yield page;
+        }
+    };
+    pin_mut!(paginated_response_stream);
 
     // Iterate over the retrieved parameters
-    while let Some(page) = get_future.next().await {
+    while let Some(page) = paginated_response_stream.next().await {
         let retrieved_parameters = page
             .context(error::GetParametersByPathSnafu {
                 path: ssm_prefix,

@@ -7,6 +7,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+async-stream.workspace = true
 aws-config.workspace = true
 aws-credential-types.workspace = true
 aws-sdk-ebs.workspace = true
