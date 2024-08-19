@@ -443,9 +443,7 @@ mod error {
     #[snafu(visibility(pub(super)))]
     pub(crate) enum Error {
         #[snafu(display("Error reading config: {}", source))]
-        Config {
-            source: pubsys_config::Error,
-        },
+        Config { source: pubsys_config::Error },
 
         #[snafu(display(
             "Failed to check whether AMI {} in {} was public: {}",
@@ -466,9 +464,7 @@ mod error {
         },
 
         #[snafu(display("Failed to fetch parameters from SSM: {}", source))]
-        FetchSsm {
-            source: ssm::Error,
-        },
+        FetchSsm { source: ssm::Error },
 
         #[snafu(display("Failed to {} '{}': {}", op, path.display(), source))]
         File {
@@ -478,19 +474,13 @@ mod error {
         },
 
         #[snafu(display("Failed to find templates: {}", source))]
-        FindTemplates {
-            source: template::Error,
-        },
+        FindTemplates { source: template::Error },
 
         #[snafu(display("Input '{}' is empty", path.display()))]
-        Input {
-            path: PathBuf,
-        },
+        Input { path: PathBuf },
 
         #[snafu(display("Infra.toml is missing {}", missing))]
-        MissingConfig {
-            missing: String,
-        },
+        MissingConfig { missing: String },
 
         #[snafu(display("Cowardly refusing to overwrite parameters without ALLOW_CLOBBER"))]
         NoClobber,
@@ -499,31 +489,22 @@ mod error {
         NoPrivateImages,
 
         #[snafu(display("Failed to render templates: {}", source))]
-        RenderTemplates {
-            source: template::Error,
-        },
+        RenderTemplates { source: template::Error },
 
         #[snafu(display("Failed to set SSM parameters: {}", source))]
-        SetSsm {
-            source: ssm::Error,
-        },
+        SetSsm { source: ssm::Error },
 
         #[snafu(display(
             "Given region(s) in Infra.toml / regions argument that are not in --ami-input file: {}",
             regions.join(", ")
         ))]
-        UnknownRegions {
-            regions: Vec<String>,
-        },
+        UnknownRegions { regions: Vec<String> },
 
-        ValidateSsm {
-            source: ssm::Error,
-        },
+        #[snafu(display("Failed to validate SSM parameters: {}", source))]
+        ValidateSsm { source: ssm::Error },
 
         #[snafu(display("Failed to parse rendered SSM parameters to JSON: {}", source))]
-        ParseRenderedSsmParameters {
-            source: serde_json::Error,
-        },
+        ParseRenderedSsmParameters { source: serde_json::Error },
 
         #[snafu(display("Failed to write rendered SSM parameters to {:#?}: {}", path, source))]
         WriteRenderedSsmParameters {
