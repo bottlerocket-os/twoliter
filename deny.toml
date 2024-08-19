@@ -74,16 +74,8 @@ skip = [
     { name = "http", version = "=0.2" },
     # dependencies are using different versions of http-body
     { name = "http-body", version = "=0.4" },
-    # kube-client uses an older version of pem
-    { name = "pem", version = "=1" },
     # dependencies are using different versions of redox_syscall
     { name = "redox_syscall", version = "=0.4" },
-    # several dependencies are using an old version of serde_yaml
-    { name = "serde_yaml", version = "=0.8" },
-    # dependencies are using different versions of snafu
-    { name = "snafu", version = "=0.7" },
-    # dependencies are using different versions of snafu-derive
-    { name = "snafu-derive", version = "=0.7" },
     # dependencies are using different versions of strsim
     { name = "strsim", version = "=0.10" },
     # multiple deps are using an older version of syn
