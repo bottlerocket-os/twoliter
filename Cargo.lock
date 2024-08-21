@@ -3815,6 +3815,7 @@ version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-recursion",
+ "async-trait",
  "async-walkdir",
  "base64 0.22.1",
  "buildsys",

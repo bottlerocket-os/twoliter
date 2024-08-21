@@ -13,6 +13,7 @@ exclude = ["/design", "/target", "/dockerfiles", "/scripts"]
 anyhow.workspace = true
 async-recursion.workspace = true
 async-walkdir.workspace = true
+async-trait.workspace = true
 base64.workspace = true
 buildsys-config.workspace = true
 clap = { workspace = true, features = ["derive", "env", "std"] }
