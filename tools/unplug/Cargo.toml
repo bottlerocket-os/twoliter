@@ -7,7 +7,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.148"

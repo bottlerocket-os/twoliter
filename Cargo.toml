@@ -36,6 +36,95 @@ installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
 
+[workspace.dependencies]
+bottlerocket-types = { version = "0.0.14", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.14" }
+bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
+buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys", "bin:bottlerocket-variant" ] }
+buildsys-config = { version = "0.1", path = "tools/buildsys-config" }
+oci-cli-wrapper = { version = "0.1", path = "tools/oci-cli-wrapper" }
+parse-datetime = { version = "0.1", path = "tools/parse-datetime" }
+pipesys = { version = "0.1", path = "tools/pipesys", lib = true, artifact = [ "bin:pipesys" ] }
+pubsys = { version = "0.1", path = "tools/pubsys", artifact = [ "bin:pubsys" ] }
+pubsys-config = { version = "0.1", path = "tools/pubsys-config" }
+pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin:pubsys-setup" ] }
+testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
+testsys-config = { version = "0.1", path = "tools/testsys-config" }
+testsys-model = { version = "0.0.14", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.14" }
+twoliter = { version = "0", path = "twoliter", artifact = [ "bin:twoliter" ] }
+unplug = { version = "0.1", path = "tools/unplug", artifact = [ "bin:unplug" ] }
+update-metadata = { version = "0.1", path = "tools/update-metadata" }
+
+anyhow = "1"
+async-recursion = "1"
+async-stream = "0.3"
+async-trait = "0.1"
+async-walkdir = "1"
+aws-config = "1"
+aws-credential-types = "1"
+aws-sdk-ebs = "1"
+aws-sdk-ec2 = "1"
+aws-sdk-kms = "1"
+aws-sdk-ssm = "1"
+aws-sdk-sts = "1"
+aws-smithy-types = "1"
+aws-types = "1"
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false }
+clap = "4"
+coldsnap = { version = "0.6", default-features = false }
+daemonize = "0.5"
+duct = "0.13"
+env_logger = "0.11"
+fastrand = "2"
+filetime = "0.2"
+flate2 = "1"
+futures = "0.3"
+governor = "0.6"
+guppy = "0.17"
+handlebars = "5"
+hex = "0.4"
+home = "0.5"
+indicatif = "0.17"
+lazy_static = "1"
+log = "0.4"
+maplit = "1"
+nix = "0.28"
+nonzero_ext = "0.3"
+num_cpus = "1"
+olpc-cjson = "0.1"
+rand = { version = "0.8", default-features = false }
+regex = "1"
+reqwest = { version = "0.11", default-features = false }
+semver = "1"
+serde = "1"
+serde_json = "1"
+serde_plain = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+shell-words = "1"
+simplelog = "0.12"
+snafu = "0.8"
+tabled = "0.10"
+tar = "0.4"
+tempfile = "3"
+term_size = "0.3"
+tinytemplate = "1"
+tokio = "1"
+tokio-stream = "0.1"
+tokio-retry = "0.3"
+toml = "0.8"
+tough = "0.17"
+tough-kms = "0.9"
+tough-ssm = "0.12"
+tracing = "0.1"
+tuftool = { version = "0.10", artifact = [ "bin:tuftool" ] }
+unescape = "0.1"
+url = "2"
+uuid = "1"
+walkdir = "2"
+which = "6"
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"

@@ -307,43 +307,28 @@ mod error {
     #[snafu(visibility(pub(super)))]
     pub(crate) enum Error {
         #[snafu(display("Error reading config: {}", source))]
-        Config {
-            source: pubsys_config::Error,
-        },
+        Config { source: pubsys_config::Error },
 
         #[snafu(display("Found no parameters in source version {}", version))]
-        EmptySource {
-            version: String,
-        },
+        EmptySource { version: String },
 
         #[snafu(display("Failed to fetch parameters from SSM: {}", source))]
-        FetchSsm {
-            source: ssm::Error,
-        },
+        FetchSsm { source: ssm::Error },
 
         #[snafu(display("Failed to find templates: {}", source))]
-        FindTemplates {
-            source: template::Error,
-        },
+        FindTemplates { source: template::Error },
 
         #[snafu(display("Infra.toml is missing {}", missing))]
-        MissingConfig {
-            missing: String,
-        },
+        MissingConfig { missing: String },
 
         #[snafu(display("Failed to render templates: {}", source))]
-        RenderTemplates {
-            source: template::Error,
-        },
+        RenderTemplates { source: template::Error },
 
         #[snafu(display("Failed to set SSM parameters: {}", source))]
-        SetSsm {
-            source: ssm::Error,
-        },
+        SetSsm { source: ssm::Error },
 
-        ValidateSsm {
-            source: ssm::Error,
-        },
+        #[snafu(display("Failed to validate SSM parameters: {}", source))]
+        ValidateSsm { source: ssm::Error },
 
         #[snafu(display(
             "Failed to parse existing SSM parameters at path {:?}: {}",

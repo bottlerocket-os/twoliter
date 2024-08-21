@@ -5,5 +5,5 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dev-dependencies]
-tokio = { version = "1", default-features = false, features = ["process", "fs", "rt-multi-thread"] }
-twoliter = { version = "0", path = "../../twoliter", artifact = [ "bin:twoliter" ] }
+tokio = { workspace = true, features = ["fs", "process", "rt-multi-thread"] }
+twoliter = { workspace = true }

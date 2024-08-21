@@ -7,14 +7,14 @@ edition = "2021"
 publish = false
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-hex = "0.4"
-log = "0.4"
-pubsys-config = { path = "../pubsys-config/", version = "0.1" }
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }
-sha2 = "0.10"
-shell-words = "1"
-simplelog = "0.12"
-snafu = "0.8"
-tempfile = "3"
-url = { version = "2", features = ["serde"] }
+clap = { workspace = true, features = ["derive"] }
+hex.workspace = true
+log.workspace = true
+pubsys-config.workspace = true
+reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
+sha2.workspace = true
+shell-words.workspace = true
+simplelog.workspace = true
+snafu.workspace = true
+tempfile.workspace = true
+url = { workspace = true, features = ["serde"] }
