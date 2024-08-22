@@ -17,5 +17,5 @@ nix = { workspace = true, features = ["fs"] }
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-inotify = "0.10.2"
-uds = { version = "0.4.1", features = ["tokio"] }
+inotify.workspace = true
+uds = { workspace = true, features = ["tokio"] }

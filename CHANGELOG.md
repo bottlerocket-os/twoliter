@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.4...HEAD
 
+## [0.4.5] - 2024-08-22
+
+### Changes
+
+- Update twoliter to re-resolve workspaces at buildtime to detect lock mismatches ([#337])
+- Improve logging in twoliter lockfile resolution ([#338])
+- Improve error messages on pubsys SSM parameter validation failure ([#348])
+- Improve reliability of pubsys SSM parameter validation with client-side rate-limiting and retries ([#348])
+
+[#337]: https://github.com/bottlerocket-os/twoliter/pull/337
+[#338]: https://github.com/bottlerocket-os/twoliter/pull/338
+[#348]: https://github.com/bottlerocket-os/twoliter/pull/348
+
+[0.4.5]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.4...v0.4.5
+
 ## [0.4.4] - 2024-08-02
 
 ### Changes
