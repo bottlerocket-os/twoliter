@@ -90,6 +90,11 @@ skip-tree = [
     { name = "windows-sys" },
 ]
 
+[bans.workspace-dependencies]    
+duplicates = "deny"                                                                                                                                                                                                                                   
+include-path-dependencies = true    
+unused = "deny"
+
 [sources]
 allow-git = [
     "https://github.com/bottlerocket-os/bottlerocket-test-system",
