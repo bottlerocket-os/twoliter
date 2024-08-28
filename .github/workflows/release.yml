@@ -47,6 +47,7 @@ on:
 jobs:
   # Create the Github Release™ so the packages have something to be uploaded to
   create-release:
+    environment: release
     runs-on:
       group: bottlerocket
       labels: bottlerocket_ubuntu-latest_16-core
