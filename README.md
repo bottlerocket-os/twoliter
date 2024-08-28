@@ -96,14 +96,18 @@ We use a fork of `cargo-dist` to facilitate binary releases.
 The purpose of the `cargo-dist` fork is to enable cross-compilation with `cross`
 We do not release Twoliter into `crates.io`.
 
+`cargo-dist` is run by GitHub Actions, and the release workflow requires an additional approver to run the release action.
+
 To perform a release:
 
-- Create a PR that bumps the version and changelog like [this one].
-- Push a release-candidate tag, e.g. `v0.0.4-rc1`.
-- That will kick of a GitHub Actions workflow that creates a GitHub release and attaches binaries.
+- Create and merge a PR that bumps the version and changelog like [this one].
+  This commit should use the desired `rc` version for the `twoliter` crate, e.g. `0.0.4-rc1`.
+- Push a release-candidate tag matching the selected version, e.g. `v0.0.4-rc1`.
+- That will create a GitHub Actions workflow which will create a GitHub release and attach binaries.
+- An additional approver must navigate to the [Actions tab] and approve the Release workflow.
 - Create a Bottlerocket PR ([example]) that uses the new version of Twoliter.
   At first, your PR will use the candidate tag.
-  Before merging, you will use the final release tag.
+  Before merging to the Bottlerocket repo, you will use the final release tag.
 - Test Twoliter in Bottlerocket
   - `cargo make`
   - `cargo make ami`
@@ -127,10 +131,12 @@ To perform a release:
     -e=TWOLITER_ALLOW_BINARY_INSTALL=false \
     -e=TWOLITER_SKIP_VERSION_CHECK=true
 ```
-- When it's working merge the Twoliter PR and push a finalized tag, e.g. `v0.0.4`.
+- When it's working, create a new PR to the Twoliter repo dropping the `-rc` in the version string.
+- Merge the Twoliter PR and push a finalized tag, e.g. `v0.0.4`.
+- An additional approver must navigate to the [Actions tab] and approve the Release workflow.
 - Once the GitHub Actions workflow finishes, update the Bottlerocket PR to your finalized tag.
 - Merge the Bottlerocket PR
-- Delete your release-candidates and release-candidate tags from the GitHub repository (using the GitHub UI).
 
 [this one]: https://github.com/bottlerocket-os/twoliter/pull/91
 [example]: https://github.com/bottlerocket-os/bottlerocket/pull/3480
+[Actions tab]: https://github.com/bottlerocket-os/twoliter/actions
