@@ -23,7 +23,6 @@ BUILDSYS_CACERTS_BUNDLE_OVERRIDE = ""
 BUILDSYS_METADATA_DIR = "${BUILDSYS_BUILD_DIR}/metadata"
 BUILDSYS_CARGO_METADATA_PATH = "${BUILDSYS_METADATA_DIR}/cargo_metadata.json"
 BUILDSYS_SBKEYS_PROFILE = { script = ['echo "${BUILDSYS_SBKEYS_PROFILE:-local}"'] }
-BUILDSYS_TIMESTAMP = { script = ["date +%s"] }
 BUILDSYS_VERSION_BUILD = { script = ["git describe --always --dirty --exclude '*' || echo 00000000"] }
 # The unix timestamp in ms of the latest commit of the project.
 # This is an input for setting the Release value of a package.

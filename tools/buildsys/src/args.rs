@@ -15,7 +15,7 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 16] = [
+const REBUILD_VARS: [(&str, u8); 15] = [
     ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_CACERTS_BUNDLE_OVERRIDE", VARIANT),
     ("BUILDSYS_KITS_DIR", KIT),
@@ -27,7 +27,6 @@ const REBUILD_VARS: [(&str, u8); 16] = [
     ("BUILDSYS_PRETTY_NAME", VARIANT),
     ("BUILDSYS_ROOT_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_STATE_DIR", PACKAGE | KIT | VARIANT),
-    ("BUILDSYS_TIMESTAMP", VARIANT),
     ("BUILDSYS_VARIANT", VARIANT),
     ("BUILDSYS_VERSION_BUILD", KIT | VARIANT),
     ("BUILDSYS_VERSION_IMAGE", KIT | VARIANT),
@@ -77,9 +76,6 @@ pub(crate) struct Common {
 
     #[arg(long, env = "BUILDSYS_STATE_DIR")]
     pub(crate) state_dir: PathBuf,
-
-    #[arg(long, env = "BUILDSYS_TIMESTAMP")]
-    pub(crate) timestamp: String,
 
     #[arg(long, env = "BUILDSYS_VERSION_FULL")]
     pub(crate) version_full: String,
