@@ -20,6 +20,7 @@ pub(crate) mod error;
 use buildsys::manifest;
 use duct::cmd;
 use error::Result;
+use filetime::{set_file_mtime, FileTime};
 use snafu::{ensure, OptionExt, ResultExt};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -76,6 +77,7 @@ impl GoMod {
         package_dir: &Path,
         external_file: &manifest::ExternalFile,
         sdk: &str,
+        mtime: FileTime,
     ) -> Result<()> {
         let url_file_name = extract_file_name(&external_file.url)?;
         let local_file_name = &external_file.path.as_ref().unwrap_or(&url_file_name);
@@ -144,6 +146,13 @@ impl GoMod {
 
         let res = docker_go(&args);
         fs::remove_file(&script_path).context(error::RemoveFileSnafu { path: &script_path })?;
+
+        if res.is_ok() {
+            set_file_mtime(output_path_arg, mtime).context(error::SetMtimeSnafu {
+                path: output_path_arg,
+            })?;
+        }
+
         res
     }
 }

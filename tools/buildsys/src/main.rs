@@ -23,6 +23,7 @@ use buildsys::manifest::{BundleModule, Manifest, ManifestInfo, SupportedArch};
 use buildsys_config::EXTERNAL_KIT_METADATA;
 use cache::LookasideCache;
 use clap::Parser;
+use filetime::FileTime;
 use gomod::GoMod;
 use project::ProjectInfo;
 use snafu::{ensure, ResultExt};
@@ -46,6 +47,12 @@ mod error {
 
         #[snafu(display("{source}"))]
         ExternalFileFetch { source: super::cache::error::Error },
+
+        #[snafu(display("Failed to get metadata for '{}': {}", path.display(), source))]
+        FileMetadata {
+            path: PathBuf,
+            source: std::io::Error,
+        },
 
         #[snafu(display("{source}"))]
         GoMod { source: super::gomod::error::Error },
@@ -136,14 +143,24 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
     ensure_package_is_not_variant_sensitive(&manifest, &manifest_path)?;
 
     if let Some(files) = manifest.info().external_files() {
+        // We need the modification time for any external files or bundled modules to be no later
+        // than the manifest's modification time, to avoid triggering spurious rebuilds.
+        let metadata =
+            std::fs::metadata(manifest_path.clone()).context(error::FileMetadataSnafu {
+                path: manifest_path,
+            })?;
+        let mtime = FileTime::from_last_modification_time(&metadata);
+
         let lookaside_cache = LookasideCache::new(
             &args.common.version_full,
             args.lookaside_cache.clone(),
             args.upstream_source_fallback == "true",
         );
+
         lookaside_cache
-            .fetch(files)
+            .fetch(files, mtime)
             .context(error::ExternalFileFetchSnafu)?;
+
         for f in files {
             if f.bundle_modules.is_none() {
                 continue;
@@ -156,6 +173,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
                         &args.common.cargo_manifest_dir,
                         f,
                         &args.common.sdk_image,
+                        mtime,
                     )
                     .context(error::GoModSnafu)?,
                 }
@@ -190,6 +208,10 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
         println!("cargo:rerun-if-changed={}", f.display());
     }
 
+    if args.common.cicd_hack {
+        return Ok(());
+    }
+
     DockerBuild::new_package(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
         .build()
@@ -209,6 +231,10 @@ fn build_kit(args: BuildKitArgs) -> Result<()> {
         &args.common.cargo_metadata_path,
     )
     .context(error::ManifestParseSnafu)?;
+
+    if args.common.cicd_hack {
+        return Ok(());
+    }
 
     DockerBuild::new_kit(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
@@ -232,6 +258,10 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
 
     supported_arch(manifest.info(), args.common.arch)?;
 
+    if args.common.cicd_hack {
+        return Ok(());
+    }
+
     DockerBuild::new_variant(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?
         .build()
@@ -248,6 +278,10 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
     .context(error::ManifestParseSnafu)?;
 
     supported_arch(manifest.info(), args.common.arch)?;
+
+    if args.common.cicd_hack {
+        return Ok(());
+    }
 
     DockerBuild::repack_variant(args, &manifest)
         .context(error::BuilderInstantiationSnafu)?

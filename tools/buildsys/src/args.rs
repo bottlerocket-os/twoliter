@@ -92,6 +92,14 @@ pub(crate) struct Common {
 
     #[arg(long, env = "TWOLITER_TOOLS_DIR")]
     pub(crate) tools_dir: PathBuf,
+
+    /// cicd_hack is used to suppress builds from running after all the cargo-related metadata is
+    /// emitted. This allows cargo to create a fresh crate, and assumes that the corresponding
+    /// build artifacts are already present. It is intended for use in a CI/CD scenario where some
+    /// other process populates the build directory from a cache. Other uses may lead to unexpected
+    /// build failures that are difficult to troubleshoot.
+    #[arg(long, env = "BUILDSYS_CICD_HACK")]
+    pub(crate) cicd_hack: bool,
 }
 
 /// Build RPMs from a spec file and sources.

@@ -13,6 +13,7 @@ bottlerocket-variant.workspace = true
 buildsys-config.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 duct.workspace = true
+filetime.workspace = true
 guppy.workspace = true
 hex.workspace = true
 lazy_static.workspace = true
