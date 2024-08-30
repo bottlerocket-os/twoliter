@@ -7,6 +7,7 @@ the repository's top-level Dockerfile.
 pub(crate) mod error;
 
 use crate::args::{BuildKitArgs, BuildPackageArgs, BuildVariantArgs, RepackVariantArgs};
+use bottlerocket_variant::Variant;
 use buildsys::manifest::{
     ExternalKitMetadataView, ImageFeature, ImageFormat, ImageLayout, Manifest, PartitionPlan,
     SupportedArch,
@@ -419,22 +420,28 @@ impl DockerBuild {
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();
 
+        let variant = filename(args.variant);
+
+        let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
+        let variant_platform = v.platform().into();
+        let variant_runtime = v.runtime().into();
+        let variant_family = v.family().into();
+        let variant_flavor = v.variant_flavor().unwrap_or("").into();
+
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
             target: "variant".to_string(),
             tag: append_token(
-                format!(
-                    "buildsys-var-{variant}-{arch}",
-                    variant = args.variant,
-                    arch = args.common.arch
-                ),
+                format!("buildsys-var-{variant}-{arch}", arch = args.common.arch),
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dirs: vec![args.common.image_arch_variant_dir],
+            artifacts_dirs: vec![args
+                .image_dir
+                .join(format!("{}-{}", args.common.arch, variant))],
             state_dir: args.common.state_dir,
-            artifact_name: args.variant.clone(),
+            artifact_name: variant.clone(),
             common_build_args: CommonBuildArgs::new(
                 &args.common.root_dir,
                 args.common.sdk_image,
@@ -477,11 +484,11 @@ impl DockerBuild {
                 }
                 .to_string(),
                 pretty_name: args.pretty_name,
-                variant: args.variant,
-                variant_family: args.variant_family,
-                variant_flavor: args.variant_flavor,
-                variant_platform: args.variant_platform,
-                variant_runtime: args.variant_runtime,
+                variant,
+                variant_family,
+                variant_flavor,
+                variant_platform,
+                variant_runtime,
                 version_build: args.version_build,
                 version_image: args.version_image,
             }),
@@ -502,22 +509,22 @@ impl DockerBuild {
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();
 
+        let variant = filename(args.variant);
+
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
             target: "repack".to_string(),
             tag: append_token(
-                format!(
-                    "buildsys-repack-{variant}-{arch}",
-                    variant = args.variant,
-                    arch = args.common.arch
-                ),
+                format!("buildsys-repack-{variant}-{arch}", arch = args.common.arch),
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
-            artifacts_dirs: vec![args.common.image_arch_variant_dir],
+            artifacts_dirs: vec![args
+                .image_dir
+                .join(format!("{}-{}", args.common.arch, variant))],
             state_dir: args.common.state_dir,
-            artifact_name: args.variant.clone(),
+            artifact_name: variant.clone(),
             common_build_args: CommonBuildArgs::new(
                 &args.common.root_dir,
                 args.common.sdk_image,
@@ -542,7 +549,7 @@ impl DockerBuild {
                     PartitionPlan::Unified => "unified",
                 }
                 .to_string(),
-                variant: args.variant,
+                variant,
                 version_build: args.version_build,
                 version_image: args.version_image,
             }),
@@ -1035,4 +1042,18 @@ where
     fn split_string(&self) -> Vec<String> {
         self.as_ref().split(' ').map(String::from).collect()
     }
+}
+
+// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+
+/// Helper to extract the file name from a path.
+fn filename(p: impl AsRef<Path>) -> String {
+    let path = p.as_ref();
+    path.file_name()
+        .with_context(|| error::BadFilenameSnafu {
+            path: PathBuf::from(path),
+        })
+        .unwrap()
+        .to_string_lossy()
+        .to_string()
 }

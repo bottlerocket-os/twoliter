@@ -10,6 +10,9 @@ pub(crate) enum Error {
     #[snafu(display("Failed to read CA certificates bundle '{}'", ca_bundle_path.display()))]
     BadCaBundle { ca_bundle_path: PathBuf },
 
+    #[snafu(display("Failed to get file name for '{}'", path.display()))]
+    BadFilename { path: PathBuf },
+
     #[snafu(display("Failed to read repo root '{}'", root_json_path.display()))]
     BadRootJson { root_json_path: PathBuf },
 
@@ -82,6 +85,11 @@ pub(crate) enum Error {
         path: PathBuf,
         prefix: PathBuf,
         source: std::path::StripPrefixError,
+    },
+
+    #[snafu(display("Failed to parse variant: {source}"))]
+    VariantParse {
+        source: bottlerocket_variant::error::Error,
     },
 }
 

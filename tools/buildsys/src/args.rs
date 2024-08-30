@@ -21,7 +21,7 @@ const REBUILD_VARS: [(&str, u8); 15] = [
     ("BUILDSYS_KITS_DIR", KIT),
     ("BUILDSYS_EXTERNAL_KITS_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_NAME", VARIANT),
-    ("BUILDSYS_OUTPUT_DIR", VARIANT),
+    ("BUILDSYS_IMAGES_DIR", VARIANT),
     ("BUILDSYS_OUTPUT_GENERATION_ID", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_PACKAGES_DIR", PACKAGE),
     ("BUILDSYS_PRETTY_NAME", VARIANT),
@@ -67,9 +67,6 @@ pub(crate) struct Common {
 
     #[arg(long, env = "BUILDSYS_CARGO_METADATA_PATH")]
     pub(crate) cargo_metadata_path: PathBuf,
-
-    #[arg(long, env = "BUILDSYS_OUTPUT_DIR")]
-    pub(crate) image_arch_variant_dir: PathBuf,
 
     #[arg(long, env = "BUILDSYS_ROOT_DIR")]
     pub(crate) root_dir: PathBuf,
@@ -157,26 +154,17 @@ pub(crate) struct BuildVariantArgs {
     #[arg(long, env = "BUILDSYS_PRETTY_NAME")]
     pub(crate) pretty_name: String,
 
-    #[arg(long, env = "BUILDSYS_VARIANT")]
-    pub(crate) variant: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_PLATFORM")]
-    pub(crate) variant_platform: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_RUNTIME")]
-    pub(crate) variant_runtime: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_FAMILY")]
-    pub(crate) variant_family: String,
-
-    #[arg(long, env = "BUILDSYS_VARIANT_FLAVOR")]
-    pub(crate) variant_flavor: String,
+    #[arg(long, env = "CARGO_MANIFEST_DIR")]
+    pub(crate) variant: PathBuf,
 
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
 
     #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
     pub(crate) version_image: String,
+
+    #[arg(long, env = "BUILDSYS_IMAGES_DIR")]
+    pub(crate) image_dir: PathBuf,
 
     #[command(flatten)]
     pub(crate) common: Common,
@@ -188,14 +176,17 @@ pub(crate) struct RepackVariantArgs {
     #[arg(long, env = "BUILDSYS_NAME")]
     pub(crate) name: String,
 
-    #[arg(long, env = "BUILDSYS_VARIANT")]
-    pub(crate) variant: String,
+    #[arg(long, env = "CARGO_MANIFEST_DIR")]
+    pub(crate) variant: PathBuf,
 
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
 
     #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
     pub(crate) version_image: String,
+
+    #[arg(long, env = "BUILDSYS_IMAGES_DIR")]
+    pub(crate) image_dir: PathBuf,
 
     #[command(flatten)]
     pub(crate) common: Common,
