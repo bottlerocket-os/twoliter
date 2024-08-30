@@ -796,8 +796,7 @@ if [ -d "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" ]; then
     "${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 fi
 
-# Save built artifacts for each architecture.  We don't set this everywhere
-# because we build host tools with cargo as well, like buildsys and pubsys.
+# Save built artifacts for each architecture in path just for buildsys.
 export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
 # The workspace manifest directory could be under variants, or at the root.
@@ -830,9 +829,8 @@ if [ -z "${BUILDSYS_KIT}" ]; then
 fi
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
-# Save built artifacts for each architecture.  We don't set this everywhere
-# because we build host tools with cargo as well, like buildsys and pubsys.
-export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}
+# Save built artifacts for each architecture in path just for buildsys.
+export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
 cargo build \
   ${CARGO_BUILD_ARGS} \
@@ -859,9 +857,8 @@ if [ -d "${BUILDSYS_ROOT_DIR}/variants/target/${BUILDSYS_ARCH}" ]; then
     "${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 fi
 
-# Save built artifacts for each architecture.  We don't set this everywhere
-# because we build host tools with cargo as well, like buildsys and pubsys.
-export CARGO_TARGET_DIR=${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}
+# Save built artifacts for each architecture in path just for buildsys.
+export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
 rm -rf "${BUILDSYS_OUTPUT_DIR}/latest"
 cargo build \
@@ -891,6 +888,28 @@ if ! buildsys repack-variant \
   exit 1
 fi
 ln -snf "${BUILDSYS_VERSION_FULL}" "${OUTPUT_LOGS_DIR}/latest"
+'''
+]
+
+[tasks.build-all]
+dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
+script = [
+'''
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+
+# Save built artifacts for each architecture in path just for buildsys.
+export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
+
+find "${BUILDSYS_IMAGES_DIR}" -mindepth 2 -maxdepth 2 -type l \
+  -name latest -exec rm {} \;
+
+cargo build \
+  ${CARGO_BUILD_ARGS} \
+  ${CARGO_MAKE_CARGO_ARGS} \
+  ${CARGO_MAKE_CARGO_LIMIT_JOBS}
+
+find "${BUILDSYS_IMAGES_DIR}" -mindepth 2 -maxdepth 2 -type d \
+  -name "${BUILDSYS_VERSION_FULL}" -exec ln -srnf {} {}/../latest \;
 '''
 ]
 
