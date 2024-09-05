@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use semver::Version;
 use serde::Deserialize;
 
-use crate::lock::{Lock, LockedImage};
+use crate::lock::{image::LockedImage, Lock};
 use crate::project::ValidIdentifier;
 use crate::{cargo_make::CargoMake, project::Project, test::data_dir};
 
@@ -17,11 +19,10 @@ async fn test_cargo_make() {
         kit: Vec::new(),
         sdk: LockedImage {
             name: "my-bottlerocket-sdk".to_string(),
-            version: version,
+            version,
             vendor: "my-vendor".to_string(),
             source: format!("{}/{}:v{}", vendor.registry, "my-bottlerocket-sdk", "1.2.3"),
             digest: "abc".to_string(),
-            manifest: Vec::new(),
         },
     };
     let cargo_make = CargoMake::new(&lock.sdk.source)

@@ -1,5 +1,6 @@
-use crate::common::fs;
+use crate::common::fs::{self, read_to_string};
 use crate::docker::ImageUri;
+use crate::lock::Override;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
@@ -16,6 +17,8 @@ use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use toml::Table;
 use tracing::{debug, info, instrument, trace, warn};
+
+const TWOLITER_OVERRIDES: &str = "Twoliter.override";
 
 /// Common functionality in commands, if the user gave a path to the `Twoliter.toml` file,
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
@@ -34,12 +37,9 @@ pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<P
 }
 
 /// Represents the structure of a `Twoliter.toml` project file.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) struct Project {
-    #[serde(skip)]
     filepath: PathBuf,
-    #[serde(skip)]
     project_dir: PathBuf,
 
     /// The version of this schema struct.
@@ -56,6 +56,8 @@ pub(crate) struct Project {
 
     /// Set of kit dependencies
     kit: Vec<Image>,
+
+    overrides: BTreeMap<String, BTreeMap<String, Override>>,
 }
 
 impl Project {
@@ -103,6 +105,10 @@ impl Project {
 
     pub(crate) fn filepath(&self) -> PathBuf {
         self.filepath.clone()
+    }
+
+    pub(crate) fn overrides(&self) -> &BTreeMap<String, BTreeMap<String, Override>> {
+        &self.overrides
     }
 
     pub(crate) fn project_dir(&self) -> PathBuf {
@@ -305,16 +311,37 @@ impl UnvalidatedProject {
 
         self.check_vendor_availability().await?;
         self.check_release_toml(&project_dir).await?;
+        let overrides = self.check_and_load_overrides(&project_dir).await?;
 
         Ok(Project {
             filepath,
-            project_dir,
+            project_dir: project_dir.clone(),
             schema_version: self.schema_version,
             release_version: self.release_version,
             sdk: self.sdk,
             vendor: self.vendor.unwrap_or_default(),
             kit: self.kit.unwrap_or_default(),
+            overrides,
         })
+    }
+
+    /// Checks if an override file exists and if so loads it
+    async fn check_and_load_overrides(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<BTreeMap<String, BTreeMap<String, Override>>> {
+        let overrides_file_path = path.as_ref().join(TWOLITER_OVERRIDES);
+        if !overrides_file_path.exists() {
+            return Ok(BTreeMap::new());
+        }
+        info!("Detected override file, loading override information");
+        let overrides_str = read_to_string(&overrides_file_path)
+            .await
+            .context("failed to read overrides file")?;
+        let overrides: BTreeMap<String, BTreeMap<String, Override>> =
+            toml::from_str(overrides_str.as_str())
+                .context("failed to deserialize overrides file")?;
+        Ok(overrides)
     }
 
     /// Errors if the user has defined a sdk and/or kit dependency without specifying the associated
