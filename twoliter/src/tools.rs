@@ -10,8 +10,6 @@ use tokio::runtime::Handle;
 use tracing::debug;
 
 const TAR_GZ_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tools.tar.gz"));
-const BOTTLEROCKET_VARIANT: &[u8] =
-    include_bytes!(env!("CARGO_BIN_FILE_BUILDSYS_bottlerocket-variant"));
 const BUILDSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_BUILDSYS"));
 const PIPESYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_PIPESYS"));
 const PUBSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_PUBSYS"));
@@ -44,7 +42,6 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
         .context("Unable to get Dockerfile metadata")?;
     let mtime = FileTime::from_last_modification_time(&metadata);
 
-    write_bin("bottlerocket-variant", BOTTLEROCKET_VARIANT, &dir, mtime).await?;
     write_bin("buildsys", BUILDSYS, &dir, mtime).await?;
     write_bin("pipesys", PIPESYS, &dir, mtime).await?;
     write_bin("pubsys", PUBSYS, &dir, mtime).await?;
@@ -122,7 +119,6 @@ async fn test_install_tools() {
     assert!(toolsdir.join("rpm2migrations").is_file());
 
     // Check that binaries were copied.
-    assert!(toolsdir.join("bottlerocket-variant").is_file());
     assert!(toolsdir.join("buildsys").is_file());
     assert!(toolsdir.join("pipesys").is_file());
     assert!(toolsdir.join("pubsys").is_file());

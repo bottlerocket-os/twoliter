@@ -32,7 +32,6 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 mod error {
-    use buildsys::manifest::SupportedArch;
     use snafu::Snafu;
     use std::path::PathBuf;
 
@@ -70,16 +69,6 @@ mod error {
         #[snafu(display("Unable to instantiate the builder: {source}"))]
         BuilderInstantiation {
             source: crate::builder::error::Error,
-        },
-
-        #[snafu(display(
-            "Unsupported architecture {}, this variant supports {}",
-            arch,
-            supported_arches.join(", ")
-        ))]
-        UnsupportedArch {
-            arch: SupportedArch,
-            supported_arches: Vec<String>,
         },
 
         #[snafu(display(
@@ -256,7 +245,7 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     )
     .context(error::ManifestParseSnafu)?;
 
-    supported_arch(manifest.info(), args.common.arch)?;
+    check_arch_support(manifest.info(), args.common.arch);
 
     if args.common.cicd_hack {
         return Ok(());
@@ -277,7 +266,7 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
     )
     .context(error::ManifestParseSnafu)?;
 
-    supported_arch(manifest.info(), args.common.arch)?;
+    check_arch_support(manifest.info(), args.common.arch);
 
     if args.common.cicd_hack {
         return Ok(());
@@ -290,20 +279,17 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
 }
 
 /// Ensure that the current arch is supported by the current variant
-fn supported_arch(manifest: &ManifestInfo, arch: SupportedArch) -> Result<()> {
+fn check_arch_support(manifest: &ManifestInfo, arch: SupportedArch) {
     if let Some(supported_arches) = manifest.supported_arches() {
-        ensure!(
-            supported_arches.contains(&arch),
-            error::UnsupportedArchSnafu {
-                arch,
-                supported_arches: supported_arches
-                    .iter()
-                    .map(|a| a.to_string())
-                    .collect::<Vec<String>>()
-            }
-        )
+        if !supported_arches.contains(&arch) {
+            let supported_arches = supported_arches
+                .iter()
+                .map(|a| a.to_string())
+                .collect::<Vec<String>>();
+            println!("cargo:warning={arch} is not one of the supported architectures ({supported_arches:?})");
+            std::process::exit(0);
+        }
     }
-    Ok(())
 }
 
 /// Prior to the release of Kits as a build feature, packages could, and did, declare themselves
