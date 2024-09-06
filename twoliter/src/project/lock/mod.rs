@@ -4,13 +4,13 @@
 /// do not mutate unexpectedly.
 
 /// Contains operations for working with an OCI Archive
-pub mod archive;
+mod archive;
 /// Covers resolution and validation of a single image dependency in a lock file
-pub mod image;
+mod image;
 /// Provides tools for marking artifacts as having been verified against the Twoliter lockfile
-pub mod verification;
+mod verification;
 /// Implements view models of common OCI manifest and configuration types
-pub mod views;
+mod views;
 
 pub(crate) use self::verification::VerificationTagger;
 
@@ -61,24 +61,14 @@ impl LockedSDK {
     ///
     /// Re-resolves the project's SDK to ensure that the lockfile matches the state of the world.
     #[instrument(level = "trace", skip(project))]
-    pub(crate) async fn load(project: &Project) -> Result<Self> {
-        VerificationTagger::cleanup_existing_tags(project.external_kits_dir()).await?;
-
+    pub(super) async fn load(project: &Project) -> Result<Self> {
         info!("Resolving project references to check against lock file");
-        let resolved_lock = {
-            // bind `current_lock` in a block so that we can't accidentally pass it to the
-            // VerificationTagger.
-            let current_lock = Lock::current_lock_state(project).await?;
-            let resolved_lock = Self::resolve_sdk(project)
-                .await?
-                .context("Project does not have explicit SDK image.")?;
-            ensure!(&current_lock.sdk == resolved_lock.as_ref(), "changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
-            resolved_lock
-        };
 
-        VerificationTagger::from(&resolved_lock)
-            .write_tags(project.external_kits_dir())
-            .await?;
+        let current_lock = Lock::current_lock_state(project).await?;
+        let resolved_lock = Self::resolve_sdk(project)
+            .await?
+            .context("Project does not have explicit SDK image.")?;
+        ensure!(&current_lock.sdk == resolved_lock.as_ref(), "changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
 
         Ok(resolved_lock)
     }
@@ -130,7 +120,7 @@ impl PartialEq for Lock {
 #[allow(dead_code)]
 impl Lock {
     #[instrument(level = "trace", skip(project))]
-    pub(crate) async fn create(project: &Project) -> Result<Self> {
+    pub(super) async fn create(project: &Project) -> Result<Self> {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
 
         info!("Resolving project references to create lock file");
@@ -149,22 +139,12 @@ impl Lock {
     /// Re-resolves the project's dependencies to ensure that the lockfile matches the state of the
     /// world.
     #[instrument(level = "trace", skip(project))]
-    pub(crate) async fn load(project: &Project) -> Result<Self> {
-        VerificationTagger::cleanup_existing_tags(project.external_kits_dir()).await?;
-
+    pub(super) async fn load(project: &Project) -> Result<Self> {
         info!("Resolving project references to check against lock file");
-        let resolved_lock = {
-            // bind `current_lock` in a block so that we can't accidentally pass it to the
-            // VerificationTagger.
-            let current_lock = Self::current_lock_state(project).await?;
-            let resolved_lock = Self::resolve(project).await?;
-            ensure!(current_lock == resolved_lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
-            resolved_lock
-        };
 
-        VerificationTagger::from(&resolved_lock)
-            .write_tags(project.external_kits_dir())
-            .await?;
+        let current_lock = Self::current_lock_state(project).await?;
+        let resolved_lock = Self::resolve(project).await?;
+        ensure!(current_lock == resolved_lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
 
         Ok(resolved_lock)
     }

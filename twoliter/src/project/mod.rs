@@ -1,6 +1,10 @@
+mod lock;
+
+pub(crate) use lock::VerificationTagger;
+
+use self::lock::{Lock, LockedSDK, Override};
 use crate::common::fs::{self, read_to_string};
 use crate::docker::ImageUri;
-use crate::lock::{Override, VerificationTagger};
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
@@ -110,6 +114,34 @@ impl Project {
             .context("Unable to find Twoliter.toml file")?
             .to_owned();
         Self::find_and_load(parent).await
+    }
+
+    pub(crate) async fn create_lock(&self) -> Result<Lock> {
+        Lock::create(self).await
+    }
+
+    pub(crate) async fn load_lock(&self) -> Result<Lock> {
+        VerificationTagger::cleanup_existing_tags(self.external_kits_dir()).await?;
+
+        let resolved_lock = Lock::load(self).await?;
+
+        VerificationTagger::from(&resolved_lock)
+            .write_tags(self.external_kits_dir())
+            .await?;
+
+        Ok(resolved_lock)
+    }
+
+    pub(crate) async fn load_locked_sdk(&self) -> Result<LockedSDK> {
+        VerificationTagger::cleanup_existing_tags(self.external_kits_dir()).await?;
+
+        let resolved_lock = LockedSDK::load(self).await?;
+
+        VerificationTagger::from(&resolved_lock)
+            .write_tags(self.external_kits_dir())
+            .await?;
+
+        Ok(resolved_lock)
     }
 
     pub(crate) fn filepath(&self) -> PathBuf {

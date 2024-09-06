@@ -1,5 +1,4 @@
 use crate::cargo_make::CargoMake;
-use crate::lock::Lock;
 use crate::project;
 use crate::tools;
 use anyhow::Result;
@@ -16,7 +15,7 @@ pub(crate) struct BuildClean {
 impl BuildClean {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock = Lock::load(&project).await?;
+        let lock = project.load_lock().await?;
         let toolsdir = project.project_dir().join("build/tools");
         tools::install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");

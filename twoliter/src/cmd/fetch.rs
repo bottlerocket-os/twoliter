@@ -1,4 +1,3 @@
-use crate::lock::Lock;
 use crate::project;
 use anyhow::Result;
 use clap::Parser;
@@ -18,7 +17,7 @@ pub(crate) struct Fetch {
 impl Fetch {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock_file = Lock::load(&project).await?;
+        let lock_file = project.load_lock().await?;
         lock_file.fetch(&project, self.arch.as_str()).await?;
         Ok(())
     }

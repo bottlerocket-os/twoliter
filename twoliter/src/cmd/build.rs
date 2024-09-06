@@ -1,7 +1,6 @@
 use super::build_clean::BuildClean;
 use crate::cargo_make::CargoMake;
 use crate::common::fs;
-use crate::lock::Lock;
 use crate::project;
 use crate::tools::install_tools;
 use anyhow::{Context, Result};
@@ -53,7 +52,7 @@ pub(crate) struct BuildKit {
 impl BuildKit {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock = Lock::load(&project).await?;
+        let lock = project.load_lock().await?;
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
@@ -113,7 +112,7 @@ pub(crate) struct BuildVariant {
 impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock = Lock::load(&project).await?;
+        let lock = project.load_lock().await?;
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");

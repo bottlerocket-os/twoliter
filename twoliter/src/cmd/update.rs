@@ -1,4 +1,3 @@
-use crate::lock::Lock;
 use crate::project;
 use anyhow::Result;
 use clap::Parser;
@@ -14,7 +13,7 @@ pub(crate) struct Update {
 impl Update {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        Lock::create(&project).await?;
+        project.create_lock().await?;
         Ok(())
     }
 }

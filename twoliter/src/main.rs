@@ -6,7 +6,6 @@ mod cargo_make;
 mod cmd;
 mod common;
 mod docker;
-mod lock;
 mod project;
 mod schema_version;
 /// Test code that should only be compiled when running tests.

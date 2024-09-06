@@ -1,5 +1,4 @@
 use crate::cargo_make::CargoMake;
-use crate::lock::{Lock, LockedSDK};
 use crate::project::{self};
 use crate::tools::install_tools;
 use anyhow::Result;
@@ -80,10 +79,10 @@ impl Make {
     /// Returns the locked SDK image for the project.
     async fn locked_sdk(&self, project: &project::Project) -> Result<String> {
         let sdk_source = if self.can_skip_kit_verification(project) {
-            let lock = LockedSDK::load(project).await?;
+            let lock = project.load_locked_sdk().await?;
             lock.0.source
         } else {
-            let lock = Lock::load(project).await?;
+            let lock = project.load_lock().await?;
             lock.sdk.source
         };
         Ok(sdk_source)
@@ -95,7 +94,7 @@ mod test {
     use std::path::Path;
 
     use crate::cmd::update::Update;
-    use crate::lock::VerificationTagger;
+    use crate::project::VerificationTagger;
 
     use super::*;
 
@@ -215,7 +214,7 @@ mod test {
         let project = project::load_or_find_project(Some(project_path))
             .await
             .unwrap();
-        let sdk_source = LockedSDK::load(&project).await.unwrap().0.source;
+        let sdk_source = project.load_locked_sdk().await.unwrap().0.source;
 
         if delete_verifier_tags {
             // Clean up tags so that the build fails
