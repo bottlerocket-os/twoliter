@@ -204,6 +204,7 @@ impl ImageResolverImpl for OverriddenImage {
 #[derive(Debug)]
 pub struct ImageResolver {
     image_resolver_impl: Box<dyn ImageResolverImpl>,
+    skip_metadata_retrieval: bool,
 }
 
 impl ImageResolver {
@@ -244,6 +245,7 @@ impl ImageResolver {
                     },
                 })
             },
+            skip_metadata_retrieval: false,
         })
     }
 
@@ -289,7 +291,16 @@ impl ImageResolver {
                     },
                 })
             },
+            skip_metadata_retrieval: false,
         })
+    }
+
+    /// Skip metadata retrieval when resolving images.
+    ///
+    /// This is useful for SDKs, which don't store image metadata (no deps.)
+    pub(crate) fn skip_metadata_retrieval(mut self) -> Self {
+        self.skip_metadata_retrieval = true;
+        self
     }
 
     /// Calculate the digest of the locked image
@@ -317,7 +328,6 @@ impl ImageResolver {
     pub(crate) async fn resolve(
         &self,
         image_tool: &ImageTool,
-        skip_metadata: bool,
     ) -> Result<(LockedImage, Option<ImageMetadata>)> {
         // First get the manifest list
         let uri = self.image_resolver_impl.uri();
@@ -336,7 +346,7 @@ impl ImageResolver {
             digest: self.calculate_digest(image_tool).await?,
         };
 
-        if skip_metadata {
+        if self.skip_metadata_retrieval {
             return Ok((locked_image, None));
         }
 
