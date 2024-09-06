@@ -276,7 +276,7 @@ impl Lock {
                     continue;
                 }
                 ensure!(
-                    project.vendor().get(&image.vendor).is_some(),
+                    project.vendor_for(image).is_some(),
                     "vendor '{}' is not specified in Twoliter.toml",
                     image.vendor
                 );

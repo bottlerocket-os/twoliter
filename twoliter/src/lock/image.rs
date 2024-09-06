@@ -3,7 +3,10 @@ use super::views::ManifestListView;
 use super::Override;
 use crate::common::fs::create_dir_all;
 use crate::docker::ImageUri;
-use crate::project::{Image, Project, ValidIdentifier};
+use crate::project::{
+    ArtifactVendor, Image, OverriddenVendor, Project, ValidIdentifier, VendedArtifact,
+    VerbatimVendor,
+};
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
@@ -20,11 +23,11 @@ use tracing::{debug, error, info, instrument};
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct LockedImage {
     /// The name of the dependency
-    pub name: String,
+    pub name: ValidIdentifier,
     /// The version of the dependency
     pub version: Version,
     /// The vendor this dependency came from
-    pub vendor: String,
+    pub vendor: ValidIdentifier,
     /// The resolved image uri of the dependency
     pub source: String,
     /// The digest of the image
@@ -43,6 +46,20 @@ impl Display for LockedImage {
             "{}-{}@{} ({})",
             self.name, self.version, self.vendor, self.source,
         ))
+    }
+}
+
+impl VendedArtifact for LockedImage {
+    fn artifact_name(&self) -> &ValidIdentifier {
+        &self.name
+    }
+
+    fn vendor_name(&self) -> &ValidIdentifier {
+        &self.vendor
+    }
+
+    fn version(&self) -> &Version {
+        &self.version
     }
 }
 
@@ -138,6 +155,22 @@ pub struct VerbatimImage {
     vendor: String,
 }
 
+impl VerbatimImage {
+    fn from_vendor<V: VendedArtifact>(artifact: &V, vendor: VerbatimVendor) -> Self {
+        let vendor_name = &vendor.vendor_name;
+        let vendor = vendor.vendor;
+
+        VerbatimImage {
+            vendor: vendor_name.as_ref().to_string(),
+            uri: ImageUri {
+                registry: Some(vendor.registry.clone()),
+                repo: artifact.artifact_name().to_string(),
+                tag: format!("v{}", artifact.version()),
+            },
+        }
+    }
+}
+
 impl ImageResolverImpl for VerbatimImage {
     fn name(&self) -> String {
         self.uri.repo.clone()
@@ -165,6 +198,22 @@ pub struct OverriddenImage {
     base_uri: ImageUri,
     vendor: String,
     override_: Override,
+}
+
+impl OverriddenImage {
+    fn from_vendor<V: VendedArtifact>(artifact: &V, vendor: OverriddenVendor) -> Self {
+        let original_vendor = vendor.original_vendor;
+
+        OverriddenImage {
+            base_uri: ImageUri {
+                registry: Some(original_vendor.registry.clone()),
+                repo: artifact.artifact_name().to_string(),
+                tag: format!("v{}", artifact.version()),
+            },
+            vendor: vendor.original_vendor_name.as_ref().to_string(),
+            override_: vendor.override_.clone(),
+        }
+    }
 }
 
 impl ImageResolverImpl for OverriddenImage {
@@ -209,88 +258,60 @@ pub struct ImageResolver {
 
 impl ImageResolver {
     pub(crate) fn from_image(image: &Image, project: &Project) -> Result<Self> {
-        let vendor_name = image.vendor.0.as_str();
-        let vendor = project.vendor().get(&image.vendor).context(format!(
-            "vendor '{}' is not specified in Twoliter.toml",
-            image.vendor
-        ))?;
-        let override_ = project
-            .overrides()
-            .get(&image.vendor.to_string())
-            .and_then(|x| x.get(&image.name.to_string()));
-        if let Some(override_) = override_.as_ref() {
-            debug!(
-                ?override_,
-                "Found override for image '{}' with vendor '{}'", image.name, image.vendor
-            );
-        }
+        let vendor = project.vendor_for(image).with_context(|| {
+            format!(
+                "failed to find vendor for image with name '{}' and vendor '{}'",
+                image.name, image.vendor,
+            )
+        })?;
+
+        let image_resolver_impl = match vendor {
+            ArtifactVendor::Verbatim(vendor) => {
+                Box::new(VerbatimImage::from_vendor(image, vendor)) as Box<dyn ImageResolverImpl>
+            }
+
+            ArtifactVendor::Overridden(vendor) => {
+                debug!(
+                    vendor_override = ?vendor,
+                    "Found override for image '{}' with vendor '{}'", image.name, image.vendor
+                );
+                Box::new(OverriddenImage::from_vendor(image, vendor)) as Box<dyn ImageResolverImpl>
+            }
+        };
+
         Ok(Self {
-            image_resolver_impl: if let Some(override_) = override_ {
-                Box::new(OverriddenImage {
-                    base_uri: ImageUri {
-                        registry: Some(vendor.registry.clone()),
-                        repo: image.name.to_string(),
-                        tag: format!("v{}", image.version),
-                    },
-                    vendor: vendor_name.to_string(),
-                    override_: override_.clone(),
-                })
-            } else {
-                Box::new(VerbatimImage {
-                    vendor: vendor_name.to_string(),
-                    uri: ImageUri {
-                        registry: Some(vendor.registry.clone()),
-                        repo: image.name.to_string(),
-                        tag: format!("v{}", image.version),
-                    },
-                })
-            },
+            image_resolver_impl,
             skip_metadata_retrieval: false,
         })
     }
 
     pub(crate) fn from_locked_image(locked_image: &LockedImage, project: &Project) -> Result<Self> {
-        let vendor_name = &locked_image.vendor;
-        let vendor = project
-            .vendor()
-            .get(&ValidIdentifier(vendor_name.clone()))
-            .context(format!(
-                "failed to find vendor for kit with name '{}' and vendor '{}'",
-                locked_image.name, locked_image.vendor
-            ))?;
-        let override_ = project
-            .overrides()
-            .get(&locked_image.vendor)
-            .and_then(|x| x.get(&locked_image.name));
-        if let Some(override_) = override_.as_ref() {
-            debug!(
-                ?override_,
-                "Found override for image '{}' with vendor '{}'",
-                locked_image.name,
-                locked_image.vendor
-            );
-        }
+        let vendor = project.vendor_for(locked_image).with_context(|| {
+            format!(
+                "failed to find vendor for image with name '{}' and vendor '{}'",
+                locked_image.name, locked_image.vendor,
+            )
+        })?;
+
+        let image_resolver_impl = match vendor {
+            ArtifactVendor::Verbatim(vendor) => {
+                Box::new(VerbatimImage::from_vendor(locked_image, vendor))
+                    as Box<dyn ImageResolverImpl>
+            }
+            ArtifactVendor::Overridden(vendor) => {
+                debug!(
+                    vendor_override = ?vendor,
+                    "Found override for image '{}' with vendor '{}'",
+                    locked_image.name,
+                    locked_image.vendor
+                );
+                Box::new(OverriddenImage::from_vendor(locked_image, vendor))
+                    as Box<dyn ImageResolverImpl>
+            }
+        };
+
         Ok(Self {
-            image_resolver_impl: if let Some(override_) = override_ {
-                Box::new(OverriddenImage {
-                    base_uri: ImageUri {
-                        registry: Some(vendor.registry.clone()),
-                        repo: locked_image.name.to_string(),
-                        tag: format!("v{}", locked_image.version),
-                    },
-                    vendor: vendor_name.to_string(),
-                    override_: override_.clone(),
-                })
-            } else {
-                Box::new(VerbatimImage {
-                    vendor: vendor_name.to_string(),
-                    uri: ImageUri {
-                        registry: Some(vendor.registry.clone()),
-                        repo: locked_image.name.to_string(),
-                        tag: format!("v{}", locked_image.version),
-                    },
-                })
-            },
+            image_resolver_impl,
             skip_metadata_retrieval: false,
         })
     }
@@ -338,9 +359,9 @@ impl ImageResolver {
             .context("no registry found for image")?;
 
         let locked_image = LockedImage {
-            name: self.image_resolver_impl.name(),
+            name: self.image_resolver_impl.name().parse()?,
             version: self.image_resolver_impl.version()?,
-            vendor: self.image_resolver_impl.vendor(),
+            vendor: self.image_resolver_impl.vendor().parse()?,
             // The source is the image uri without the tag, which is the digest
             source: self.image_resolver_impl.source(),
             digest: self.calculate_digest(image_tool).await?,

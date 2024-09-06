@@ -1,0 +1,15 @@
+schema-version = 1
+release-version = "1.0.0"
+
+[sdk]
+name = "my-bottlerocket-sdk"
+version = "1.2.3"
+vendor = "my-vendor"
+
+[vendor.my-vendor]
+registry = "a.com/b"
+
+[[kit]]
+name = "my-core-kit"
+version = "1.2.3"
+vendor = "my-vendor"

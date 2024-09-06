@@ -15,6 +15,7 @@ use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use toml::Table;
 use tracing::{debug, info, instrument, trace, warn};
 
@@ -115,10 +116,6 @@ impl Project {
         self.filepath.clone()
     }
 
-    pub(crate) fn overrides(&self) -> &BTreeMap<String, BTreeMap<String, Override>> {
-        &self.overrides
-    }
-
     pub(crate) fn project_dir(&self) -> PathBuf {
         self.project_dir.clone()
     }
@@ -139,8 +136,28 @@ impl Project {
         self.release_version.as_str()
     }
 
-    pub(crate) fn vendor(&self) -> &BTreeMap<ValidIdentifier, Vendor> {
-        &self.vendor
+    pub(crate) fn vendor_for<'proj, 'arti, V: VendedArtifact>(
+        &'proj self,
+        artifact: &'arti V,
+    ) -> Option<ArtifactVendor<'proj, 'arti>> {
+        let artifact_name = artifact.artifact_name();
+        let vendor_name = artifact.vendor_name();
+        let vendor = self.vendor.get(vendor_name)?;
+
+        self.overrides
+            .get(vendor_name.as_ref())
+            .and_then(|vendor_overrides| vendor_overrides.get(artifact_name.as_ref()))
+            .map(|override_| {
+                ArtifactVendor::Overridden(OverriddenVendor {
+                    original_vendor_name: vendor_name,
+                    original_vendor: vendor,
+                    override_,
+                })
+            })
+            .or(Some(ArtifactVendor::Verbatim(VerbatimVendor {
+                vendor_name,
+                vendor,
+            })))
     }
 
     pub(crate) fn kits(&self) -> Vec<Image> {
@@ -223,6 +240,37 @@ pub(crate) struct Vendor {
     pub registry: String,
 }
 
+/// `ArtifactVendor` represents a vendor associated with an image artifact used in a project.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum ArtifactVendor<'proj, 'arti> {
+    /// The project only knows of the given vendor as it is written in Twoliter.toml
+    Verbatim(VerbatimVendor<'proj, 'arti>),
+    /// The project has an override expressed in Twoliter.override
+    Overridden(OverriddenVendor<'proj, 'arti>),
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct VerbatimVendor<'proj, 'arti> {
+    vendor_name: &'arti ValidIdentifier,
+    vendor: &'proj Vendor,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct OverriddenVendor<'proj, 'arti> {
+    original_vendor_name: &'arti ValidIdentifier,
+    original_vendor: &'proj Vendor,
+    override_: &'proj Override,
+}
+
+/// An artifact/vendor name combination used to identify an artifact resolved by Twoliter.
+///
+/// This is intended for use in [`Project::vendor_for`] lookups.
+pub(crate) trait VendedArtifact: std::fmt::Debug {
+    fn artifact_name(&self) -> &ValidIdentifier;
+    fn vendor_name(&self) -> &ValidIdentifier;
+    fn version(&self) -> &Version;
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) struct ValidIdentifier(pub(crate) String);
 
@@ -235,29 +283,35 @@ impl Serialize for ValidIdentifier {
     }
 }
 
+impl FromStr for ValidIdentifier {
+    type Err = anyhow::Error;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        ensure!(
+            !input.is_empty(),
+            "cannot define an identifier as an empty string",
+        );
+
+        // Check if the input contains any invalid characters
+        for c in input.chars() {
+            ensure!(
+                is_valid_id_char(c),
+                "invalid character '{}' found in identifier name",
+                c
+            );
+        }
+
+        Ok(Self(input.to_string()))
+    }
+}
+
 impl<'de> Deserialize<'de> for ValidIdentifier {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let input = String::deserialize(deserializer)?;
-        // Check if the input is empty
-        if input.is_empty() {
-            return Err(D::Error::custom(
-                "cannot define an identifier as an empty string",
-            ));
-        }
-
-        // Check if the input contains any invalid characters
-        for c in input.chars() {
-            if !is_valid_id_char(c) {
-                return Err(D::Error::custom(format!(
-                    "invalid character '{}' found in identifier name",
-                    c
-                )));
-            }
-        }
-        Ok(Self(input.clone()))
+        input.parse().map_err(D::Error::custom)
     }
 }
 
@@ -294,6 +348,20 @@ pub(crate) struct Image {
 impl Display for Image {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}-{}@{}", self.name, self.version, self.vendor)
+    }
+}
+
+impl VendedArtifact for Image {
+    fn artifact_name(&self) -> &ValidIdentifier {
+        &self.name
+    }
+
+    fn vendor_name(&self) -> &ValidIdentifier {
+        &self.vendor
+    }
+
+    fn version(&self) -> &Version {
+        &self.version
     }
 }
 
@@ -513,6 +581,42 @@ mod test {
             result.is_err(),
             "Expected the loading of the project to fail because of a mismatched version in \
             Release.toml, but the project loaded without an error."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_verbatim_sdk() {
+        let path = data_dir().join("Twoliter-1.toml");
+        let project = Project::load(path).await.unwrap();
+
+        let sdk = project.sdk.as_ref().unwrap();
+
+        let vendor = project.vendor_for(sdk).unwrap();
+
+        assert!(matches!(vendor, ArtifactVendor::Verbatim(_)));
+    }
+
+    #[tokio::test]
+    async fn test_overridden_sdk() {
+        let path = data_dir().join("override/Twoliter-override-1.toml");
+        let project = Project::load(path).await.unwrap();
+
+        let sdk = project.sdk.as_ref().unwrap();
+
+        let vendor = project.vendor_for(sdk).unwrap();
+
+        assert_eq!(
+            vendor,
+            ArtifactVendor::Overridden(OverriddenVendor {
+                original_vendor_name: &sdk.vendor,
+                original_vendor: &Vendor {
+                    registry: "a.com/b".parse().unwrap(),
+                },
+                override_: &Override {
+                    name: Some("my-overridden-sdk".parse().unwrap()),
+                    registry: Some("c.com/d".parse().unwrap()),
+                },
+            })
         );
     }
 

@@ -13,15 +13,15 @@ async fn test_cargo_make() {
     let project = Project::load(path).await.unwrap();
     let version = Version::new(1, 2, 3);
     let vendor_id = ValidIdentifier("my-vendor".into());
-    let vendor = project.vendor().get(&vendor_id).unwrap();
+    let registry = "a.com/b";
     let lock = Lock {
         schema_version: project.schema_version(),
         kit: Vec::new(),
         sdk: LockedImage {
-            name: "my-bottlerocket-sdk".to_string(),
+            name: "my-bottlerocket-sdk".parse().unwrap(),
             version,
-            vendor: "my-vendor".to_string(),
-            source: format!("{}/{}:v{}", vendor.registry, "my-bottlerocket-sdk", "1.2.3"),
+            vendor: "my-vendor".parse().unwrap(),
+            source: format!("{}/{}:v{}", registry, "my-bottlerocket-sdk", "1.2.3"),
             digest: "abc".to_string(),
         },
     };
