@@ -3,7 +3,7 @@ use super::views::ManifestListView;
 use super::Override;
 use crate::common::fs::create_dir_all;
 use crate::docker::ImageUri;
-use crate::project::{Image, Vendor};
+use crate::project::{Image, Project, ValidIdentifier};
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
@@ -207,13 +207,23 @@ pub struct ImageResolver {
 }
 
 impl ImageResolver {
-    pub(crate) fn from_image(
-        image: &Image,
-        vendor_name: &str,
-        vendor: &Vendor,
-        override_: Option<&Override>,
-    ) -> Self {
-        Self {
+    pub(crate) fn from_image(image: &Image, project: &Project) -> Result<Self> {
+        let vendor_name = image.vendor.0.as_str();
+        let vendor = project.vendor().get(&image.vendor).context(format!(
+            "vendor '{}' is not specified in Twoliter.toml",
+            image.vendor
+        ))?;
+        let override_ = project
+            .overrides()
+            .get(&image.vendor.to_string())
+            .and_then(|x| x.get(&image.name.to_string()));
+        if let Some(override_) = override_.as_ref() {
+            debug!(
+                ?override_,
+                "Found override for image '{}' with vendor '{}'", image.name, image.vendor
+            );
+        }
+        Ok(Self {
             image_resolver_impl: if let Some(override_) = override_ {
                 Box::new(OverriddenImage {
                     base_uri: ImageUri {
@@ -234,16 +244,31 @@ impl ImageResolver {
                     },
                 })
             },
-        }
+        })
     }
 
-    pub(crate) fn from_locked_image(
-        locked_image: &LockedImage,
-        vendor_name: &str,
-        vendor: &Vendor,
-        override_: Option<&Override>,
-    ) -> Self {
-        Self {
+    pub(crate) fn from_locked_image(locked_image: &LockedImage, project: &Project) -> Result<Self> {
+        let vendor_name = &locked_image.vendor;
+        let vendor = project
+            .vendor()
+            .get(&ValidIdentifier(vendor_name.clone()))
+            .context(format!(
+                "failed to find vendor for kit with name '{}' and vendor '{}'",
+                locked_image.name, locked_image.vendor
+            ))?;
+        let override_ = project
+            .overrides()
+            .get(&locked_image.vendor)
+            .and_then(|x| x.get(&locked_image.name));
+        if let Some(override_) = override_.as_ref() {
+            debug!(
+                ?override_,
+                "Found override for image '{}' with vendor '{}'",
+                locked_image.name,
+                locked_image.vendor
+            );
+        }
+        Ok(Self {
             image_resolver_impl: if let Some(override_) = override_ {
                 Box::new(OverriddenImage {
                     base_uri: ImageUri {
@@ -264,7 +289,7 @@ impl ImageResolver {
                     },
                 })
             },
-        }
+        })
     }
 
     /// Calculate the digest of the locked image

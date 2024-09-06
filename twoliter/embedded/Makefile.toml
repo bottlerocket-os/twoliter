@@ -315,6 +315,10 @@ dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
 '''
+if [ ! -s "${BUILDSYS_EXTERNAL_KITS_DIR}/.sdk-verified" ]; then
+   echo "Twoliter could not validate '${TLPRIVATE_SDK_IMAGE}', refusing to continue" >&2
+   exit 1
+fi
 if ! docker image inspect "${TLPRIVATE_SDK_IMAGE}" >/dev/null 2>&1 ; then
   if ! docker pull "${TLPRIVATE_SDK_IMAGE}" ; then
     echo "failed to pull '${TLPRIVATE_SDK_IMAGE}'" >&2
@@ -736,6 +740,18 @@ docker run --rm \
 '''
 ]
 
+[tasks.validate-kits]
+dependencies = ["cargo-metadata"]
+script_runner = "bash"
+script = [
+'''
+if [ ! -s "${BUILDSYS_EXTERNAL_KITS_DIR}/.kits-verified" ]; then
+   echo "Twoliter could not validate external kits, refusing to continue" >&2
+   exit 1
+fi
+'''
+]
+
 # Reads the project's workspace Cargo dependency graph to a json file. Needed by buildsys when
 # building packages, kits and variants.
 [tasks.cargo-metadata]
@@ -772,7 +788,7 @@ cargo metadata \
 
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
-dependencies = ["check-cargo-version", "fetch", "publish-setup", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "validate-kits"]
 script_runner = "bash"
 script = [
 '''
@@ -817,7 +833,7 @@ cargo build \
 
 # Builds a kit including its dependency packages.
 [tasks.build-kit]
-dependencies = ["check-cargo-version", "fetch", "publish-setup", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "validate-kits"]
 script_runner = "bash"
 script = [
 '''
@@ -841,7 +857,7 @@ cargo build \
 ]
 
 [tasks.build-variant]
-dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
+dependencies = ["fetch", "build-sbkeys", "publish-setup", "validate-kits"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -892,7 +908,7 @@ ln -snf "${BUILDSYS_VERSION_FULL}" "${OUTPUT_LOGS_DIR}/latest"
 ]
 
 [tasks.build-all]
-dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
+dependencies = ["fetch", "build-sbkeys", "publish-setup", "validate-kits"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
