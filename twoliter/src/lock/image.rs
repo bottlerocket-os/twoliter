@@ -3,7 +3,7 @@ use super::views::ManifestListView;
 use super::Override;
 use crate::common::fs::create_dir_all;
 use crate::docker::ImageUri;
-use crate::project::{Image, Vendor};
+use crate::project::{Image, Project, ValidIdentifier};
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
@@ -204,16 +204,27 @@ impl ImageResolverImpl for OverriddenImage {
 #[derive(Debug)]
 pub struct ImageResolver {
     image_resolver_impl: Box<dyn ImageResolverImpl>,
+    skip_metadata_retrieval: bool,
 }
 
 impl ImageResolver {
-    pub(crate) fn from_image(
-        image: &Image,
-        vendor_name: &str,
-        vendor: &Vendor,
-        override_: Option<&Override>,
-    ) -> Self {
-        Self {
+    pub(crate) fn from_image(image: &Image, project: &Project) -> Result<Self> {
+        let vendor_name = image.vendor.0.as_str();
+        let vendor = project.vendor().get(&image.vendor).context(format!(
+            "vendor '{}' is not specified in Twoliter.toml",
+            image.vendor
+        ))?;
+        let override_ = project
+            .overrides()
+            .get(&image.vendor.to_string())
+            .and_then(|x| x.get(&image.name.to_string()));
+        if let Some(override_) = override_.as_ref() {
+            debug!(
+                ?override_,
+                "Found override for image '{}' with vendor '{}'", image.name, image.vendor
+            );
+        }
+        Ok(Self {
             image_resolver_impl: if let Some(override_) = override_ {
                 Box::new(OverriddenImage {
                     base_uri: ImageUri {
@@ -234,16 +245,32 @@ impl ImageResolver {
                     },
                 })
             },
-        }
+            skip_metadata_retrieval: false,
+        })
     }
 
-    pub(crate) fn from_locked_image(
-        locked_image: &LockedImage,
-        vendor_name: &str,
-        vendor: &Vendor,
-        override_: Option<&Override>,
-    ) -> Self {
-        Self {
+    pub(crate) fn from_locked_image(locked_image: &LockedImage, project: &Project) -> Result<Self> {
+        let vendor_name = &locked_image.vendor;
+        let vendor = project
+            .vendor()
+            .get(&ValidIdentifier(vendor_name.clone()))
+            .context(format!(
+                "failed to find vendor for kit with name '{}' and vendor '{}'",
+                locked_image.name, locked_image.vendor
+            ))?;
+        let override_ = project
+            .overrides()
+            .get(&locked_image.vendor)
+            .and_then(|x| x.get(&locked_image.name));
+        if let Some(override_) = override_.as_ref() {
+            debug!(
+                ?override_,
+                "Found override for image '{}' with vendor '{}'",
+                locked_image.name,
+                locked_image.vendor
+            );
+        }
+        Ok(Self {
             image_resolver_impl: if let Some(override_) = override_ {
                 Box::new(OverriddenImage {
                     base_uri: ImageUri {
@@ -264,7 +291,16 @@ impl ImageResolver {
                     },
                 })
             },
-        }
+            skip_metadata_retrieval: false,
+        })
+    }
+
+    /// Skip metadata retrieval when resolving images.
+    ///
+    /// This is useful for SDKs, which don't store image metadata (no deps.)
+    pub(crate) fn skip_metadata_retrieval(mut self) -> Self {
+        self.skip_metadata_retrieval = true;
+        self
     }
 
     /// Calculate the digest of the locked image
@@ -292,7 +328,6 @@ impl ImageResolver {
     pub(crate) async fn resolve(
         &self,
         image_tool: &ImageTool,
-        skip_metadata: bool,
     ) -> Result<(LockedImage, Option<ImageMetadata>)> {
         // First get the manifest list
         let uri = self.image_resolver_impl.uri();
@@ -311,7 +346,7 @@ impl ImageResolver {
             digest: self.calculate_digest(image_tool).await?,
         };
 
-        if skip_metadata {
+        if self.skip_metadata_retrieval {
             return Ok((locked_image, None));
         }
 

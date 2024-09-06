@@ -315,6 +315,10 @@ dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
 '''
+if [ ! -s "${BUILDSYS_EXTERNAL_KITS_DIR}/.sdk-verified" ]; then
+   echo "Twoliter could not validate '${TLPRIVATE_SDK_IMAGE}', refusing to continue" >&2
+   exit 1
+fi
 if ! docker image inspect "${TLPRIVATE_SDK_IMAGE}" >/dev/null 2>&1 ; then
   if ! docker pull "${TLPRIVATE_SDK_IMAGE}" ; then
     echo "failed to pull '${TLPRIVATE_SDK_IMAGE}'" >&2
@@ -736,6 +740,18 @@ docker run --rm \
 '''
 ]
 
+[tasks.validate-kits]
+dependencies = ["cargo-metadata"]
+script_runner = "bash"
+script = [
+'''
+if [ ! -s "${BUILDSYS_EXTERNAL_KITS_DIR}/.kits-verified" ]; then
+   echo "Twoliter could not validate external kits, refusing to continue" >&2
+   exit 1
+fi
+'''
+]
+
 # Reads the project's workspace Cargo dependency graph to a json file. Needed by buildsys when
 # building packages, kits and variants.
 [tasks.cargo-metadata]
@@ -772,7 +788,7 @@ cargo metadata \
 
 # Builds a package including its build-time and runtime dependency packages.
 [tasks.build-package]
-dependencies = ["check-cargo-version", "fetch", "publish-setup", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "validate-kits"]
 script_runner = "bash"
 script = [
 '''
@@ -817,7 +833,7 @@ cargo build \
 
 # Builds a kit including its dependency packages.
 [tasks.build-kit]
-dependencies = ["check-cargo-version", "fetch", "publish-setup", "cargo-metadata"]
+dependencies = ["check-cargo-version", "fetch", "publish-setup", "validate-kits"]
 script_runner = "bash"
 script = [
 '''
@@ -841,7 +857,7 @@ cargo build \
 ]
 
 [tasks.build-variant]
-dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
+dependencies = ["fetch", "build-sbkeys", "publish-setup", "validate-kits"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -892,7 +908,7 @@ ln -snf "${BUILDSYS_VERSION_FULL}" "${OUTPUT_LOGS_DIR}/latest"
 ]
 
 [tasks.build-all]
-dependencies = ["fetch", "build-sbkeys", "publish-setup", "cargo-metadata"]
+dependencies = ["fetch", "build-sbkeys", "publish-setup", "validate-kits"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
@@ -968,10 +984,7 @@ run_task = "publish-setup"
 # to create a repo under /build/repos, named after the arch/variant/version,
 # containing subdirectories for the repo metadata and targets.
 [tasks.repo]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# check for the image files below to save time.  This does mean that `cargo
-# make` must be run before `cargo make repo`.
-dependencies = ["publish-setup", "fetch-sources"]
+dependencies = ["publish-setup"]
 script_runner = "bash"
 script = [
 '''
@@ -1068,7 +1081,7 @@ ln -sfn "${PUBLISH_REPO_OUTPUT_DIR##*/}" "${PUBLISH_REPO_OUTPUT_DIR%/*}/latest"
 ]
 
 [tasks.validate-repo]
-dependencies = ["publish-setup-without-key", "fetch-sources"]
+dependencies = ["publish-setup-without-key"]
 script_runner = "bash"
 script = [
 '''
@@ -1134,7 +1147,7 @@ run_task = "fetch-variant"
 run_task = "fetch-friendly-variant"
 
 [tasks.check-repo-expirations]
-dependencies = ["publish-setup-without-key", "fetch-sources"]
+dependencies = ["publish-setup-without-key"]
 script_runner = "bash"
 script = [
 '''
@@ -1158,7 +1171,7 @@ pubsys \
 ]
 
 [tasks.refresh-repo]
-dependencies = ["publish-setup", "fetch-sources"]
+dependencies = ["publish-setup"]
 script_runner = "bash"
 script = [
 '''
@@ -1189,10 +1202,7 @@ pubsys \
 ]
 
 [tasks.ami]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the image files below to save time.
-# This does mean that `cargo make` must be run before `cargo make ami`.
-dependencies = ["setup-build", "fetch-sources"]
+dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
 '''
@@ -1262,10 +1272,6 @@ ln -snf "${ami_output##*/}" "${ami_output_latest}"
 ]
 
 [tasks.ami-public]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ami` must be run before `cargo make ami-public`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1293,10 +1299,6 @@ pubsys \
 ]
 
 [tasks.ami-private]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ami` must be run before `cargo make ami-private`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1324,10 +1326,6 @@ pubsys \
 ]
 
 [tasks.grant-ami]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ami` must be run before `cargo make grant-ami`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1363,10 +1361,6 @@ pubsys \
 ]
 
 [tasks.revoke-ami]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ami` must be run before `cargo make revoke-ami`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1402,10 +1396,6 @@ pubsys \
 ]
 
 [tasks.validate-ami]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ami` must be run before `cargo make validate-ami`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1433,10 +1423,6 @@ pubsys \
 ]
 
 [tasks.ssm]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ami` must be run before `cargo make ssm`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1471,7 +1457,6 @@ pubsys \
 ]
 
 [tasks.promote-ssm]
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1506,10 +1491,6 @@ pubsys \
 ]
 
 [tasks.validate-ssm]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the input file below to save time.
-# This does mean that `cargo make ssm` must be run before `cargo make validate-ssm`.
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1537,7 +1518,6 @@ pubsys \
 ]
 
 [tasks.publish-kit]
-dependencies = ["fetch-sources"]
 script_runner = "bash"
 script = [
 '''
@@ -1567,11 +1547,7 @@ pubsys \
 ]
 
 [tasks._upload-ova-base]
-# Rather than depend on "build", which currently rebuilds images each run, we
-# depend on publish-tools and check for the image files below to save time.
-# This does mean that `cargo make` must be run before
-# `cargo make _upload-ova-base`.
-dependencies = ["setup-build", "fetch-sources"]
+dependencies = ["setup-build"]
 script_runner = "bash"
 script = [
 '''

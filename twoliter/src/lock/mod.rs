@@ -7,8 +7,12 @@
 pub mod archive;
 /// Covers resolution and validation of a single image dependency in a lock file
 pub mod image;
+/// Provides tools for marking artifacts as having been verified against the Twoliter lockfile
+pub mod verification;
 /// Implements view models of common OCI manifest and configuration types
 pub mod views;
+
+pub(crate) use self::verification::VerificationTagger;
 
 use crate::common::fs::{create_dir_all, read, write};
 use crate::project::{Image, Project, ValidIdentifier};
@@ -40,6 +44,67 @@ struct ExternalKitMetadata {
 pub(crate) struct Override {
     pub name: Option<String>,
     pub registry: Option<String>,
+}
+
+/// A resolved and locked project SDK, typically from the Twoliter.lock file for a project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LockedSDK(pub LockedImage);
+
+impl AsRef<LockedImage> for LockedSDK {
+    fn as_ref(&self) -> &LockedImage {
+        &self.0
+    }
+}
+
+impl LockedSDK {
+    /// Loads the locked SDK for the given project.
+    ///
+    /// Re-resolves the project's SDK to ensure that the lockfile matches the state of the world.
+    #[instrument(level = "trace", skip(project))]
+    pub(crate) async fn load(project: &Project) -> Result<Self> {
+        VerificationTagger::cleanup_existing_tags(project.external_kits_dir()).await?;
+
+        info!("Resolving project references to check against lock file");
+        let resolved_lock = {
+            // bind `current_lock` in a block so that we can't accidentally pass it to the
+            // VerificationTagger.
+            let current_lock = Lock::current_lock_state(project).await?;
+            let resolved_lock = Self::resolve_sdk(project)
+                .await?
+                .context("Project does not have explicit SDK image.")?;
+            ensure!(&current_lock.sdk == resolved_lock.as_ref(), "changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
+            resolved_lock
+        };
+
+        VerificationTagger::from(&resolved_lock)
+            .write_tags(project.external_kits_dir())
+            .await?;
+
+        Ok(resolved_lock)
+    }
+
+    /// Creates a project lock referring to only the resolved SDK image from the project.
+    ///
+    /// Returns `None` if the project does not have an explicit SDK image.
+    #[instrument(level = "trace", skip(project))]
+    async fn resolve_sdk(project: &Project) -> Result<Option<Self>> {
+        debug!("Attempting to resolve workspace SDK");
+        let sdk = match project.sdk_image() {
+            Some(sdk) => sdk,
+            None => {
+                debug!("No explicit SDK image provided");
+                return Ok(None);
+            }
+        };
+
+        debug!(?sdk, "Resolving workspace SDK");
+        let image_tool = ImageTool::from_environment()?;
+        ImageResolver::from_image(&sdk, project)?
+            .skip_metadata_retrieval() // SDKs don't have metadata
+            .resolve(&image_tool)
+            .await
+            .map(|(sdk, _)| Some(Self(sdk)))
+    }
 }
 
 /// Represents the structure of a `Twoliter.lock` lock file.
@@ -79,8 +144,33 @@ impl Lock {
         Ok(lock_state)
     }
 
+    /// Loads the lockfile for the given project.
+    ///
+    /// Re-resolves the project's dependencies to ensure that the lockfile matches the state of the
+    /// world.
     #[instrument(level = "trace", skip(project))]
     pub(crate) async fn load(project: &Project) -> Result<Self> {
+        VerificationTagger::cleanup_existing_tags(project.external_kits_dir()).await?;
+
+        info!("Resolving project references to check against lock file");
+        let resolved_lock = {
+            // bind `current_lock` in a block so that we can't accidentally pass it to the
+            // VerificationTagger.
+            let current_lock = Self::current_lock_state(project).await?;
+            let resolved_lock = Self::resolve(project).await?;
+            ensure!(current_lock == resolved_lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
+            resolved_lock
+        };
+
+        VerificationTagger::from(&resolved_lock)
+            .write_tags(project.external_kits_dir())
+            .await?;
+
+        Ok(resolved_lock)
+    }
+
+    /// Returns the state of the lockfile for the given `Project`
+    async fn current_lock_state(project: &Project) -> Result<Self> {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
         ensure!(
             lock_file_path.exists(),
@@ -92,10 +182,6 @@ impl Lock {
             .context("failed to read lockfile")?;
         let lock: Self =
             toml::from_str(lock_str.as_str()).context("failed to deserialize lockfile")?;
-        info!("Resolving project references to check against lock file");
-        let lock_state = Self::resolve(project).await?;
-
-        ensure!(lock_state == lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
         Ok(lock)
     }
 
@@ -121,19 +207,7 @@ impl Lock {
             "Extracting kit dependencies."
         );
         for image in self.kit.iter() {
-            let vendor = project
-                .vendor()
-                .get(&ValidIdentifier(image.vendor.clone()))
-                .context(format!(
-                    "failed to find vendor for kit with name '{}' and vendor '{}'",
-                    image.name, image.vendor
-                ))?;
-            let override_ = project
-                .overrides()
-                .get(&image.vendor)
-                .and_then(|x| x.get(&image.name));
-            let resolver =
-                ImageResolver::from_locked_image(image, image.vendor.as_str(), vendor, override_);
+            let resolver = ImageResolver::from_locked_image(image, project)?;
             resolver
                 .extract(&image_tool, &project.external_kits_dir(), arch)
                 .await?;
@@ -172,12 +246,11 @@ impl Lock {
 
     #[instrument(level = "trace", skip(project))]
     async fn resolve(project: &Project) -> Result<Self> {
-        let vendor_table = project.vendor();
         let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
         let mut locked: Vec<LockedImage> = Vec::new();
         let image_tool = ImageTool::from_environment()?;
-        let overrides = project.overrides();
         let mut remaining: Vec<Image> = project.kits();
+
         let mut sdk_set: HashSet<Image> = HashSet::new();
         if let Some(sdk) = project.sdk_image() {
             // We don't scan over the sdk images as they are not kit images and there is no kit metadata to fetch
@@ -193,7 +266,8 @@ impl Lock {
                     let vendor = image.vendor.clone();
                     ensure!(
                         image.version == *version,
-                        "cannot have multiple versions of the same kit ({name}-{left_version}@{vendor} != {name}-{version}@{vendor}",
+                        "cannot have multiple versions of the same kit ({name}-{left_version}@{vendor} \
+                        != {name}-{version}@{vendor}",
                     );
                     debug!(
                         ?image,
@@ -201,26 +275,17 @@ impl Lock {
                     );
                     continue;
                 }
-                let vendor = vendor_table.get(&image.vendor).context(format!(
+                ensure!(
+                    project.vendor().get(&image.vendor).is_some(),
                     "vendor '{}' is not specified in Twoliter.toml",
                     image.vendor
-                ))?;
+                );
                 known.insert(
                     (image.name.clone(), image.vendor.clone()),
                     image.version.clone(),
                 );
-                let override_ = overrides
-                    .get(&image.vendor.to_string())
-                    .and_then(|x| x.get(&image.name.to_string()));
-                if let Some(override_) = override_.as_ref() {
-                    debug!(
-                        ?override_,
-                        "Found override for kit '{}' with vendor '{}'", image.name, image.vendor
-                    );
-                }
-                let image_resolver =
-                    ImageResolver::from_image(image, image.vendor.0.as_str(), vendor, override_);
-                let (locked_image, metadata) = image_resolver.resolve(&image_tool, false).await?;
+                let image_resolver = ImageResolver::from_image(image, project)?;
+                let (locked_image, metadata) = image_resolver.resolve(&image_tool).await?;
                 let metadata = metadata.context(format!(
                     "failed to validate kit image with name {} from vendor {}",
                     locked_image.name, locked_image.vendor
@@ -232,7 +297,6 @@ impl Lock {
                 }
             }
         }
-
         debug!(?sdk_set, "Resolving workspace SDK");
         ensure!(
             sdk_set.len() <= 1,
@@ -247,20 +311,17 @@ impl Lock {
             .iter()
             .next()
             .context("no sdk was found for use, please specify a sdk in Twoliter.toml")?;
-        let vendor = vendor_table.get(&sdk.vendor).context(format!(
-            "vendor '{}' is not specified in Twoliter.toml",
-            sdk.vendor
-        ))?;
-        let sdk_override = overrides
-            .get(&sdk.vendor.to_string())
-            .and_then(|x| x.get(&sdk.name.to_string()));
-        let sdk_resolver =
-            ImageResolver::from_image(sdk, sdk.vendor.0.as_str(), vendor, sdk_override);
-        let (sdk, _) = sdk_resolver.resolve(&image_tool, true).await?;
+
+        debug!(?sdk, "Resolving workspace SDK");
+        let (sdk, _metadata) = ImageResolver::from_image(sdk, project)?
+            .skip_metadata_retrieval() // SDKs don't have metadata
+            .resolve(&image_tool)
+            .await?;
+
         Ok(Self {
             schema_version: project.schema_version(),
-            sdk,
             kit: locked,
+            sdk,
         })
     }
 }

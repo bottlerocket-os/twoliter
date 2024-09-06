@@ -1,6 +1,6 @@
 use crate::common::fs::{self, read_to_string};
 use crate::docker::ImageUri;
-use crate::lock::Override;
+use crate::lock::{Override, VerificationTagger};
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
@@ -71,7 +71,15 @@ impl Project {
             "Unable to deserialize project file '{}'",
             path.display()
         ))?;
-        unvalidated.validate(path).await
+        let project = unvalidated.validate(path).await?;
+
+        // When projects are resolved, tags are written indicating which artifacts have been checked
+        // against the lockfile.
+        // We clean these up as early as possible to avoid situations in which artifacts are
+        // incorrectly flagged as having been resolved.
+        VerificationTagger::cleanup_existing_tags(project.external_kits_dir()).await?;
+
+        Ok(project)
     }
 
     /// Recursively search for a file named `Twoliter.toml` starting in `dir`. If it is not found,
@@ -152,7 +160,7 @@ impl Project {
             ))?;
             Ok(Some(ImageUri::new(
                 Some(vendor.registry.clone()),
-                kit.name.to_string(),
+                &kit.name,
                 format!("v{}", kit.version),
             )))
         } else {
@@ -250,6 +258,12 @@ impl<'de> Deserialize<'de> for ValidIdentifier {
             }
         }
         Ok(Self(input.clone()))
+    }
+}
+
+impl AsRef<str> for ValidIdentifier {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
     }
 }
 

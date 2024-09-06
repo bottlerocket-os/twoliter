@@ -145,6 +145,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore] // integration test
     async fn build_core_kit() {
         let kit_name = "core-kit";
         let arch = "aarch64";
@@ -167,6 +168,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore] // integration test
     async fn build_extra_1_kit() {
         let kit_name = "extra-1-kit";
         let arch = "x86_64";
@@ -190,6 +192,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore] // integration test
     async fn build_extra_2_kit() {
         let kit_name = "extra-2-kit";
         let arch = "aarch64";
@@ -213,6 +216,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore] // integration test
     async fn build_extra_3_kit() {
         let kit_name = "extra-3-kit";
         let arch = "x86_64";
