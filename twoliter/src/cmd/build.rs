@@ -1,7 +1,7 @@
 use super::build_clean::BuildClean;
 use crate::cargo_make::CargoMake;
 use crate::common::fs;
-use crate::project;
+use crate::project::{self, Locked};
 use crate::tools::install_tools;
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -52,7 +52,7 @@ pub(crate) struct BuildKit {
 impl BuildKit {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock = project.load_lock().await?;
+        let project = project.load_lock::<Locked>().await?;
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
@@ -63,7 +63,7 @@ impl BuildKit {
             optional_envs.push(("BUILDSYS_LOOKASIDE_CACHE", lookaside_cache))
         }
 
-        CargoMake::new(&lock.sdk.source)?
+        CargoMake::new(&project.sdk_image().project_image_uri().to_string())?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_KIT", &self.kit)
@@ -112,7 +112,7 @@ pub(crate) struct BuildVariant {
 impl BuildVariant {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock = project.load_lock().await?;
+        let project = project.load_lock::<Locked>().await?;
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
@@ -135,7 +135,7 @@ impl BuildVariant {
             ))
         }
 
-        CargoMake::new(&lock.sdk.source)?
+        CargoMake::new(&project.sdk_image().project_image_uri().to_string())?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)

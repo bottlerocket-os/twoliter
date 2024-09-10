@@ -1,12 +1,7 @@
 use super::archive::OCIArchive;
 use super::views::ManifestListView;
-use super::Override;
 use crate::common::fs::create_dir_all;
-use crate::docker::ImageUri;
-use crate::project::{
-    ArtifactVendor, Image, OverriddenVendor, Project, ValidIdentifier, VendedArtifact,
-    VerbatimVendor,
-};
+use crate::project::{Image, ProjectImage, ValidIdentifier, VendedArtifact};
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
@@ -141,177 +136,16 @@ impl Debug for EncodedKitMetadata {
     }
 }
 
-pub trait ImageResolverImpl: Debug {
-    fn name(&self) -> String;
-    fn version(&self) -> Result<Version>;
-    fn vendor(&self) -> String;
-    fn source(&self) -> String;
-    fn uri(&self) -> ImageUri;
-}
-
-#[derive(Debug)]
-pub struct VerbatimImage {
-    uri: ImageUri,
-    vendor: String,
-}
-
-impl VerbatimImage {
-    fn from_vendor<V: VendedArtifact>(artifact: &V, vendor: VerbatimVendor) -> Self {
-        let vendor_name = &vendor.vendor_name;
-        let vendor = vendor.vendor;
-
-        VerbatimImage {
-            vendor: vendor_name.as_ref().to_string(),
-            uri: ImageUri {
-                registry: Some(vendor.registry.clone()),
-                repo: artifact.artifact_name().to_string(),
-                tag: format!("v{}", artifact.version()),
-            },
-        }
-    }
-}
-
-impl ImageResolverImpl for VerbatimImage {
-    fn name(&self) -> String {
-        self.uri.repo.clone()
-    }
-
-    fn version(&self) -> Result<Version> {
-        Version::parse(self.uri.tag.trim_start_matches('v')).context("invalid version tag")
-    }
-
-    fn source(&self) -> String {
-        self.uri.to_string()
-    }
-
-    fn vendor(&self) -> String {
-        self.vendor.clone()
-    }
-
-    fn uri(&self) -> ImageUri {
-        self.uri.clone()
-    }
-}
-
-#[derive(Debug)]
-pub struct OverriddenImage {
-    base_uri: ImageUri,
-    vendor: String,
-    override_: Override,
-}
-
-impl OverriddenImage {
-    fn from_vendor<V: VendedArtifact>(artifact: &V, vendor: OverriddenVendor) -> Self {
-        let original_vendor = vendor.original_vendor;
-
-        OverriddenImage {
-            base_uri: ImageUri {
-                registry: Some(original_vendor.registry.clone()),
-                repo: artifact.artifact_name().to_string(),
-                tag: format!("v{}", artifact.version()),
-            },
-            vendor: vendor.original_vendor_name.as_ref().to_string(),
-            override_: vendor.override_.clone(),
-        }
-    }
-}
-
-impl ImageResolverImpl for OverriddenImage {
-    fn name(&self) -> String {
-        self.base_uri.repo.clone()
-    }
-
-    fn version(&self) -> Result<Version> {
-        Version::parse(self.base_uri.tag.trim_start_matches('v')).context("invalid version tag")
-    }
-
-    fn source(&self) -> String {
-        self.base_uri.to_string()
-    }
-
-    fn vendor(&self) -> String {
-        self.vendor.clone()
-    }
-
-    fn uri(&self) -> ImageUri {
-        ImageUri {
-            registry: self
-                .override_
-                .registry
-                .clone()
-                .or(self.base_uri.registry.clone()),
-            repo: self
-                .override_
-                .name
-                .clone()
-                .unwrap_or(self.base_uri.repo.clone()),
-            tag: self.base_uri.tag.clone(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct ImageResolver {
-    image_resolver_impl: Box<dyn ImageResolverImpl>,
+    image: ProjectImage,
     skip_metadata_retrieval: bool,
 }
 
 impl ImageResolver {
-    pub(crate) fn from_image(image: &Image, project: &Project) -> Result<Self> {
-        let vendor = project.vendor_for(image).with_context(|| {
-            format!(
-                "failed to find vendor for image with name '{}' and vendor '{}'",
-                image.name, image.vendor,
-            )
-        })?;
-
-        let image_resolver_impl = match vendor {
-            ArtifactVendor::Verbatim(vendor) => {
-                Box::new(VerbatimImage::from_vendor(image, vendor)) as Box<dyn ImageResolverImpl>
-            }
-
-            ArtifactVendor::Overridden(vendor) => {
-                debug!(
-                    vendor_override = ?vendor,
-                    "Found override for image '{}' with vendor '{}'", image.name, image.vendor
-                );
-                Box::new(OverriddenImage::from_vendor(image, vendor)) as Box<dyn ImageResolverImpl>
-            }
-        };
-
+    pub(crate) fn from_image(image: &ProjectImage) -> Result<Self> {
         Ok(Self {
-            image_resolver_impl,
-            skip_metadata_retrieval: false,
-        })
-    }
-
-    pub(crate) fn from_locked_image(locked_image: &LockedImage, project: &Project) -> Result<Self> {
-        let vendor = project.vendor_for(locked_image).with_context(|| {
-            format!(
-                "failed to find vendor for image with name '{}' and vendor '{}'",
-                locked_image.name, locked_image.vendor,
-            )
-        })?;
-
-        let image_resolver_impl = match vendor {
-            ArtifactVendor::Verbatim(vendor) => {
-                Box::new(VerbatimImage::from_vendor(locked_image, vendor))
-                    as Box<dyn ImageResolverImpl>
-            }
-            ArtifactVendor::Overridden(vendor) => {
-                debug!(
-                    vendor_override = ?vendor,
-                    "Found override for image '{}' with vendor '{}'",
-                    locked_image.name,
-                    locked_image.vendor
-                );
-                Box::new(OverriddenImage::from_vendor(locked_image, vendor))
-                    as Box<dyn ImageResolverImpl>
-            }
-        };
-
-        Ok(Self {
-            image_resolver_impl,
+            image: image.clone(),
             skip_metadata_retrieval: false,
         })
     }
@@ -326,7 +160,7 @@ impl ImageResolver {
 
     /// Calculate the digest of the locked image
     async fn calculate_digest(&self, image_tool: &ImageTool) -> Result<String> {
-        let image_uri = self.image_resolver_impl.uri();
+        let image_uri = self.image.project_image_uri();
         let image_uri_str = image_uri.to_string();
         let manifest_bytes = image_tool.get_manifest(image_uri_str.as_str()).await?;
         let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
@@ -340,7 +174,7 @@ impl ImageResolver {
     }
 
     async fn get_manifest(&self, image_tool: &ImageTool) -> Result<ManifestListView> {
-        let uri = self.image_resolver_impl.uri().to_string();
+        let uri = self.image.project_image_uri().to_string();
         let manifest_bytes = image_tool.get_manifest(uri.as_str()).await?;
         serde_json::from_slice(manifest_bytes.as_slice())
             .context("failed to deserialize manifest list")
@@ -351,7 +185,7 @@ impl ImageResolver {
         image_tool: &ImageTool,
     ) -> Result<(LockedImage, Option<ImageMetadata>)> {
         // First get the manifest list
-        let uri = self.image_resolver_impl.uri();
+        let uri = self.image.project_image_uri();
         let manifest_list = self.get_manifest(image_tool).await?;
         let registry = uri
             .registry
@@ -359,11 +193,11 @@ impl ImageResolver {
             .context("no registry found for image")?;
 
         let locked_image = LockedImage {
-            name: self.image_resolver_impl.name().parse()?,
-            version: self.image_resolver_impl.version()?,
-            vendor: self.image_resolver_impl.vendor().parse()?,
+            name: self.image.name().to_owned(),
+            version: self.image.version().to_owned(),
+            vendor: self.image.vendor_name().to_owned(),
             // The source is the image uri without the tag, which is the digest
-            source: self.image_resolver_impl.source(),
+            source: self.image.original_source_uri().to_string(),
             digest: self.calculate_digest(image_tool).await?,
         };
 
@@ -407,7 +241,7 @@ impl ImageResolver {
 
     #[instrument(
         level = "trace",
-        fields(uri = %self.image_resolver_impl.uri(), path = %path.as_ref().display())
+        fields(uri = %self.image.project_image_uri(), path = %path.as_ref().display())
     )]
     pub(crate) async fn extract<P>(&self, image_tool: &ImageTool, path: P, arch: &str) -> Result<()>
     where
@@ -415,20 +249,20 @@ impl ImageResolver {
     {
         info!(
             "Extracting kit '{}' to '{}'",
-            self.image_resolver_impl.name(),
+            self.image.name(),
             path.as_ref().display()
         );
         let target_path = path.as_ref().join(format!(
             "{}/{}/{arch}",
-            self.image_resolver_impl.vendor(),
-            self.image_resolver_impl.name()
+            self.image.vendor_name(),
+            self.image.name()
         ));
         let cache_path = path.as_ref().join("cache");
         create_dir_all(&target_path).await?;
         create_dir_all(&cache_path).await?;
 
         // First get the manifest for the specific requested architecture
-        let uri = self.image_resolver_impl.uri();
+        let uri = self.image.project_image_uri();
         let manifest_list = self.get_manifest(image_tool).await?;
         let docker_arch = DockerArchitecture::try_from(arch)?;
         let manifest = manifest_list

@@ -1,4 +1,4 @@
-use crate::project;
+use crate::project::{self, Locked};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
@@ -17,8 +17,8 @@ pub(crate) struct Fetch {
 impl Fetch {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let lock_file = project.load_lock().await?;
-        lock_file.fetch(&project, self.arch.as_str()).await?;
+        let project = project.load_lock::<Locked>().await?;
+        project.fetch(self.arch.as_str()).await?;
         Ok(())
     }
 }

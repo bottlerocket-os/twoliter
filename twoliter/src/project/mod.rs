@@ -1,5 +1,7 @@
 mod lock;
+pub(crate) mod vendor;
 
+pub(crate) use self::vendor::ArtifactVendor;
 pub(crate) use lock::VerificationTagger;
 
 use self::lock::{Lock, LockedSDK, Override};
@@ -8,6 +10,7 @@ use crate::docker::ImageUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
+use async_trait::async_trait;
 use async_walkdir::WalkDir;
 use buildsys_config::{EXTERNAL_KIT_DIRECTORY, EXTERNAL_KIT_METADATA};
 use futures::stream::StreamExt;
@@ -16,7 +19,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -29,7 +32,7 @@ const TWOLITER_OVERRIDES: &str = "Twoliter.override";
 /// we use it, otherwise we search for the file. Returns the `Project` and the path at which it was
 /// found (this is the same as `user_path` if provided).
 #[instrument(level = "trace")]
-pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<Project> {
+pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<Project<Unlocked>> {
     let project = match user_path {
         None => Project::find_and_load(".").await?,
         Some(p) => Project::load(&p).await?,
@@ -43,7 +46,7 @@ pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<P
 
 /// Represents the structure of a `Twoliter.toml` project file.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) struct Project {
+pub(crate) struct Project<L: ProjectLock> {
     filepath: PathBuf,
     project_dir: PathBuf,
 
@@ -63,9 +66,12 @@ pub(crate) struct Project {
     kit: Vec<Image>,
 
     overrides: BTreeMap<String, BTreeMap<String, Override>>,
+
+    /// The resolved and locked dependencies of the project.
+    lock: L,
 }
 
-impl Project {
+impl Project<Unlocked> {
     /// Load a `Twoliter.toml` file from the given file path (it can have any filename).
     pub(crate) async fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = fs::canonicalize(path).await?;
@@ -116,32 +122,39 @@ impl Project {
         Self::find_and_load(parent).await
     }
 
-    pub(crate) async fn create_lock(&self) -> Result<Lock> {
-        Lock::create(self).await
+    pub(crate) async fn create_lock(self) -> Result<Project<Locked>> {
+        let lock = Lock::create(&self).await?;
+        Ok(self.with_new_lock(lock))
     }
 
-    pub(crate) async fn load_lock(&self) -> Result<Lock> {
+    pub(crate) async fn load_lock<NL: ProjectLock>(&self) -> Result<Project<NL>> {
         VerificationTagger::cleanup_existing_tags(self.external_kits_dir()).await?;
 
-        let resolved_lock = Lock::load(self).await?;
+        let resolved_lock = NL::load_lock(self, private::SealToken).await?;
 
-        VerificationTagger::from(&resolved_lock)
+        resolved_lock
+            .verification_tagger(private::SealToken)
             .write_tags(self.external_kits_dir())
             .await?;
 
-        Ok(resolved_lock)
+        Ok(self.with_new_lock(resolved_lock))
     }
+}
 
-    pub(crate) async fn load_locked_sdk(&self) -> Result<LockedSDK> {
-        VerificationTagger::cleanup_existing_tags(self.external_kits_dir()).await?;
-
-        let resolved_lock = LockedSDK::load(self).await?;
-
-        VerificationTagger::from(&resolved_lock)
-            .write_tags(self.external_kits_dir())
-            .await?;
-
-        Ok(resolved_lock)
+impl<L: ProjectLock> Project<L> {
+    /// Private function to create a new `Project` after resolving a different lock level.
+    fn with_new_lock<NL: ProjectLock, T: Into<NL>>(&self, new_lock: T) -> Project<NL> {
+        Project {
+            filepath: self.filepath.clone(),
+            project_dir: self.project_dir.clone(),
+            schema_version: self.schema_version,
+            release_version: self.release_version.clone(),
+            sdk: self.sdk.clone(),
+            vendor: self.vendor.clone(),
+            kit: self.kit.clone(),
+            overrides: self.overrides.clone(),
+            lock: new_lock.into(),
+        }
     }
 
     pub(crate) fn filepath(&self) -> PathBuf {
@@ -168,10 +181,18 @@ impl Project {
         self.release_version.as_str()
     }
 
-    pub(crate) fn vendor_for<'proj, 'arti, V: VendedArtifact>(
-        &'proj self,
-        artifact: &'arti V,
-    ) -> Option<ArtifactVendor<'proj, 'arti>> {
+    pub(crate) fn direct_kit_deps(&self) -> Result<Vec<ProjectImage>> {
+        self.kit
+            .iter()
+            .map(|kit| self.as_project_image(kit))
+            .collect()
+    }
+
+    pub(crate) fn direct_sdk_image_dep(&self) -> Option<Result<ProjectImage>> {
+        self.sdk.as_ref().map(|sdk| self.as_project_image(sdk))
+    }
+
+    pub(crate) fn vendor_for<V: VendedArtifact>(&self, artifact: &V) -> Option<ArtifactVendor> {
         let artifact_name = artifact.artifact_name();
         let vendor_name = artifact.vendor_name();
         let vendor = self.vendor.get(vendor_name)?;
@@ -180,41 +201,26 @@ impl Project {
             .get(vendor_name.as_ref())
             .and_then(|vendor_overrides| vendor_overrides.get(artifact_name.as_ref()))
             .map(|override_| {
-                ArtifactVendor::Overridden(OverriddenVendor {
-                    original_vendor_name: vendor_name,
-                    original_vendor: vendor,
-                    override_,
-                })
+                ArtifactVendor::overridden(vendor_name.clone(), vendor.clone(), override_.clone())
             })
-            .or(Some(ArtifactVendor::Verbatim(VerbatimVendor {
-                vendor_name,
-                vendor,
-            })))
-    }
-
-    pub(crate) fn kits(&self) -> Vec<Image> {
-        self.kit.clone()
-    }
-
-    pub(crate) fn sdk_image(&self) -> Option<Image> {
-        self.sdk.clone()
-    }
-
-    #[allow(unused)]
-    pub(crate) fn kit(&self, name: &str) -> Result<Option<ImageUri>> {
-        if let Some(kit) = self.kit.iter().find(|y| y.name.to_string() == name) {
-            let vendor = self.vendor.get(&kit.vendor).context(format!(
-                "vendor '{}' was not specified in Twoliter.toml",
-                kit.vendor
-            ))?;
-            Ok(Some(ImageUri::new(
-                Some(vendor.registry.clone()),
-                &kit.name,
-                format!("v{}", kit.version),
+            .or(Some(ArtifactVendor::verbatim(
+                vendor_name.clone(),
+                vendor.clone(),
             )))
-        } else {
-            Ok(None)
-        }
+    }
+
+    pub(crate) fn as_project_image<'proj, 'arti: 'proj>(
+        &'proj self,
+        image: &'arti impl VendedArtifact,
+    ) -> Result<ProjectImage> {
+        let vendor = self
+            .vendor_for(image)
+            .with_context(|| format!("Could not find defined vendor for image '{:?}'", &image))?;
+
+        Ok(ProjectImage {
+            image: Image::from_vended_artifact(image),
+            vendor,
+        })
     }
 
     /// Returns a list of the names of Go modules by searching the `sources` directory for `go.mod`
@@ -264,34 +270,92 @@ impl Project {
     }
 }
 
-/// This represents a container registry vendor that is used in resolving the kits and also
-/// now the bottlerocket sdk
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) struct Vendor {
-    pub registry: String,
+impl Project<SDKLocked> {
+    pub(crate) fn sdk_image(&self) -> ProjectImage {
+        let SDKLocked(lock) = &self.lock;
+        self.as_project_image(&lock.0)
+            .expect("Could not find SDK vendor despite lock resolution succeeding?")
+    }
 }
 
-/// `ArtifactVendor` represents a vendor associated with an image artifact used in a project.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) enum ArtifactVendor<'proj, 'arti> {
-    /// The project only knows of the given vendor as it is written in Twoliter.toml
-    Verbatim(VerbatimVendor<'proj, 'arti>),
-    /// The project has an override expressed in Twoliter.override
-    Overridden(OverriddenVendor<'proj, 'arti>),
+impl Project<Locked> {
+    /// Fetches all external kits defined in a Twoliter.lock to the build directory
+    pub(crate) async fn fetch(&self, arch: &str) -> Result<()> {
+        let Locked(lock) = &self.lock;
+        lock.fetch(self, arch).await
+    }
+
+    #[expect(dead_code)]
+    pub(crate) fn kits(&self) -> Vec<ProjectImage> {
+        let Locked(lock) = &self.lock;
+        lock.kit
+            .iter()
+            .map(|kit| self.as_project_image(kit))
+            .collect::<Result<_>>()
+            .expect("Could not find kit vendor despite lock resolution succeeding?")
+    }
+
+    pub(crate) fn sdk_image(&self) -> ProjectImage {
+        let Locked(lock) = &self.lock;
+        self.as_project_image(&lock.sdk)
+            .expect("Could not find SDK vendor despite lock resolution succeeding?")
+    }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) struct VerbatimVendor<'proj, 'arti> {
-    vendor_name: &'arti ValidIdentifier,
-    vendor: &'proj Vendor,
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub(crate) struct ProjectImage {
+    image: Image,
+    vendor: ArtifactVendor,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) struct OverriddenVendor<'proj, 'arti> {
-    original_vendor_name: &'arti ValidIdentifier,
-    original_vendor: &'proj Vendor,
-    override_: &'proj Override,
+impl Display for ProjectImage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.vendor {
+            ArtifactVendor::Overridden(_) => write!(
+                f,
+                "{} (overridden-to: {})",
+                self.image,
+                self.project_image_uri()
+            ),
+            ArtifactVendor::Verbatim(_) => write!(f, "{}", self.image),
+        }
+    }
+}
+
+impl ProjectImage {
+    pub(crate) fn name(&self) -> &ValidIdentifier {
+        &self.image.name
+    }
+
+    pub(crate) fn version(&self) -> &Version {
+        self.image.version()
+    }
+
+    pub(crate) fn vendor_name(&self) -> &ValidIdentifier {
+        self.vendor.vendor_name()
+    }
+
+    /// Returns the URI for the original vendor.
+    pub(crate) fn original_source_uri(&self) -> ImageUri {
+        match &self.vendor {
+            ArtifactVendor::Overridden(overridden) => {
+                let original = ArtifactVendor::Verbatim(overridden.original_vendor());
+                original.image_uri_for(&self.image)
+            }
+            ArtifactVendor::Verbatim(_) => self.vendor.image_uri_for(&self.image),
+        }
+    }
+
+    /// Returns the image URI that the project will use for this image
+    ///
+    /// This could be different than the source_uri if overridden.
+    pub(crate) fn project_image_uri(&self) -> ImageUri {
+        ImageUri {
+            registry: Some(self.vendor.registry().to_string()),
+            repo: self.vendor.repo_for(&self.image).to_string(),
+            tag: format!("v{}", self.image.version()),
+        }
+    }
 }
 
 /// An artifact/vendor name combination used to identify an artifact resolved by Twoliter.
@@ -368,6 +432,14 @@ fn is_valid_id_char(c: char) -> bool {
     }
 }
 
+/// This represents a container registry vendor that is used in resolving the kits and also
+/// now the bottlerocket sdk
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct Vendor {
+    pub registry: String,
+}
+
 /// This represents a dependency on a container, primarily used for kits
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -375,6 +447,16 @@ pub(crate) struct Image {
     pub name: ValidIdentifier,
     pub version: Version,
     pub vendor: ValidIdentifier,
+}
+
+impl Image {
+    fn from_vended_artifact(artifact: &impl VendedArtifact) -> Self {
+        Self {
+            name: artifact.artifact_name().clone(),
+            vendor: artifact.vendor_name().clone(),
+            version: artifact.version().clone(),
+        }
+    }
 }
 
 impl Display for Image {
@@ -413,7 +495,7 @@ struct UnvalidatedProject {
 
 impl UnvalidatedProject {
     /// Constructs a [`Project`] from an [`UnvalidatedProject`] after validating fields.
-    async fn validate(self, path: impl AsRef<Path>) -> Result<Project> {
+    async fn validate(self, path: impl AsRef<Path>) -> Result<Project<Unlocked>> {
         let filepath: PathBuf = path.as_ref().into();
         let project_dir = filepath
             .parent()
@@ -436,6 +518,7 @@ impl UnvalidatedProject {
             vendor: self.vendor.unwrap_or_default(),
             kit: self.kit.unwrap_or_default(),
             overrides,
+            lock: Unlocked,
         })
     }
 
@@ -523,6 +606,80 @@ impl UnvalidatedProject {
         );
         Ok(())
     }
+}
+
+/// Marker trait that dictates what artifacts have been validated in the lock.
+#[async_trait]
+pub(crate) trait ProjectLock: Sized + Debug + Send + Sync + 'static {
+    /// Loads the project lock for the given project.
+    async fn load_lock(project: &Project<Unlocked>, _: private::SealToken) -> Result<Self>;
+
+    /// Returns a `VerificationTagger` for this lock type.
+    fn verification_tagger(&self, _: private::SealToken) -> VerificationTagger;
+}
+
+/// Indicates a project which has not resolved and validated the lockfile.
+#[derive(Debug)]
+pub struct Unlocked;
+
+#[async_trait]
+impl ProjectLock for Unlocked {
+    async fn load_lock(_project: &Project<Unlocked>, _: private::SealToken) -> Result<Self> {
+        Ok(Unlocked)
+    }
+
+    fn verification_tagger(&self, _: private::SealToken) -> VerificationTagger {
+        VerificationTagger::no_verifications()
+    }
+}
+
+/// Indicates a project which has resolved and verified only the SDK.
+#[derive(Debug)]
+pub struct SDKLocked(LockedSDK);
+
+#[async_trait]
+impl ProjectLock for SDKLocked {
+    async fn load_lock(project: &Project<Unlocked>, _: private::SealToken) -> Result<Self> {
+        LockedSDK::load(project).await.map(Self)
+    }
+
+    fn verification_tagger(&self, _: private::SealToken) -> VerificationTagger {
+        (&self.0).into()
+    }
+}
+
+impl From<LockedSDK> for SDKLocked {
+    fn from(lock: LockedSDK) -> Self {
+        SDKLocked(lock)
+    }
+}
+
+/// Indicates a project which has resolved and verified all dependencies.
+#[derive(Debug)]
+pub struct Locked(Lock);
+
+#[async_trait]
+impl ProjectLock for Locked {
+    async fn load_lock(project: &Project<Unlocked>, _: private::SealToken) -> Result<Self> {
+        Lock::load(project).await.map(Self)
+    }
+
+    fn verification_tagger(&self, _: private::SealToken) -> VerificationTagger {
+        (&self.0).into()
+    }
+}
+
+impl From<Lock> for Locked {
+    fn from(lock: Lock) -> Self {
+        Locked(lock)
+    }
+}
+
+/// Seal the `ProjectLock` trait -- only this module is allowed to define new lock types.
+mod private {
+    /// A marker type that, when used in a method signature, makes it impossible for other modules
+    /// to implement the `ProjectLock` trait.
+    pub struct SealToken;
 }
 
 #[cfg(test)]
@@ -633,23 +790,30 @@ mod test {
         let path = data_dir().join("override/Twoliter-override-1.toml");
         let project = Project::load(path).await.unwrap();
 
-        let sdk = project.sdk.as_ref().unwrap();
-
-        let vendor = project.vendor_for(sdk).unwrap();
+        let sdk = project.direct_sdk_image_dep().unwrap().unwrap();
 
         assert_eq!(
-            vendor,
-            ArtifactVendor::Overridden(OverriddenVendor {
-                original_vendor_name: &sdk.vendor,
-                original_vendor: &Vendor {
+            &sdk.vendor,
+            &ArtifactVendor::overridden(
+                sdk.vendor_name().clone(),
+                Vendor {
                     registry: "a.com/b".parse().unwrap(),
                 },
-                override_: &Override {
+                Override {
                     name: Some("my-overridden-sdk".parse().unwrap()),
                     registry: Some("c.com/d".parse().unwrap()),
                 },
-            })
+            )
         );
+
+        assert_eq!(
+            sdk.project_image_uri(),
+            ImageUri {
+                registry: Some("c.com/d".into()),
+                repo: "my-overridden-sdk".into(),
+                tag: "v1.2.3".into(),
+            }
+        )
     }
 
     #[tokio::test]
