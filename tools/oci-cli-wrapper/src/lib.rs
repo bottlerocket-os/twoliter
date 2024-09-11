@@ -142,7 +142,7 @@ impl ImageTool {
 }
 
 #[async_trait]
-pub trait ImageToolImpl: std::fmt::Debug {
+pub trait ImageToolImpl: std::fmt::Debug + Send + Sync + 'static {
     /// Pull an image archive to disk
     async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()>;
     /// Fetch the image config

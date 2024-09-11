@@ -1,0 +1,3 @@
+[my-vendor.my-bottlerocket-sdk]
+name = "my-overridden-sdk"
+registry = "c.com/d"

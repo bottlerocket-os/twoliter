@@ -1,6 +1,5 @@
 use crate::cargo_make::CargoMake;
-use crate::lock::{Lock, LockedSDK};
-use crate::project::{self};
+use crate::project::{self, Locked, SDKLocked, Unlocked};
 use crate::tools::install_tools;
 use anyhow::Result;
 use clap::Parser;
@@ -69,24 +68,23 @@ impl Make {
             .await
     }
 
-    fn can_skip_kit_verification(&self, project: &project::Project) -> bool {
+    fn can_skip_kit_verification(&self, project: &project::Project<Unlocked>) -> bool {
         let target_allows_kit_verification_skip =
             !MUST_VALIDATE_KITS_TARGETS.contains(&self.makefile_task.as_str());
-        let project_has_explicit_sdk_dep = project.sdk_image().is_some();
+        let project_has_explicit_sdk_dep = project.direct_sdk_image_dep().is_some();
 
         target_allows_kit_verification_skip && project_has_explicit_sdk_dep
     }
 
     /// Returns the locked SDK image for the project.
-    async fn locked_sdk(&self, project: &project::Project) -> Result<String> {
-        let sdk_source = if self.can_skip_kit_verification(project) {
-            let lock = LockedSDK::load(project).await?;
-            lock.0.source
+    async fn locked_sdk(&self, project: &project::Project<Unlocked>) -> Result<String> {
+        Ok(if self.can_skip_kit_verification(project) {
+            project.load_lock::<SDKLocked>().await?.sdk_image()
         } else {
-            let lock = Lock::load(project).await?;
-            lock.sdk.source
-        };
-        Ok(sdk_source)
+            project.load_lock::<Locked>().await?.sdk_image()
+        }
+        .project_image_uri()
+        .to_string())
     }
 }
 
@@ -95,7 +93,7 @@ mod test {
     use std::path::Path;
 
     use crate::cmd::update::Update;
-    use crate::lock::VerificationTagger;
+    use crate::project::VerificationTagger;
 
     use super::*;
 
@@ -215,7 +213,8 @@ mod test {
         let project = project::load_or_find_project(Some(project_path))
             .await
             .unwrap();
-        let sdk_source = LockedSDK::load(&project).await.unwrap().0.source;
+        let project = project.load_lock::<SDKLocked>().await.unwrap();
+        let sdk_source = project.sdk_image().project_image_uri().to_string();
 
         if delete_verifier_tags {
             // Clean up tags so that the build fails

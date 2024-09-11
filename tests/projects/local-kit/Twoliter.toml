@@ -7,4 +7,6 @@ vendor = "bottlerocket"
 version = "0.41.0"
 
 [vendor.bottlerocket]
-registry = "public.ecr.aws/bottlerocket"
+# This test will fail if Twoliter overrides aren't working
+# See `Twoliter.override`
+registry = "this-definitely-wont-resolve/bottlerocket"
