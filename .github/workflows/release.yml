@@ -55,6 +55,7 @@ jobs:
       has-releases: ${{ steps.create-release.outputs.has-releases }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -71,7 +72,7 @@ jobs:
       - id: create-release
         run: |
           export PATH=$CARGO_HOME/bin:$PATH
-          cargo dist plan --tag=${{ github.ref_name }} --output-format=json > dist-manifest.json
+          cargo dist plan --tag="${GITHUB_REF_NAME}" --output-format=json > dist-manifest.json
           echo "dist plan ran successfully"
           cat dist-manifest.json
 
@@ -79,11 +80,11 @@ jobs:
           ANNOUNCEMENT_TITLE=$(jq --raw-output ".announcement_title" dist-manifest.json)
           IS_PRERELEASE=$(jq --raw-output ".announcement_is_prerelease" dist-manifest.json)
           jq --raw-output ".announcement_github_body" dist-manifest.json > new_dist_announcement.md
-          gh release create ${{ github.ref_name }} --draft --prerelease="$IS_PRERELEASE" --title="$ANNOUNCEMENT_TITLE" --notes-file=new_dist_announcement.md
+          gh release create "${GITHUB_REF_NAME}" --draft --prerelease="$IS_PRERELEASE" --title="$ANNOUNCEMENT_TITLE" --notes-file=new_dist_announcement.md
           echo "created announcement!"
 
           # Upload the manifest to the Github Release™
-          gh release upload ${{ github.ref_name }} dist-manifest.json
+          gh release upload "${GITHUB_REF_NAME}" dist-manifest.json
           echo "uploaded manifest!"
 
           # Disable all the upload-artifacts tasks if we have no actual releases
@@ -115,12 +116,15 @@ jobs:
       labels: bottlerocket_ubuntu-latest_16-core
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MATRIX_DIST_ARGS: ${{ matrix.dist-args }}
+      MATRIX_INSTALL_DIST: ${{ matrix.install-dist }}
+      GITHUB_REF_NAME: ${{ github.ref_name }
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Install cargo-dist
-        run: ${{ matrix.install-dist }}
+        run: "${MATRIX_INSTALL_DIST}"
       - name: Install Cross
         # Pin cargo cross to a version that we know is working for us.
         run: |
@@ -133,7 +137,7 @@ jobs:
         run: |
           export PATH=$CARGO_HOME/bin:$PATH
           # Actually do builds and make zips and whatnot
-          cargo dist build --tag=${{ github.ref_name }} --output-format=json ${{ matrix.dist-args }} > dist-manifest.json
+          cargo dist build --tag="${GITHUB_REF_NAME}" --output-format=json ${MATRIX_DIST_ARGS} > dist-manifest.json
           echo "dist ran successfully"
           cat dist-manifest.json
 
@@ -141,7 +145,7 @@ jobs:
           jq --raw-output ".artifacts[]?.path | select( . != null )" dist-manifest.json > uploads.txt
           echo "uploading..."
           cat uploads.txt
-          gh release upload ${{ github.ref_name }} $(cat uploads.txt)
+          gh release upload "${GITHUB_REF_NAME}" $(cat uploads.txt)
           echo "uploaded!"
 
   # Mark the Github Release™ as a non-draft now that everything has succeeded!
@@ -152,10 +156,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: mark release as non-draft
         run: |
-          gh release edit ${{ github.ref_name }} --draft=false
+          gh release edit "${GITHUB_REF_NAME}" --draft=false
