@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.4...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.6...HEAD
+
+## [0.4.6] - 2024-09-11
+
+### Changes
+
+- Add support for vendor override files ([#344])
+- Updated buildsys to add new 'build-all' target, reduce build time ([#345], [#357])
+- CICD, workspace and doc improvements ([#353], [#354], [#355], [#358])
+- Add support for partial lockfile validation & refactor lock interfaces ([#361], [#363])
+- Update tough dependencies to latest versions ([#365])
+
+
+[#344]: https://github.com/bottlerocket-os/twoliter/pull/344
+[#345]: https://github.com/bottlerocket-os/twoliter/pull/345
+[#353]: https://github.com/bottlerocket-os/twoliter/pull/353
+[#354]: https://github.com/bottlerocket-os/twoliter/pull/354
+[#355]: https://github.com/bottlerocket-os/twoliter/pull/355
+[#357]: https://github.com/bottlerocket-os/twoliter/pull/357
+[#358]: https://github.com/bottlerocket-os/twoliter/pull/358
+[#361]: https://github.com/bottlerocket-os/twoliter/pull/361
+[#363]: https://github.com/bottlerocket-os/twoliter/pull/363
+[#365]: https://github.com/bottlerocket-os/twoliter/pull/365
+
+[0.4.6]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.5...v0.4.6
 
 ## [0.4.5] - 2024-08-22
 
