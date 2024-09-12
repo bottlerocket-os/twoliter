@@ -420,7 +420,7 @@ impl DockerBuild {
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();
 
-        let variant = filename(args.variant);
+        let variant = filename(args.common.cargo_manifest_dir);
 
         let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
         let variant_platform = v.platform().into();
@@ -509,7 +509,7 @@ impl DockerBuild {
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();
 
-        let variant = filename(args.variant);
+        let variant = filename(args.common.cargo_manifest_dir);
 
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
