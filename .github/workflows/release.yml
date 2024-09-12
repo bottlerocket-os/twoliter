@@ -124,7 +124,7 @@ jobs:
         with:
           submodules: recursive
       - name: Install cargo-dist
-        run: "${MATRIX_INSTALL_DIST}"
+        run: ${MATRIX_INSTALL_DIST}
       - name: Install Cross
         # Pin cargo cross to a version that we know is working for us.
         run: |
