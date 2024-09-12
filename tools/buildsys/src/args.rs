@@ -162,9 +162,6 @@ pub(crate) struct BuildVariantArgs {
     #[arg(long, env = "BUILDSYS_PRETTY_NAME")]
     pub(crate) pretty_name: String,
 
-    #[arg(long, env = "CARGO_MANIFEST_DIR")]
-    pub(crate) variant: PathBuf,
-
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
 
@@ -183,9 +180,6 @@ pub(crate) struct BuildVariantArgs {
 pub(crate) struct RepackVariantArgs {
     #[arg(long, env = "BUILDSYS_NAME")]
     pub(crate) name: String,
-
-    #[arg(long, env = "CARGO_MANIFEST_DIR")]
-    pub(crate) variant: PathBuf,
 
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
