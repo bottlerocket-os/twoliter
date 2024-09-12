@@ -17,7 +17,7 @@ pub(crate) use self::verification::VerificationTagger;
 use crate::common::fs::{create_dir_all, read, write};
 use crate::project::{Project, ValidIdentifier};
 use crate::schema_version::SchemaVersion;
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use image::{ImageResolver, LockedImage};
 use oci_cli_wrapper::ImageTool;
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::mem::take;
 use tokio::fs::read_to_string;
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use super::{Locked, ProjectLock, Unlocked};
 
@@ -64,13 +64,26 @@ impl LockedSDK {
     /// Re-resolves the project's SDK to ensure that the lockfile matches the state of the world.
     #[instrument(level = "trace", skip(project))]
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
-        info!("Resolving project references to check against lock file");
+        info!("Resolving SDK project reference to check against lock file");
 
         let current_lock = Lock::current_lock_state(project).await?;
         let resolved_lock = Self::resolve_sdk(project)
             .await?
             .context("Project does not have explicit SDK image.")?;
-        ensure!(&current_lock.sdk == resolved_lock.as_ref(), "changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
+
+        debug!(
+            current_sdk=?current_lock.sdk,
+            resolved_sdk=?resolved_lock,
+            "Comparing resolved SDK to current lock state"
+        );
+        if &current_lock.sdk != resolved_lock.as_ref() {
+            error!(
+                current_sdk=?current_lock.sdk,
+                resolved_sdk=?resolved_lock,
+                "Locked SDK does not match resolved SDK",
+            );
+            bail!("Changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
+        }
 
         Ok(resolved_lock)
     }
@@ -146,7 +159,20 @@ impl Lock {
 
         let current_lock = Self::current_lock_state(project).await?;
         let resolved_lock = Self::resolve(project).await?;
-        ensure!(current_lock == resolved_lock, "changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
+
+        debug!(
+            current_lock=?current_lock,
+            resolved_lock=?resolved_lock,
+            "Comparing resolved lock to current lock state"
+        );
+        if current_lock != resolved_lock {
+            error!(
+                current_lock=?current_lock,
+                resolved_lock=?resolved_lock,
+                "Locked dependencies do not match resolved dependencies"
+            );
+            bail!("changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
+        }
 
         Ok(resolved_lock)
     }

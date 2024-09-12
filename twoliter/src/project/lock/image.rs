@@ -158,6 +158,10 @@ impl ImageResolver {
         self
     }
 
+    #[instrument(
+        level = "trace",
+        fields(image = %self.image, uri = %self.image.project_image_uri())
+    )]
     /// Calculate the digest of the locked image
     async fn calculate_digest(&self, image_tool: &ImageTool) -> Result<String> {
         let image_uri = self.image.project_image_uri();
@@ -165,27 +169,37 @@ impl ImageResolver {
         let manifest_bytes = image_tool.get_manifest(image_uri_str.as_str()).await?;
         let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
         let digest = base64::engine::general_purpose::STANDARD.encode(digest.as_slice());
-        trace!(
+        debug!(
             "Calculated digest for locked image '{}': '{}'",
-            image_uri,
-            digest,
+            image_uri, digest,
         );
         Ok(digest)
     }
 
+    #[instrument(
+        level = "trace",
+        fields(image = %self.image, uri = %self.image.project_image_uri())
+    )]
     async fn get_manifest(&self, image_tool: &ImageTool) -> Result<ManifestListView> {
         let uri = self.image.project_image_uri().to_string();
+        debug!(image=%self.image, uri, "Fetching image manifest.");
         let manifest_bytes = image_tool.get_manifest(uri.as_str()).await?;
         serde_json::from_slice(manifest_bytes.as_slice())
             .context("failed to deserialize manifest list")
     }
 
+    #[instrument(
+        level = "trace",
+        fields(image = %self.image, uri = %self.image.project_image_uri())
+    )]
     pub(crate) async fn resolve(
         &self,
         image_tool: &ImageTool,
     ) -> Result<(LockedImage, Option<ImageMetadata>)> {
         // First get the manifest list
         let uri = self.image.project_image_uri();
+        info!("Resolving dependency image dependency '{}'.", self.image);
+
         let manifest_list = self.get_manifest(image_tool).await?;
         let registry = uri
             .registry
