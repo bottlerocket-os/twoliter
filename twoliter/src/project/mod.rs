@@ -313,11 +313,19 @@ impl Display for ProjectImage {
         match self.vendor {
             ArtifactVendor::Overridden(_) => write!(
                 f,
-                "{} (overridden-to: {})",
-                self.image,
-                self.project_image_uri()
+                "{}-{}@{} (overridden-to: {})",
+                self.name(),
+                self.version(),
+                self.original_source_uri(),
+                self.project_image_uri(),
             ),
-            ArtifactVendor::Verbatim(_) => write!(f, "{}", self.image),
+            ArtifactVendor::Verbatim(_) => write!(
+                f,
+                "{}-{}@{}",
+                self.name(),
+                self.version(),
+                self.original_source_uri()
+            ),
         }
     }
 }
