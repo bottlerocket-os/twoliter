@@ -17,6 +17,10 @@ pub(crate) struct PublishKitArgs {
     #[arg(long)]
     vendor: String,
 
+    /// Optionally push the kit a different repository name
+    #[arg(long)]
+    repo: Option<String>,
+
     /// The version of the kit that should be published
     #[arg(long)]
     version: String,
@@ -66,6 +70,11 @@ async fn publish_kit(
     let kit_version = publish_kit_args.version.clone();
     let build_id = publish_kit_args.build_id.clone();
 
+    let repository_target = match publish_kit_args.repo.as_ref() {
+        Some(repo) => repo.clone(),
+        None => kit_name.to_string(),
+    };
+
     let mut platform_images = Vec::new();
     for arch in ["aarch64", "x86_64"] {
         let docker_arch =
@@ -81,7 +90,7 @@ async fn publish_kit(
 
         let arch_specific_target_uri = format!(
             "{}/{}:{}-{}-{}",
-            vendor_registry_uri, kit_name, &kit_version, &build_id, arch
+            vendor_registry_uri, repository_target, &kit_version, &build_id, arch
         );
 
         info!(

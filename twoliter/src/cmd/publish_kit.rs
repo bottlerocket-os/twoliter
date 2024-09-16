@@ -31,6 +31,9 @@ pub(crate) struct PublishKit {
 
     /// Vendor to publish to
     vendor: String,
+
+    /// Publish kit image to a different repository than the kit's name
+    kit_repo: Option<String>,
 }
 
 impl PublishKit {
@@ -41,11 +44,16 @@ impl PublishKit {
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
 
+        let publish_kit_repo = match &self.kit_repo {
+            Some(kit_repo) => kit_repo,
+            None => &self.kit_name,
+        };
         CargoMake::new(project.sdk_image().project_image_uri().to_string().as_str())?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_KIT", &self.kit_name)
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .env("PUBLISH_VENDOR", &self.vendor)
+            .env("PUBLISH_KIT_REPO", publish_kit_repo)
             .makefile(makefile_path)
             .project_dir(project.project_dir())
             .exec("publish-kit")
