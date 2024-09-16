@@ -119,14 +119,13 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MATRIX_DIST_ARGS: ${{ matrix.dist-args }}
-      MATRIX_INSTALL_DIST: ${{ matrix.install-dist }}
       GITHUB_REF_NAME: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Install cargo-dist
-        run: ${MATRIX_INSTALL_DIST}
+        run: ${{ matrix.install-dist }}
       - name: Install Cross
         # Pin cargo cross to a version that we know is working for us.
         run: |
