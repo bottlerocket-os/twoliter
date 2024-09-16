@@ -8,13 +8,6 @@ on:
       - "**.md"
       - "**.plantuml"
       - "**.svg"
-  # triggers when a PR is merged
-  push:
-    branches: [develop]
-    paths-ignore:
-      - "**.md"
-      - "**.plantuml"
-      - "**.svg"
 jobs:
   build:
     runs-on:

@@ -47,6 +47,7 @@ on:
 jobs:
   # Create the Github Release™ so the packages have something to be uploaded to
   create-release:
+    if: github.repository == 'bottlerocket-os/twoliter'
     environment: release
     runs-on:
       group: bottlerocket
@@ -93,6 +94,7 @@ jobs:
 
   # Build and packages all the things
   upload-artifacts:
+    if: github.repository == 'bottlerocket-os/twoliter'
     # Let the initial task tell us to not run (currently very blunt)
     needs: create-release
     if: ${{ needs.create-release.outputs.has-releases == 'true' }}
@@ -150,6 +152,7 @@ jobs:
 
   # Mark the Github Release™ as a non-draft now that everything has succeeded!
   publish-release:
+    if: github.repository == 'bottlerocket-os/twoliter'
     # Only run after all the other tasks, but it's ok if upload-artifacts was skipped
     needs: [create-release, upload-artifacts]
     if: ${{ always() && needs.create-release.result == 'success' && (needs.upload-artifacts.result == 'skipped' || needs.upload-artifacts.result == 'success') }}
