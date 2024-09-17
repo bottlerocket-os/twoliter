@@ -857,7 +857,7 @@ cargo build \
 ]
 
 [tasks.build-variant]
-dependencies = ["fetch", "build-sbkeys", "publish-setup", "validate-kits"]
+dependencies = ["fetch-sdk", "build-sbkeys", "publish-setup", "validate-kits"]
 script = [
 '''
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
