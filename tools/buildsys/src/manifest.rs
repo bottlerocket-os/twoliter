@@ -498,6 +498,11 @@ impl ManifestInfo {
                 }
             }
         }
+        for experiment in EXPERIMENTAL_IMAGE_FEATURES {
+            if features.contains(experiment) {
+                println!("cargo:warning=Image feature {experiment} is experimental; use at your own risk!");
+            }
+        }
         Some(features)
     }
 
@@ -796,6 +801,8 @@ pub enum ImageFeature {
     InPlaceUpdates,
     HostContainers,
 }
+
+const EXPERIMENTAL_IMAGE_FEATURES: [&ImageFeature; 1] = [&ImageFeature::ErofsRootPartition];
 
 impl TryFrom<String> for ImageFeature {
     type Error = Error;
