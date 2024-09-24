@@ -151,10 +151,31 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" $(cat uploads.txt)
           echo "uploaded!"
 
+  # Upload dependency attributions
+  upload-attributions:
+    needs: [create-release, upload-artifacts]
+    if: >-
+      ${{ needs.create-release.outputs.has-releases == 'true'
+          && github.repository == 'bottlerocket-os/bottlerocket'
+      }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Upload attributions
+        run: |
+          make attributions
+          gh release upload "${GITHUB_REF_NAME}" twoliter-attributions.tar.gz
+
   # Mark the Github Release™ as a non-draft now that everything has succeeded!
   publish-release:
     # Only run after all the other tasks, but it's ok if upload-artifacts was skipped
-    needs: [create-release, upload-artifacts]
+    needs: [create-release, upload-artifacts, upload-attributions]
     if: >-
       ${{ github.repository == 'bottlerocket-os/twoliter'
           && always()
