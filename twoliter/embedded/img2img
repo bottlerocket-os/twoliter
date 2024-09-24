@@ -6,6 +6,7 @@ shopt -qs failglob
 OUTPUT_FMT="raw"
 OVF_TEMPLATE=""
 
+EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 
@@ -21,6 +22,7 @@ for opt in "$@"; do
   --data-image-publish-size-gib=*) DATA_IMAGE_PUBLISH_SIZE_GIB="${optarg}" ;;
   --partition-plan=*) PARTITION_PLAN="${optarg}" ;;
   --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
+  --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   *)
@@ -80,6 +82,10 @@ ROOT_MOUNT="$(mktemp -p "${WORKDIR}" -d root.XXXXXXXXXX)"
 BOOT_MOUNT="$(mktemp -p "${WORKDIR}" -d boot.XXXXXXXXXX)"
 EFI_MOUNT="$(mktemp -p "${WORKDIR}" -d efi.XXXXXXXXXX)"
 
+SELINUX_ROOT="/etc/selinux"
+SELINUX_POLICY="fortified"
+SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/files/file_contexts"
+
 # Collect partition sizes and offsets from the partition plan.
 declare -A partsize partoff
 set_partition_sizes \
@@ -122,6 +128,13 @@ done
 dd if="${OS_IMAGE}" of="${ROOT_IMAGE}" \
   count="${partsize["ROOT-A"]}" bs=1M skip="${partoff["ROOT-A"]}"
 
+# For erofs, extract the root filesystem since we can't modify in-place.
+if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  fsck.erofs --extract="${ROOT_MOUNT}" "${ROOT_IMAGE}"
+  touch -r "${ROOT_IMAGE}" "${ROOT_MOUNT}"
+  rm "${ROOT_IMAGE}"
+fi
+
 # Extract the boot partition from the OS image, and dump the contents.
 dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" \
   count="${partsize["BOOT-A"]}" bs=1M skip="${partoff["BOOT-A"]}"
@@ -149,25 +162,29 @@ install_root_json "${ROOT_MOUNT}"
 ###############################################################################
 # Section 4: update root partition and root verity
 
-# shellcheck disable=SC2312  # mapfile is validated elsewhere
-mapfile -t new_root_artifacts <<<"$(find "${ROOT_MOUNT}" -type f)"
-
-# The reason we check index 0 rather than the mapfile length is if `find` fails
-# to find an artifact the heredoc to mapfile will assign empty output to 0.
-if [[ -z "${new_root_artifacts[0]}" ]]; then
-  echo "no new root artifacts found" >&2
-  exit 1
+if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  mkfs_root_erofs "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${SELINUX_FILE_CONTEXTS}"
 else
-  # Write files from the root mount to the root image.
-  ROOT_DEBUGFS_STDERR="${WORKDIR}/root.err"
-  for artifact in "${new_root_artifacts[@]}"; do
-    cat <<EOF | debugfs -w -f - "${ROOT_IMAGE}" 2>>"${ROOT_DEBUGFS_STDERR}"
+  # shellcheck disable=SC2312  # mapfile is validated elsewhere
+  mapfile -t new_root_artifacts <<<"$(find "${ROOT_MOUNT}" -type f)"
+
+  # The reason we check index 0 rather than the mapfile length is if `find` fails
+  # to find an artifact the heredoc to mapfile will assign empty output to 0.
+  if [[ -z "${new_root_artifacts[0]}" ]]; then
+    echo "no new root artifacts found" >&2
+    exit 1
+  else
+    # Write files from the root mount to the root image.
+    ROOT_DEBUGFS_STDERR="${WORKDIR}/root.err"
+    for artifact in "${new_root_artifacts[@]}"; do
+      cat <<EOF | debugfs -w -f - "${ROOT_IMAGE}" 2>>"${ROOT_DEBUGFS_STDERR}"
 rm ${artifact#"${ROOT_MOUNT}"}
 write ${artifact} ${artifact#"${ROOT_MOUNT}"}
 ea_set ${artifact#"${ROOT_MOUNT}"} security.selinux system_u:object_r:os_t:s0
 EOF
-  done
-  check_debugfs_errors "${ROOT_DEBUGFS_STDERR}"
+    done
+    check_debugfs_errors "${ROOT_DEBUGFS_STDERR}"
+  fi
 fi
 
 # Validate and write root image back to the OS image.

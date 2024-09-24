@@ -8,6 +8,7 @@ OVF_TEMPLATE=""
 
 GRUB_SET_PRIVATE_VAR="no"
 XFS_DATA_PARTITION="no"
+EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 
@@ -26,6 +27,7 @@ for opt in "$@"; do
   --ovf-template=*) OVF_TEMPLATE="${optarg}" ;;
   --with-grub-set-private-var=*) GRUB_SET_PRIVATE_VAR="${optarg}" ;;
   --with-xfs-data-partition=*) XFS_DATA_PARTITION="${optarg}" ;;
+  --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   *)
@@ -260,6 +262,13 @@ printf "%s\n" "${INVENTORY_DATA}" >"${OUTPUT_DIR}/application-inventory.json"
 
 # Regenerate module dependencies, if possible.
 KMOD_DIR="${ROOT_MOUNT}/lib/modules"
+# First decompress the kernel modules, so they can be recompressed by EROFS.
+if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  find "${KMOD_DIR}" -name '*.ko.gz' -exec gunzip '{}' \;
+  find "${KMOD_DIR}" -name '*.ko.xz' -exec unxz '{}' \;
+  find "${KMOD_DIR}" -name '*.ko.zst' -exec unzstd --rm '{}' \;
+fi
+
 # shellcheck disable=SC2066
 # Quotes are fine here because we only expect one directory to be found.
 for kver in "$(find "${KMOD_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%P\n')"; do
@@ -280,12 +289,19 @@ install_ca_certs "${ROOT_MOUNT}"
 # Install 'root.json'.
 install_root_json "${ROOT_MOUNT}"
 
-# Install licenses.
-mksquashfs \
-  "${ROOT_MOUNT}"/usr/share/licenses \
-  "${ROOT_MOUNT}"/usr/share/bottlerocket/licenses.squashfs \
-  -no-exports -all-root -comp zstd
-rm -rf "${ROOT_MOUNT}"/var/lib "${ROOT_MOUNT}"/usr/share/licenses/*
+# "Install" licenses by compressing them into a squashfs, then removing the
+# original files. Skip this step if using erofs, since they will be compressed
+# when the filesystem is created.
+if [[ "${EROFS_ROOT_PARTITION}" == "no" ]]; then
+  mksquashfs \
+    "${ROOT_MOUNT}"/usr/share/licenses \
+    "${ROOT_MOUNT}"/usr/share/bottlerocket/licenses.squashfs \
+    -no-exports -all-root -comp zstd
+  rm -rf "${ROOT_MOUNT}"/usr/share/licenses/*
+fi
+
+# Clean up rpmdb.
+rm -rf "${ROOT_MOUNT}"/var/lib
 
 if [[ "${ARCH}" == "x86_64" ]]; then
   # MBR and BIOS-BOOT
@@ -377,14 +393,18 @@ else
 fi
 
 # BOTTLEROCKET-ROOT-A
-mkdir -p "${ROOT_MOUNT}/lost+found"
-ROOT_LABELS=$(setfiles -n -d -F -m -r "${ROOT_MOUNT}" \
-  "${SELINUX_FILE_CONTEXTS}" "${ROOT_MOUNT}" |
-  awk -v root="${ROOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
-mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH}" \
-  -O ^has_journal -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
-echo "${ROOT_LABELS}" | debugfs -w -f - "${ROOT_IMAGE}"
-resize2fs -M "${ROOT_IMAGE}"
+if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  mkfs_root_erofs "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${SELINUX_FILE_CONTEXTS}"
+else
+  mkdir -p "${ROOT_MOUNT}/lost+found"
+  ROOT_LABELS=$(setfiles -n -d -F -m -r "${ROOT_MOUNT}" \
+    "${SELINUX_FILE_CONTEXTS}" "${ROOT_MOUNT}" |
+    awk -v root="${ROOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
+  mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH}" \
+    -O ^has_journal -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
+  echo "${ROOT_LABELS}" | debugfs -w -f - "${ROOT_IMAGE}"
+  resize2fs -M "${ROOT_IMAGE}"
+fi
 dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
 
 # BOTTLEROCKET-VERITY-A
