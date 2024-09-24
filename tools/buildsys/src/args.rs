@@ -15,7 +15,7 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 15] = [
+const REBUILD_VARS: [(&str, u8); 14] = [
     ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_CACERTS_BUNDLE_OVERRIDE", VARIANT),
     ("BUILDSYS_KITS_DIR", KIT),
@@ -27,7 +27,6 @@ const REBUILD_VARS: [(&str, u8); 15] = [
     ("BUILDSYS_PRETTY_NAME", VARIANT),
     ("BUILDSYS_ROOT_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_STATE_DIR", PACKAGE | KIT | VARIANT),
-    ("BUILDSYS_VARIANT", VARIANT),
     ("BUILDSYS_VERSION_BUILD", KIT | VARIANT),
     ("BUILDSYS_VERSION_IMAGE", KIT | VARIANT),
     ("TLPRIVATE_SDK_IMAGE", PACKAGE | KIT | VARIANT),
@@ -268,7 +267,7 @@ fn build_type_includes_test() {
 fn test_sensitive_env_vars_variant() {
     let list: Vec<&str> = sensitive_env_vars(BuildFlags::Variant).collect();
     assert!(list.contains(&"BUILDSYS_ARCH"));
-    assert!(list.contains(&"BUILDSYS_VARIANT"));
+    assert!(list.contains(&"BUILDSYS_IMAGES_DIR"));
     assert!(!list.contains(&"BUILDSYS_PACKAGES_DIR"));
 }
 
@@ -277,5 +276,13 @@ fn test_sensitive_env_vars_package() {
     let list: Vec<&str> = sensitive_env_vars(BuildFlags::Package).collect();
     assert!(list.contains(&"BUILDSYS_ARCH"));
     assert!(list.contains(&"BUILDSYS_PACKAGES_DIR"));
-    assert!(!list.contains(&"BUILDSYS_VARIANT"));
+    assert!(!list.contains(&"BUILDSYS_KITS_DIR"));
+}
+
+#[test]
+fn test_sensitive_env_vars_kit() {
+    let list: Vec<&str> = sensitive_env_vars(BuildFlags::Kit).collect();
+    assert!(list.contains(&"BUILDSYS_ARCH"));
+    assert!(list.contains(&"BUILDSYS_KITS_DIR"));
+    assert!(!list.contains(&"BUILDSYS_IMAGES_DIR"));
 }
