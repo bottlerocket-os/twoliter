@@ -14,7 +14,7 @@ use url::Url;
 
 use buildsys::manifest::{ImageFormat, ManifestInfo, PartitionPlan};
 
-/// fetching and downdloaing the image targets of a given variant
+/// fetching and downloading the image targets of a given variant
 #[derive(Debug, Parser)]
 pub(crate) struct FetchVariantArgs {
     #[arg(long)]
@@ -48,6 +48,9 @@ pub(crate) struct FetchVariantArgs {
     #[arg(long)]
     /// The variant name without extension
     filename_prefix: String,
+
+    #[arg(long)]
+    fetch_repo_files: bool,
 
     #[arg(long)]
     /// The manifest of the variant
@@ -122,6 +125,7 @@ async fn fetch_variant(
     filename_prefix: &str,
     variant_manifest: &PathBuf,
     variant: &str,
+    fetch_repo_files: bool,
 ) -> Result<(), Error> {
     // Load the repository
     let repo = RepositoryLoader::new(
@@ -134,7 +138,7 @@ async fn fetch_variant(
     .context(repo_error::RepoLoadSnafu {
         metadata_base_url: metadata_url.clone(),
     })?;
-
+    let repo_file_types = vec!["boot.ext4.lz4", "root.ext4.lz4", "root.verity.lz4"];
     let manifest_info = ManifestInfo::new(variant_manifest).context(error::ManifestParseSnafu)?;
 
     let image_layout = manifest_info
@@ -147,7 +151,7 @@ async fn fetch_variant(
         Some(ImageFormat::Vmdk) => "ova",
     };
 
-    let targets = match image_format {
+    let mut targets = match image_format {
         // Since the OVA will contain all of the necessary VMDKs, the partition plan is irrelevant.
         Some(ImageFormat::Vmdk) => {
             vec![format!("{filename_prefix}.{image_ext}")]
@@ -162,6 +166,16 @@ async fn fetch_variant(
             PartitionPlan::Unified => vec![format!("{filename_prefix}.{image_ext}")],
         },
     };
+
+    if fetch_repo_files {
+        // Fetch required TUF Repo file names.
+        let repo_files = repo_file_types
+            .into_iter()
+            .map(|ext| format!("{filename_prefix}-{ext}"))
+            .collect();
+        targets.push(repo_files);
+    }
+
     handle_download(&repo, outdir, &targets).await
 }
 
@@ -205,6 +219,7 @@ pub(crate) async fn run(args: &Args, fetch_variant_args: &FetchVariantArgs) -> R
         &fetch_variant_args.filename_prefix,
         &fetch_variant_args.variant_manifest,
         &fetch_variant_args.variant,
+        fetch_variant_args.fetch_repo_files,
     )
     .await
 }
