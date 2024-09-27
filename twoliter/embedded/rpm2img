@@ -254,6 +254,7 @@ if [[ "${INVENTORY_COUNT}" -ne "${RPM_COUNT}" ]]; then
 fi
 
 # Write the inventory.
+mkdir -p "${ROOT_MOUNT}/usr/share/bottlerocket"
 printf "%s\n" "${INVENTORY_DATA}" >"${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
 
 # Write the the inventory to a file in the local build output directory so that builders
