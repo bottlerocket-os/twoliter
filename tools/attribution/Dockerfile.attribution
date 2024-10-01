@@ -1,0 +1,19 @@
+# This dockerfile installs rustup into the Bottlerocket SDK so that attributions can be generated
+# using the same nightly compiler as is used to build twoliter.
+ARG BOTTLEROCKET_SDK_IMAGE
+FROM ${BOTTLEROCKET_SDK_IMAGE}
+
+# Rustup is installed using the given user, allowing the container to write the results to a
+# mounted filesystem to which the given user has write access.
+ARG UID
+ARG GID
+
+USER root
+
+RUN mkdir /home/attribution-creator \
+    && chown ${UID}:${GID} /home/attribution-creator
+
+USER ${UID}:${GID}
+RUN export HOME=/home/attribution-creator \
+    && curl --proto '=https' --tlsv1.2 -sS 'https://sh.rustup.rs' \
+    | sh -s -- -q --default-toolchain none -y
