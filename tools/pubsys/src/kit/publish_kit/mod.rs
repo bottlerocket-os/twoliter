@@ -110,7 +110,10 @@ async fn publish_kit(
         error::NoArchiveSnafu { path: kit_path }
     );
 
-    let target_uri = format!("{}/{}:{}", vendor_registry_uri, kit_name, kit_version);
+    let target_uri = format!(
+        "{}/{}:{}",
+        vendor_registry_uri, repository_target, kit_version
+    );
 
     info!("Pushing kit to {}", &target_uri);
 
