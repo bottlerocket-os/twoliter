@@ -1,18 +1,28 @@
 use super::archive::OCIArchive;
 use super::views::ManifestListView;
 use crate::common::fs::create_dir_all;
+use crate::compatibility::SUPPORTED_KIT_METADATA_VERSION;
 use crate::project::{Image, ProjectImage, ValidIdentifier, VendedArtifact};
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use log::trace;
-use oci_cli_wrapper::{DockerArchitecture, ImageTool};
+use oci_cli_wrapper::{ConfigView, DockerArchitecture, ImageTool};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::fmt::{Debug, Display, Formatter};
 use std::path::Path;
 use tracing::{debug, error, info, instrument};
+
+/// The OCI config label prefix to which the supported kit metadata version is appended.
+///
+/// Kit metadata is embedded in the OCI image under this label.
+const KIT_METADATA_LABEL_PREFIX: &str = "dev.bottlerocket.kit.";
+
+pub fn supported_kit_metadata_label() -> String {
+    format!("{KIT_METADATA_LABEL_PREFIX}{SUPPORTED_KIT_METADATA_VERSION}")
+}
 
 /// Represents a locked dependency on an image
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -59,12 +69,13 @@ impl VendedArtifact for LockedImage {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ImageMetadata {
     /// The name of the kit
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub name: String,
     /// The version of the kit
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub version: Version,
     /// The required sdk of the kit,
     pub sdk: Image,
@@ -93,13 +104,7 @@ impl EncodedKitMetadata {
     async fn try_from_image(image_uri: &str, image_tool: &ImageTool) -> Result<Self> {
         tracing::trace!(image_uri, "Extracting kit metadata from OCI image config");
         let config = image_tool.get_config(image_uri).await?;
-        let kit_metadata = EncodedKitMetadata(
-            config
-                .labels
-                .get("dev.bottlerocket.kit.v1")
-                .context("no metadata stored on image, this image appears to not be a kit")?
-                .to_owned(),
-        );
+        let kit_metadata = EncodedKitMetadata(Self::extract_encoded_kit_metadata(&config)?);
 
         tracing::trace!(
             image_uri,
@@ -109,6 +114,53 @@ impl EncodedKitMetadata {
         );
 
         Ok(kit_metadata)
+    }
+
+    fn extract_encoded_kit_metadata(oci_config: &ConfigView) -> Result<String> {
+        let encoded_metadata = oci_config
+            .labels
+            .get(supported_kit_metadata_label().as_str());
+
+        match encoded_metadata {
+            Some(encoded_metadata) => Ok(encoded_metadata.to_owned()),
+            None => {
+                if let Some(kit_label) = oci_config
+                    .labels
+                    .keys()
+                    .find(|label| label.starts_with(KIT_METADATA_LABEL_PREFIX))
+                {
+                    let kit_version = kit_label.trim_start_matches(KIT_METADATA_LABEL_PREFIX);
+                    let meta_relation =
+                        Self::compare_version_strs(kit_version, SUPPORTED_KIT_METADATA_VERSION);
+
+                    bail!(
+                        "kit appears to be built with metadata version '{kit_version}', possibly by \
+                        {meta_relation} version of twoliter with unsupported incompatibilities. \
+                        This version of twoliter supports metadata version \
+                        '{SUPPORTED_KIT_METADATA_VERSION}'.",
+                    )
+                } else {
+                    bail!("no metadata stored on image, this image appears not to be a kit")
+                }
+            }
+        }
+    }
+
+    /// Compare's kit metadata versions in english. Intended to be used in error messages.
+    fn compare_version_strs(lhs: &str, rhs: &str) -> &'static str {
+        let lhs: Result<u64, _> = lhs.trim_start_matches('v').parse();
+        let rhs = rhs.trim_start_matches('v').parse();
+
+        match (lhs, rhs) {
+            (Ok(lhs), Ok(rhs)) => {
+                if lhs < rhs {
+                    "an older"
+                } else {
+                    "a newer"
+                }
+            }
+            _ => "a different",
+        }
     }
 
     /// Infallible method to provide debugging insights into encoded `ImageMetadata`
@@ -311,6 +363,8 @@ impl ImageResolver {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::collections::HashMap;
+
     #[test]
     fn test_try_debug_image_metadata_succeeds() {
         // Given a valid encoded metadata string,
@@ -333,5 +387,66 @@ mod test {
         // Then the debug string is marked as remaining encoded.
         let junk_data = EncodedKitMetadata("abcdefghijklmnophello".to_string());
         assert!(junk_data.debug_image_metadata().is_none());
+    }
+
+    #[test]
+    fn test_extract_encoded_kit_metadata_fails_no_label() {
+        EncodedKitMetadata::extract_encoded_kit_metadata(&ConfigView {
+            labels: HashMap::from([("foo".to_string(), "bar".to_string())]),
+        })
+        .expect_err("no label");
+    }
+
+    #[test]
+    fn test_extract_encoded_kit_metadata_fails_older_metadata() {
+        let err = EncodedKitMetadata::extract_encoded_kit_metadata(&ConfigView {
+            labels: HashMap::from([(format!("{KIT_METADATA_LABEL_PREFIX}v0"), "bar".to_string())]),
+        })
+        .expect_err("too old")
+        .to_string();
+
+        assert!(err.contains("older") && err.contains("incompatibilities"));
+    }
+
+    #[test]
+    fn test_extract_encoded_kit_metadata_fails_newer_metadata() {
+        let err = EncodedKitMetadata::extract_encoded_kit_metadata(&ConfigView {
+            labels: HashMap::from([(
+                format!("{KIT_METADATA_LABEL_PREFIX}v9999"),
+                "bar".to_string(),
+            )]),
+        })
+        .expect_err("too new")
+        .to_string();
+
+        assert!(err.contains("newer") && err.contains("incompatibilities"));
+    }
+
+    #[test]
+    fn test_extract_encoded_kit_metadata_fails_metadata_ver_unparseable() {
+        let err = EncodedKitMetadata::extract_encoded_kit_metadata(&ConfigView {
+            labels: HashMap::from([(
+                format!("{KIT_METADATA_LABEL_PREFIX}notaversion"),
+                "foo".to_string(),
+            )]),
+        })
+        .expect_err("not a version")
+        .to_string();
+
+        assert!(err.contains("different") && err.contains("incompatibilities"));
+    }
+
+    #[test]
+    fn test_extract_encoded_kit_metadata_succeeds_current_metadata_version() {
+        assert_eq!(
+            EncodedKitMetadata::extract_encoded_kit_metadata(&ConfigView {
+                labels: HashMap::from([(
+                    format!("{KIT_METADATA_LABEL_PREFIX}{SUPPORTED_KIT_METADATA_VERSION}"),
+                    "bar".to_string(),
+                )]),
+            })
+            .unwrap(),
+            "bar".to_string()
+        );
     }
 }

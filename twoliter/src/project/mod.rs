@@ -6,6 +6,7 @@ pub(crate) use lock::VerificationTagger;
 
 use self::lock::{Lock, LockedSDK, Override};
 use crate::common::fs::{self, read_to_string};
+use crate::compatibility::SUPPORTED_TWOLITER_PROJECT_SCHEMA_VERSION;
 use crate::docker::ImageUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
@@ -51,7 +52,7 @@ pub(crate) struct Project<L: ProjectLock> {
     project_dir: PathBuf,
 
     /// The version of this schema struct.
-    schema_version: SchemaVersion<1>,
+    schema_version: SchemaVersion<SUPPORTED_TWOLITER_PROJECT_SCHEMA_VERSION>,
 
     /// The version that will be given to released artifacts such as kits and variants.
     release_version: String,
