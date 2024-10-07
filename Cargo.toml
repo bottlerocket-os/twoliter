@@ -50,7 +50,7 @@ pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin
 testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.14", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.14" }
-twoliter = { version = "0", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter = { version = "0.4.7-rc1", path = "twoliter", artifact = [ "bin:twoliter" ] }
 unplug = { version = "0.1", path = "tools/unplug", artifact = [ "bin:unplug" ] }
 update-metadata = { version = "0.1", path = "tools/update-metadata" }
 

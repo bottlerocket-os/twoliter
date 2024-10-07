@@ -7,11 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.6...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.7...HEAD
+
+## [0.4.7] - 2024-10-07
+
+### Added
+
+- Add support for building with erofs root filesystems ([#379])
+
+### Fixed
+
+- Refrain from tracking `BUILDSYS_VARIANT` environment variable in change-detection ([#377])
+- Generate `/usr/share/bottlerocket` if not created by any variant packages ([#381])
+- Fix kit publication not fully-overriding OCI repository names ([#385])
+
+[#377]: https://github.com/bottlerocket-os/twoliter/pull/377
+[#379]: https://github.com/bottlerocket-os/twoliter/pull/379
+[#381]: https://github.com/bottlerocket-os/twoliter/pull/381
+[#385]: https://github.com/bottlerocket-os/twoliter/pull/385
 
 ## [0.4.6] - 2024-09-16
 
-### Changes
+### Changed
 
 - Add support for vendor override files ([#344])
 - Updated buildsys to add new 'build-all' target, reduce build time ([#345], [#357])
@@ -39,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.5] - 2024-08-22
 
-### Changes
+### Changed
 
 - Update twoliter to re-resolve workspaces at buildtime to detect lock mismatches ([#337])
 - Improve logging in twoliter lockfile resolution ([#338])
@@ -54,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.4] - 2024-08-02
 
-### Changes
+### Changed
 
 - Update cross to newer version ([#328])
 - Update testsys to v0.0.14 ([#341])
@@ -74,7 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2024-07-17
 
-### Changes
+### Changed
 
 - Update rust nightly to newer version ([#325])
 - Fix image handling bugs in `twoliter update` ([#326])
