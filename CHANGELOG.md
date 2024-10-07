@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.6...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.7...HEAD
+
+## [0.4.7] - 2024-10-07
+
+### Added
+
+- Add support for building with erofs root filesystems ([#379])
+
+### Fixed
+
+- Refrain from tracking `BUILDSYS_VARIANT` environment variable in change-detection ([#377])
+- Generate `/usr/share/bottlerocket` if not created by any variant packages ([#381])
+- Fix kit publication not fully-overriding OCI repository names ([#385])
+
+[#377]: https://github.com/bottlerocket-os/twoliter/pull/377
+[#379]: https://github.com/bottlerocket-os/twoliter/pull/379
+[#381]: https://github.com/bottlerocket-os/twoliter/pull/381
+[#385]: https://github.com/bottlerocket-os/twoliter/pull/385
 
 ## [0.4.6] - 2024-09-16
 
