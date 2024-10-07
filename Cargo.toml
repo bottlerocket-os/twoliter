@@ -41,6 +41,7 @@ bottlerocket-types = { version = "0.0.14", git = "https://github.com/bottlerocke
 bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
 buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys" ] }
 buildsys-config = { version = "0.1", path = "tools/buildsys-config" }
+krane-bundle = { version = "0.1", path = "tools/krane" }
 oci-cli-wrapper = { version = "0.1", path = "tools/oci-cli-wrapper" }
 parse-datetime = { version = "0.1", path = "tools/parse-datetime" }
 pipesys = { version = "0.1", path = "tools/pipesys", lib = true, artifact = [ "bin:pipesys" ] }
@@ -94,6 +95,7 @@ nix = "0.28"
 nonzero_ext = "0.3"
 num_cpus = "1"
 olpc-cjson = "0.1"
+pentacle = "1.1"
 rand = { version = "0.8", default-features = false }
 regex = "1"
 reqwest = { version = "0.11", default-features = false }

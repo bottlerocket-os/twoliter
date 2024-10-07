@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 async-trait.workspace = true
+krane-bundle.workspace = true
 log.workspace = true
 olpc-cjson.workspace = true
 regex.workspace = true

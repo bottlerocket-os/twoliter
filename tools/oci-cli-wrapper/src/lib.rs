@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use cli::CommandLine;
 use crane::CraneCLI;
 use docker::DockerCLI;
+use krane_bundle::KRANE;
 use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -54,40 +55,30 @@ impl ImageTool {
         Ok(Self { image_tool_impl })
     }
 
-    /// Auto-selects the container tool based on unix search path.
-    ///
-    /// Uses `crane` if available, falling back to `docker` otherwise.
-    fn from_unix_search_path() -> Result<Self> {
-        let crane = which("krane").or(which("gcrane")).or(which("crane"));
-        let image_tool_impl: Box<dyn ImageToolImpl> = if let Ok(path) = crane {
-            Box::new(CraneCLI {
-                cli: CommandLine { path },
-            })
-        } else {
-            Box::new(DockerCLI {
-                cli: CommandLine {
-                    path: which("docker").context(error::NoneFoundSnafu)?,
-                },
-            })
-        };
-
-        Ok(Self { image_tool_impl })
+    /// Uses the builtin `krane` provided by the `tools/krane` crate.
+    fn from_builtin_krane() -> Self {
+        let image_tool_impl = Box::new(CraneCLI {
+            cli: CommandLine {
+                path: KRANE.path().to_path_buf(),
+            },
+        });
+        Self { image_tool_impl }
     }
 
     /// Auto-select the container tool to use by environment variable
     /// and-or auto detection.
     ///
-    /// If TWOLITER_KIT_IMAGE_TOOL environment variable is set, uses that value.
+    /// By default, uses a bundled `krane` from go-containerregistry.
+    ///
+    /// If TWOLITER_KIT_IMAGE_TOOL environment variable is set, uses that value instead.
     /// Valid values are:
     /// * docker
     /// * crane | gcrane | krane
-    ///
-    /// Otherwise, searches $PATH, using `crane` if available and falling back to docker otherwise.
     pub fn from_environment() -> Result<Self> {
         if let Ok(name) = env::var("TWOLITER_KIT_IMAGE_TOOL") {
             Self::from_tool_name(&name)
         } else {
-            Self::from_unix_search_path()
+            Ok(Self::from_builtin_krane())
         }
     }
 
