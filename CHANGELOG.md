@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.6] - 2024-09-16
 
-### Changes
+### Changed
 
 - Add support for vendor override files ([#344])
 - Updated buildsys to add new 'build-all' target, reduce build time ([#345], [#357])
@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.5] - 2024-08-22
 
-### Changes
+### Changed
 
 - Update twoliter to re-resolve workspaces at buildtime to detect lock mismatches ([#337])
 - Improve logging in twoliter lockfile resolution ([#338])
@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.4] - 2024-08-02
 
-### Changes
+### Changed
 
 - Update cross to newer version ([#328])
 - Update testsys to v0.0.14 ([#341])
@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.3] - 2024-07-17
 
-### Changes
+### Changed
 
 - Update rust nightly to newer version ([#325])
 - Fix image handling bugs in `twoliter update` ([#326])
