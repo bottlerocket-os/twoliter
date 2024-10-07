@@ -156,7 +156,7 @@ jobs:
     needs: [create-release, upload-artifacts]
     if: >-
       ${{ needs.create-release.outputs.has-releases == 'true'
-          && github.repository == 'bottlerocket-os/bottlerocket'
+          && github.repository == 'bottlerocket-os/twoliter'
       }}
     runs-on: ubuntu-latest
     env:
