@@ -31,7 +31,7 @@ pub(crate) struct PublishKitArgs {
 }
 
 pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Result<()> {
-    let image_tool = ImageTool::from_environment().context(error::ImageToolSnafu)?;
+    let image_tool = ImageTool::from_builtin_krane();
 
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
@@ -136,11 +136,6 @@ mod error {
     pub(crate) enum Error {
         #[snafu(display("Error reading config: {}", source))]
         Config { source: pubsys_config::Error },
-
-        #[snafu(display("Could not find image tool: {}", source))]
-        ImageTool {
-            source: oci_cli_wrapper::error::Error,
-        },
 
         #[snafu(display("Could not convert {} to docker architecture: {}", arch, source))]
         InvalidArchitecture {

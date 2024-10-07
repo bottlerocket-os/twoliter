@@ -103,7 +103,7 @@ impl LockedSDK {
         };
 
         debug!(?sdk, "Resolving workspace SDK");
-        let image_tool = ImageTool::from_environment()?;
+        let image_tool = ImageTool::from_builtin_krane();
         ImageResolver::from_image(&sdk)?
             .skip_metadata_retrieval() // SDKs don't have metadata
             .resolve(&image_tool)
@@ -203,7 +203,7 @@ impl Lock {
     /// Fetches all external kits defined in a Twoliter.lock to the build directory
     #[instrument(level = "trace", skip_all)]
     pub(crate) async fn fetch(&self, project: &Project<Locked>, arch: &str) -> Result<()> {
-        let image_tool = ImageTool::from_environment()?;
+        let image_tool = ImageTool::from_builtin_krane();
         let target_dir = project.external_kits_dir();
         create_dir_all(&target_dir).await.context(format!(
             "failed to create external-kits directory at {}",
@@ -257,7 +257,7 @@ impl Lock {
     async fn resolve(project: &Project<Unlocked>) -> Result<Self> {
         let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
         let mut locked: Vec<LockedImage> = Vec::new();
-        let image_tool = ImageTool::from_environment()?;
+        let image_tool = ImageTool::from_builtin_krane();
         let mut remaining = project.direct_kit_deps()?;
 
         let mut sdk_set = HashSet::new();

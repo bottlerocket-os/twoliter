@@ -12,21 +12,18 @@
 //!     metadata. In addition, in order to operate with OCI image format, the containerd-snapshotter
 //!     feature has to be enabled in the docker daemon
 use std::fmt::{Display, Formatter};
-use std::{collections::HashMap, env, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use async_trait::async_trait;
 use cli::CommandLine;
 use crane::CraneCLI;
-use docker::DockerCLI;
 use krane_bundle::KRANE;
 use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
-use which::which;
 
 mod cli;
 mod crane;
-mod docker;
 
 #[derive(Debug)]
 pub struct ImageTool {
@@ -34,52 +31,14 @@ pub struct ImageTool {
 }
 
 impl ImageTool {
-    /// Uses the container tool specified by the given tool name.
-    ///
-    /// The specified tool must be present in the unix search path.
-    fn from_tool_name(tool_name: &str) -> Result<Self> {
-        let image_tool_impl: Box<dyn ImageToolImpl> = match tool_name {
-            "docker" => Box::new(DockerCLI {
-                cli: CommandLine {
-                    path: which("docker").context(error::NotFoundSnafu { name: "docker" })?,
-                },
-            }),
-            tool @ ("crane" | "gcrane" | "krane") => Box::new(CraneCLI {
-                cli: CommandLine {
-                    path: which(tool).context(error::NotFoundSnafu { name: tool })?,
-                },
-            }),
-            _ => return error::UnsupportedSnafu { name: tool_name }.fail(),
-        };
-
-        Ok(Self { image_tool_impl })
-    }
-
     /// Uses the builtin `krane` provided by the `tools/krane` crate.
-    fn from_builtin_krane() -> Self {
+    pub fn from_builtin_krane() -> Self {
         let image_tool_impl = Box::new(CraneCLI {
             cli: CommandLine {
                 path: KRANE.path().to_path_buf(),
             },
         });
         Self { image_tool_impl }
-    }
-
-    /// Auto-select the container tool to use by environment variable
-    /// and-or auto detection.
-    ///
-    /// By default, uses a bundled `krane` from go-containerregistry.
-    ///
-    /// If TWOLITER_KIT_IMAGE_TOOL environment variable is set, uses that value instead.
-    /// Valid values are:
-    /// * docker
-    /// * crane | gcrane | krane
-    pub fn from_environment() -> Result<Self> {
-        if let Ok(name) = env::var("TWOLITER_KIT_IMAGE_TOOL") {
-            Self::from_tool_name(&name)
-        } else {
-            Ok(Self::from_builtin_krane())
-        }
     }
 
     pub fn new(image_tool_impl: Box<dyn ImageToolImpl>) -> Self {
