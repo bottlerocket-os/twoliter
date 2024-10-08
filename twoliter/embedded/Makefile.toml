@@ -1146,6 +1146,10 @@ run_task = "fetch-variant"
 [tasks.fetch-ova]
 run_task = "fetch-friendly-variant"
 
+[tasks.fetch-repo]
+env = { "FETCH_REPO_FILES" = "true" }
+run_task = "fetch-variant"
+
 [tasks.check-repo-expirations]
 dependencies = ["publish-setup-without-key"]
 script_runner = "bash"
