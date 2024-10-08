@@ -5,9 +5,9 @@ release-version = "1.0.0"
 registry = "public.ecr.aws/bottlerocket"
 
 [vendor.custom-vendor]
-registry = "public.ecr.aws/bottlerocket"
+registry = "definitely-wont-resolve"
 
 [[kit]]
-name = "bottlerocket-core-kit"
-version = "2.0.0"
+name = "core-kit"
+version = "1.0.0"
 vendor = "custom-vendor"

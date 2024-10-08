@@ -1,0 +1,17 @@
+[package]
+name = "krane-bundle"
+version = "0.1.0"
+authors = ["Sean P. Kelly <seankell@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+flate2.workspace = true
+lazy_static.workspace = true
+pentacle.workspace = true
+
+[build-dependencies]
+flate2.workspace = true
+tar.workspace = true

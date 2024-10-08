@@ -1815,7 +1815,10 @@ dependencies = [
 name = "integration-tests"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "tempfile",
  "tokio",
+ "toml",
  "twoliter",
 ]
 
@@ -1890,6 +1893,17 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
+]
+
+[[package]]
+name = "krane-bundle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "lazy_static",
+ "pentacle",
+ "tar",
 ]
 
 [[package]]
@@ -2150,6 +2164,7 @@ name = "oci-cli-wrapper"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "krane-bundle",
  "log",
  "olpc-cjson",
  "regex",
@@ -2286,6 +2301,16 @@ checksum = "8e459365e590736a54c3fa561947c84837534b8e9af6fc5bf781307e82658fae"
 dependencies = [
  "base64 0.22.1",
  "serde",
+]
+
+[[package]]
+name = "pentacle"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e875807b4510e6847d4ef7674ab9b3efe30cc99b933f2e6e82f6ef38f7e5352"
+dependencies = [
+ "libc",
+ "log",
 ]
 
 [[package]]

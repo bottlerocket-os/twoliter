@@ -1,3 +1,6 @@
 /target/
 .ignore/
-twoliter-attributions.tar.gz
+*.tar.gz
+/tools/krane/go-containerregistry-*
+/tools/krane/krane
+/tools/krane/krane.gz

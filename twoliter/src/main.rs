@@ -5,6 +5,7 @@ use clap::Parser;
 mod cargo_make;
 mod cmd;
 mod common;
+mod compatibility;
 mod docker;
 mod project;
 mod schema_version;

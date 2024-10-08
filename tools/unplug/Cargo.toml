@@ -10,5 +10,5 @@ publish = false
 anyhow.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2.148"
-seccompiler = "0.4.0"
+libc.workspace = true
+seccompiler.workspace = true

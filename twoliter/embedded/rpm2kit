@@ -125,7 +125,7 @@ CONFIG="$(jq --compact-output <<EOF
     "WorkingDir": "/",
     "OnBuild": null,
     "Labels": {
-      "dev.bottlerocket.kit.v1": "${METADATA}"
+      "dev.bottlerocket.kit.v2": "${METADATA}"
     }
   },
   "created": "${TIMESTAMP}",
