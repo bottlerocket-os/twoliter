@@ -75,7 +75,7 @@ RUN --mount=target=/host \
       -x '*-debugsource-*.rpm' \
       --no-database \
       ./rpmbuild/RPMS && \
-    cp .rpmmacros /etc/rpm/macros && \
+    cp .rpmmacros /root/.rpmmacros && \
     declare -a KIT_REPOS && \
     for kit in ${KIT_DEPENDENCIES} ; do \
       KIT_REPOS+=("--repofrompath=${kit},/bypass/build/kits/${kit}/${ARCH}" --enablerepo "${kit}") ; \
