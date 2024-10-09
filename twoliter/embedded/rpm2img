@@ -170,6 +170,7 @@ INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"Publisher\":\"Bottlerocket\"\
 ,\"Version\":\"%{Version}\"\
 ,\"Release\":\"%{Release}\"\
+,\"Epoch\":\"%|Epoch?{%{EPOCH}}:{0}|\"\
 ,\"InstalledTime\":\"${INSTALL_TIME}\"\
 ,\"ApplicationType\":\"%{GROUP}\"\
 ,\"Architecture\":\"%{ARCH}\"\
@@ -237,11 +238,7 @@ if [[ -n "${CORE_KIT_VERSION}" && -n "${CORE_KIT_VENDOR}" ]]; then
   # the version with the core kit's version, and replace the name with the unprefixed name.
   INVENTORY_DATA="$(jq \
     --argfile replace core-kit-replacements.json \
-    --arg CORE_KIT_VERSION "${CORE_KIT_VERSION}" \
-    --arg CORE_KIT_GIT_SHA "${CORE_KIT_GIT_SHA}" \
-    '(.Content[] | select(.Name | $replace[.] != null) | .Version) = $CORE_KIT_VERSION |
-     (.Content[] | select(.Name | $replace[.] != null) | .Release) = $CORE_KIT_GIT_SHA |
-     .Content[].Name |= (if $replace[.] then $replace[.] else . end)' \
+     '.Content[].Name |= (if $replace[.] then $replace[.] else . end)' \
     <<<"${INVENTORY_DATA}")"
 fi
 
