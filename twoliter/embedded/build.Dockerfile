@@ -104,9 +104,6 @@ RUN --mount=target=/host \
       -exec cp {} ./rpmbuild/SOURCES/ \; && \
     rm /bypass
 
-# Ensure that the target binutils that `find-debuginfo.sh` uses are present in $PATH.
-ENV PATH="/usr/${ARCH}-bottlerocket-linux-gnu/debuginfo/bin:${PATH}"
-
 USER builder
 RUN --mount=source=.cargo,target=/home/builder/.cargo \
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
