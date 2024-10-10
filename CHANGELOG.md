@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.7...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.5.0...HEAD
+
+## [0.5.0] - 2024-10-10
+
+### Added
+
+- Use bundled `krane` for OCI repository support ([#387])
+
+### Changed
+
+- Increment kit metadata version. This makes this version of Twoliter incompatible with kits built
+  from older versions of Twoliter, and older versions of Twoliter incompatible with kits built from
+  this version. ([#387])
+- Unconditionally use an RPMs NEVR in a variant's application inventory ([#384])
+
+### Fixed
+
+- Allow `find-debuginfo` to manage its own PATH ([#383])
+- Refrain from defining RPM macros twice ([#392])
+
+### Removed
+
+- Remove the ability to use `docker` or `crane` from system PATH ([#387])
+
+[#383]: https://github.com/bottlerocket-os/twoliter/pull/383
+[#384]: https://github.com/bottlerocket-os/twoliter/pull/384
+[#387]: https://github.com/bottlerocket-os/twoliter/pull/387
+[#392]: https://github.com/bottlerocket-os/twoliter/pull/392
+
+[0.5.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.7...v0.5.0
 
 ## [0.4.7] - 2024-10-07
 
@@ -25,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#379]: https://github.com/bottlerocket-os/twoliter/pull/379
 [#381]: https://github.com/bottlerocket-os/twoliter/pull/381
 [#385]: https://github.com/bottlerocket-os/twoliter/pull/385
+
+[0.4.7]: https://github.com/bottlerocket-os/twoliter/compare/v0.4.6...v0.4.7
 
 ## [0.4.6] - 2024-09-16
 
