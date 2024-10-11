@@ -141,6 +141,12 @@ jobs:
         # do agree on 'cat' and '$()' so we use that to marshal values between commands.
         run: |
           export PATH=$CARGO_HOME/bin:$PATH
+          # cargo-cross warns us that multiple cross configurations are present in our
+          # workspace (ie dependencies have configurations), but it picks the appropriate one from
+          # the twoliter workspace.
+          #
+          # These warnings cause the tool to fail, so we disable them.
+          export CROSS_NO_WARNINGS=0
           # Actually do builds and make zips and whatnot
           cargo dist build --tag="${GITHUB_REF_NAME}" --output-format=json ${MATRIX_DIST_ARGS} > dist-manifest.json
           echo "dist ran successfully"
