@@ -85,6 +85,7 @@ chrono = { version = "0.4", default-features = false }
 clap = "4"
 coldsnap = { version = "0.6", default-features = false }
 daemonize = "0.5"
+derivative = "2"
 duct = "0.13"
 env_logger = "0.11"
 fastrand = "2"

@@ -1,7 +1,10 @@
+use std::borrow::Borrow;
+use std::fmt::Debug;
 use std::fs::File;
 use std::path::Path;
 
 use async_trait::async_trait;
+use krane_bundle::Krane;
 use snafu::ResultExt;
 use tar::Archive as TarArchive;
 use tempfile::TempDir;
@@ -10,12 +13,27 @@ use crate::{
     cli::CommandLine, error, ConfigView, DockerArchitecture, ImageToolImpl, ImageView, Result,
 };
 
+// allow CraneCLI to be initialized with an Arc or an owned Krane
+pub trait CraneBinary: Borrow<Krane> + Debug + Send + Sync + 'static {}
+impl<T: Borrow<Krane> + Debug + Send + Sync + 'static> CraneBinary for T {}
+
 #[derive(Debug)]
-pub struct CraneCLI {
+pub struct CraneCLI<C: CraneBinary> {
     pub(crate) cli: CommandLine,
+    // Hold a reference to a tempfile which is deleted when `_krane` is dropped
+    _crane: C,
 }
 
-impl CraneCLI {
+impl<C: CraneBinary> CraneCLI<C> {
+    pub fn new(crane: C) -> Self {
+        Self {
+            cli: CommandLine {
+                path: crane.borrow().path().to_path_buf(),
+            },
+            _crane: crane,
+        }
+    }
+
     /// Enables verbose logging of crane if debug logging is enabled.
     fn crane_cmd<'a>(cmd: &[&'a str]) -> Vec<&'a str> {
         if log::max_level() >= log::LevelFilter::Debug {
@@ -27,7 +45,7 @@ impl CraneCLI {
 }
 
 #[async_trait]
-impl ImageToolImpl for CraneCLI {
+impl<K: CraneBinary> ImageToolImpl for CraneCLI<K> {
     async fn pull_oci_image(&self, path: &Path, uri: &str) -> Result<()> {
         let archive_path = path.to_string_lossy();
         self.cli

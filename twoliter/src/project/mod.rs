@@ -2,7 +2,9 @@ mod lock;
 pub(crate) mod vendor;
 
 pub(crate) use self::vendor::ArtifactVendor;
+use krane_bundle::Krane;
 pub(crate) use lock::VerificationTagger;
+use oci_cli_wrapper::ImageTool;
 
 use self::lock::{Lock, LockedSDK, Override};
 use crate::common::fs::{self, read_to_string};
@@ -14,6 +16,7 @@ use async_recursion::async_recursion;
 use async_trait::async_trait;
 use async_walkdir::WalkDir;
 use buildsys_config::{EXTERNAL_KIT_DIRECTORY, EXTERNAL_KIT_METADATA};
+use derivative::Derivative;
 use futures::stream::StreamExt;
 use semver::Version;
 use serde::de::Error;
@@ -46,7 +49,8 @@ pub(crate) async fn load_or_find_project(user_path: Option<PathBuf>) -> Result<P
 }
 
 /// Represents the structure of a `Twoliter.toml` project file.
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Derivative, Debug, Clone)]
+#[derivative(Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) struct Project<L: ProjectLock> {
     filepath: PathBuf,
     project_dir: PathBuf,
@@ -70,6 +74,11 @@ pub(crate) struct Project<L: ProjectLock> {
 
     /// The resolved and locked dependencies of the project.
     lock: L,
+
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Ord = "ignore")]
+    #[derivative(PartialOrd = "ignore")]
+    oci_image_tool: ImageTool,
 }
 
 impl Project<Unlocked> {
@@ -155,6 +164,7 @@ impl<L: ProjectLock> Project<L> {
             kit: self.kit.clone(),
             overrides: self.overrides.clone(),
             lock: new_lock.into(),
+            oci_image_tool: self.oci_image_tool.clone(),
         }
     }
 
@@ -271,6 +281,10 @@ impl<L: ProjectLock> Project<L> {
         // Provide a predictable ordering.
         modules.sort();
         Ok(modules)
+    }
+
+    pub(crate) fn oci_image_tool(&self) -> &ImageTool {
+        &self.oci_image_tool
     }
 }
 
@@ -531,6 +545,9 @@ impl UnvalidatedProject {
             kit: self.kit.unwrap_or_default(),
             overrides,
             lock: Unlocked,
+            oci_image_tool: ImageTool::from_krane(
+                Krane::new().context("Failed to initialize `krane`")?,
+            ),
         })
     }
 

@@ -2,7 +2,7 @@ use crate::common::fs;
 use anyhow::{Context, Result};
 use filetime::{set_file_handle_times, set_file_mtime, FileTime};
 use flate2::read::ZlibDecoder;
-use krane_bundle::KRANE;
+use krane_bundle::Krane;
 use std::path::Path;
 use tar::Archive;
 use tokio::fs::OpenOptions;
@@ -50,7 +50,9 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
     write_bin("testsys", TESTSYS, &dir, mtime).await?;
     write_bin("tuftool", TUFTOOL, &dir, mtime).await?;
     write_bin("unplug", UNPLUG, &dir, mtime).await?;
-    fs::copy(KRANE.path(), dir.join("krane")).await?;
+
+    let krane_path = dir.join("krane");
+    tokio::task::spawn_blocking(|| Krane::write_archive(krane_path)).await??;
 
     // Apply the mtime to the directory now that the writes are done.
     set_file_mtime(dir, mtime).context(format!("Unable to set mtime for '{}'", dir.display()))?;

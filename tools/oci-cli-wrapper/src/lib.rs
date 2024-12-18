@@ -12,12 +12,13 @@
 //!     metadata. In addition, in order to operate with OCI image format, the containerd-snapshotter
 //!     feature has to be enabled in the docker daemon
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
 use async_trait::async_trait;
-use cli::CommandLine;
-use crane::CraneCLI;
-use krane_bundle::KRANE;
+use crane::{CraneBinary, CraneCLI};
+use error::CraneInitializeSnafu;
+use krane_bundle::Krane;
 use olpc_cjson::CanonicalFormatter;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
@@ -25,23 +26,30 @@ use snafu::ResultExt;
 mod cli;
 mod crane;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImageTool {
-    image_tool_impl: Box<dyn ImageToolImpl>,
+    image_tool_impl: Arc<dyn ImageToolImpl>,
 }
 
 impl ImageTool {
-    /// Uses the builtin `krane` provided by the `tools/krane` crate.
-    pub fn from_builtin_krane() -> Self {
-        let image_tool_impl = Box::new(CraneCLI {
-            cli: CommandLine {
-                path: KRANE.path().to_path_buf(),
-            },
-        });
+    /// Creates a new `ImageTool` using the given Krane.
+    ///
+    /// Can be called with an owned Krane or Arc<Krane>.
+    pub fn from_krane<K: CraneBinary>(krane: K) -> Self {
+        let image_tool_impl = Arc::new(CraneCLI::new(krane));
         Self { image_tool_impl }
     }
 
-    pub fn new(image_tool_impl: Box<dyn ImageToolImpl>) -> Self {
+    /// Uses the builtin `krane` provided by the `tools/krane` crate.
+    ///
+    /// Each call to this creates a new temporary file with the `krane` binary. Use
+    /// [`ImageTool::from_krane`] to share references to e.g. an `Arc<Krane>`.
+    pub fn from_new_krane() -> Result<Self> {
+        let image_tool_impl = Arc::new(CraneCLI::new(Krane::new().context(CraneInitializeSnafu)?));
+        Ok(Self { image_tool_impl })
+    }
+
+    pub fn new(image_tool_impl: Arc<dyn ImageToolImpl>) -> Self {
         Self { image_tool_impl }
     }
 
@@ -179,6 +187,9 @@ pub mod error {
         #[snafu(display("Failed to create temporary directory for crane push: {source}"))]
         CraneTemp { source: std::io::Error },
 
+        #[snafu(display("Failed to initialize crane: {source}"))]
+        CraneInitialize { source: krane_bundle::KraneError },
+
         #[snafu(display("Failed to create temporary directory for docker save: {source}"))]
         DockerTemp { source: std::io::Error },
 
@@ -218,5 +229,43 @@ pub mod error {
 
         #[snafu(display("Unsupported container image tool '{}'", name))]
         Unsupported { name: String },
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_owned_krane_cleans_up() {
+        // Ensure we can make an image tool with an owned or Arc Krane object.
+        // Using an Arc would allow multiple `ImageTools` to refer to the same `krane` binary on
+        // disk.
+
+        let krane = Krane::new().unwrap();
+        let bin_path = krane.path().to_path_buf();
+
+        let owned_image_tool = ImageTool::from_krane(krane);
+        assert!(tokio::fs::try_exists(&bin_path).await.unwrap());
+
+        drop(owned_image_tool);
+        assert!(!tokio::fs::try_exists(&bin_path).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_shared_krane_cleans_up() {
+        let krane = Arc::new(Krane::new().unwrap());
+        let bin_path = krane.path().to_path_buf();
+
+        let image_tool = ImageTool::from_krane(Arc::clone(&krane));
+        assert!(tokio::fs::try_exists(&bin_path).await.unwrap());
+
+        drop(image_tool);
+        assert!(tokio::fs::try_exists(&bin_path).await.unwrap());
+
+        drop(krane);
+        assert!(!tokio::fs::try_exists(&bin_path).await.unwrap());
     }
 }
