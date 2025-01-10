@@ -15,7 +15,7 @@ const DATA_DEVICE_NAME: &str = "/dev/xvdb";
 
 // Features we assume/enable for the images.
 const VIRT_TYPE: &str = "hvm";
-const VOLUME_TYPE: &str = "gp2";
+const VOLUME_TYPE: &str = "gp3";
 const SRIOV: &str = "simple";
 const ENA: bool = true;
 
