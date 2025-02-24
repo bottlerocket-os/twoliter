@@ -416,6 +416,7 @@ done
 [tasks.check]
 dependencies = [
    "check-cargo-version",
+   "check-advisories",
    "unit-tests",
    "check-fmt",
    "check-lints",
@@ -536,6 +537,61 @@ fi
 if [ "${rc}" -ne 0 ]; then
   echo "Found lint warnings. First-party shell code is checked with ShellCheck." >&2
   exit $rc
+fi
+'''
+]
+
+# Task to lint Bottlerocket Security Advisories by checking for non-ASCII characters
+# and verifying that each versioned directory under "advisories" has a corresponding
+# tag on the Twoliter project this task runs against.
+[tasks.check-advisories]
+script_runner = "bash"
+script = [
+'''
+if find advisories -name '*.toml' -type f >/dev/null 2>&1 ; then
+
+  # Ensure each versioned advisories directory has a corresponding release tag.
+  for version in $(find advisories/* -type d -not -path advisories/staging); do
+    set +e; grep -q v$(basename ${version})$ <(PAGER= git tag); rc="$?"; set -e;
+    if [ "${rc}" -ne 0  ]; then
+      echo "error: no corresponding tag found for ${version} advisories directory" >&2
+      exit 1
+    fi
+  done
+
+
+  # Not all BRSAs might have a CVE; there can be cases where an advisory
+  # is for a GHSA, for example, but no corresponding CVE, and vice versa.
+  # Check separately for GHSA ID regex when a 'ghsa' is included and for
+  # CVE ID regex when a 'cve' is included.
+
+  # 1. If ghsa line exists and GHSA ID does not match regex, error
+
+  # Regex to strictly match a GHSA identifier in an advisory
+  # https://github.com/github/advisory-database?tab=readme-ov-file#ghsa-ids
+  ghsa_regex="^ghsa\s+=\s+\"GHSA(-[23456789cfghjmpqrvwx]{4}){3}\""
+
+  # Find all non-matching GHSA lines and report
+  ghsa_found="$(grep -L --include '*.toml' -R -P ${ghsa_regex} advisories | xargs awk '/ghsa/')"
+  if [ ! -z "${ghsa_found}"  ] ; then
+    echo "error: advisory GHSA ID did not match expression '${ghsa_regex}' and may contain non-ASCII characters" >&2
+    echo "${ghsa_found}" >&2
+    exit 1
+  fi
+
+  # 2. If cve line exists and CVE ID does not match regex, error
+
+  # Regex to strictly match CVE identifier in an advisory
+  # https://cve.mitre.org/cve/identifiers/tech-guidance.html#input_format
+  cve_regex="^cve\s+=\s+\"CVE-\d{4}-(0\d{3}|[1-9]\d{3,})\""
+
+  # Find all non-matching CVE lines and report
+  cve_found="$(grep -L --include '*.toml' -R -P ${cve_regex} advisories | xargs awk '/cve/')"
+  if [ ! -z "${cve_found}"  ] ; then
+    echo "error: advisory CVE ID did not match expression '${cve_regex}' and may contain non-ASCII characters" >&2
+    echo "${cve_found}" >&2
+    exit 1
+  fi
 fi
 '''
 ]
