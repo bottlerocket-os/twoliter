@@ -311,7 +311,7 @@ impl Update {
             .waves
             .range((Included(0), Excluded(seed)))
             .map(|(k, v)| (*k, *v))
-            .last();
+            .next_back();
         let end_wave = self
             .waves
             .range((Included(seed), Included(MAX_SEED)))

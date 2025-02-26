@@ -1,7 +1,7 @@
-/// Covers the functionality and implementation of Twoliter.lock which is generated using
-/// `twoliter update`. It acts similarly to Cargo.lock as a flattened out representation of all kit
-/// and sdk image dependencies with associated digests so twoliter can validate that contents of a kit
-/// do not mutate unexpectedly.
+//! Covers the functionality and implementation of Twoliter.lock which is generated using
+//! `twoliter update`. It acts similarly to Cargo.lock as a flattened out representation of all kit
+//! and sdk image dependencies with associated digests so twoliter can validate that contents of a kit
+//! do not mutate unexpectedly.
 
 /// Contains operations for working with an OCI Archive
 mod archive;

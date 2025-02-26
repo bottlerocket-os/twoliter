@@ -5,7 +5,7 @@ license-files = [
     { path = "COPYING", hash = 0x278afbcf },
     { path = "LICENSE-APACHE", hash = 0x24b54f4b },
     { path = "LICENSE-MIT", hash = 0x462dee44 },
-    { path = "src/unicode/data/LICENSE-UNICODE", hash = 0x70f7339 },
+    { path = "src/unicode/data/LICENSE-UNICODE", hash = 0x70f7339  },
 ]
 
 [clarify.petgraph]
@@ -26,6 +26,23 @@ license-files = [
     { path = "LICENSE-MIT", hash = 0xb755395b },
     { path = "src/unicode_tables/LICENSE-UNICODE", hash = 0xa7f28b93 },
 ]
+
+[clarify.rust-fuzzy-search]
+expression = "MIT OR Apache-2.0"
+license-files = [
+    { path = "LICENSE-APACHE", hash = 0xbde481e5 },
+    { path = "LICENSE-MIT", hash = 0xb5a90d39 },
+]
+skip-files = [
+    # these licenses apply to documentation
+    "target/doc/FiraSans-LICENSE.txt",
+    "target/doc/COPYRIGHT.txt",
+    "target/doc/LICENSE-APACHE.txt",
+    "target/doc/LICENSE-MIT.txt",
+    "target/doc/SourceCodePro-LICENSE.txt",
+    "target/doc/SourceSerif4-LICENSE.md",
+]
+
 
 [clarify.typenum]
 expression = "MIT OR Apache-2.0"

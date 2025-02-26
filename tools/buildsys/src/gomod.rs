@@ -162,7 +162,7 @@ fn extract_file_name(url: &str) -> Result<PathBuf> {
     let name = parsed
         .path_segments()
         .context(error::InputFileBadSnafu { path: url })?
-        .last()
+        .next_back()
         .context(error::InputFileBadSnafu { path: url })?;
     Ok(name.into())
 }

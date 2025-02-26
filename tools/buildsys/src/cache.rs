@@ -159,7 +159,7 @@ impl LookasideCache {
         let name = parsed
             .path_segments()
             .context(error::ExternalFileNameSnafu { path: url })?
-            .last()
+            .next_back()
             .context(error::ExternalFileNameSnafu { path: url })?;
         Ok(name.into())
     }
