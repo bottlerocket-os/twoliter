@@ -78,8 +78,6 @@ skip = [
     { name = "tabled", version = "0.15.0" },
     # multiple deps are using an older version of tabled_derive
     { name = "tabled_derive", version = "0.7.0" },
-    # multiple deps are using an older version of zerocopy
-    { name = "zerocopy", version = "0.7.35" },
 ]
 
 skip-tree = [
@@ -90,9 +88,9 @@ skip-tree = [
     { name = "windows-sys" },
 ]
 
-[bans.workspace-dependencies]    
-duplicates = "deny"                                                                                                                                                                                                                                   
-include-path-dependencies = true    
+[bans.workspace-dependencies]
+duplicates = "deny"
+include-path-dependencies = true
 unused = "deny"
 
 [sources]

@@ -114,8 +114,8 @@ pub(crate) struct AmiImage {
 }
 
 /// Create a CRD to launch Bottlerocket instances on an EKS or ECS cluster.
-pub(crate) async fn ec2_crd<'a>(
-    bottlerocket_input: BottlerocketInput<'a>,
+pub(crate) async fn ec2_crd(
+    bottlerocket_input: BottlerocketInput<'_>,
     cluster_type: ClusterType,
     region: &str,
 ) -> Result<Resource> {
@@ -231,8 +231,8 @@ pub(crate) async fn ec2_crd<'a>(
 }
 
 /// Create a CRD to launch Bottlerocket instances on an EKS or ECS cluster.
-pub(crate) async fn ec2_karpenter_crd<'a>(
-    bottlerocket_input: BottlerocketInput<'a>,
+pub(crate) async fn ec2_karpenter_crd(
+    bottlerocket_input: BottlerocketInput<'_>,
     region: &str,
 ) -> Result<Resource> {
     let cluster_name = bottlerocket_input

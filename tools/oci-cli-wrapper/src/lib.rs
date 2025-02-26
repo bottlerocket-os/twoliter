@@ -3,14 +3,14 @@
 //!
 //! Current two tools are supported:
 //! * crane, gcrane, krane
-//!     Crane provides a more direct interaction with the container registry,
-//!     allowing us to query image information in the registry without having to pull the full image to
-//!     disk. It also does not require a daemon to operate and has optimizations for pulling large images to disk
+//!   Crane provides a more direct interaction with the container registry,
+//!   allowing us to query image information in the registry without having to pull the full image to
+//!   disk. It also does not require a daemon to operate and has optimizations for pulling large images to disk
 //! * docker
-//!     Docker can perform all interactions we need with several caveats that make it less efficient than
-//!     crane. The image needs to be pulled locally in order for docker to inspect the manifest and extract
-//!     metadata. In addition, in order to operate with OCI image format, the containerd-snapshotter
-//!     feature has to be enabled in the docker daemon
+//!   Docker can perform all interactions we need with several caveats that make it less efficient than
+//!   crane. The image needs to be pulled locally in order for docker to inspect the manifest and extract
+//!   metadata. In addition, in order to operate with OCI image format, the containerd-snapshotter
+//!   feature has to be enabled in the docker daemon
 use std::fmt::{Display, Formatter};
 use std::{collections::HashMap, path::Path};
 

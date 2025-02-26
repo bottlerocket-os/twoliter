@@ -101,9 +101,6 @@ impl LockfileVerifier for Lock {
     }
 }
 
-/// A `LockfileVerifier` can return a set of `VerifyTag` structs, claiming that those artifacts
-/// have been resolved and verified against the lockfile.
-
 /// Writes marker files indicating which artifacts have been resolved and verified against the lock
 #[derive(Debug)]
 pub(crate) struct VerificationTagger {
