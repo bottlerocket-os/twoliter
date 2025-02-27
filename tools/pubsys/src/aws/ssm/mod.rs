@@ -15,7 +15,7 @@ use crate::Args;
 use aws_config::SdkConfig;
 use aws_sdk_ec2::{types::ArchitectureValues, Client as Ec2Client};
 use aws_sdk_ssm::{config::Region, Client as SsmClient};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use futures::stream::{StreamExt, TryStreamExt};
 use governor::{prelude::*, Quota, RateLimiter};
 use log::{error, info, trace};
@@ -32,6 +32,11 @@ use std::{
 
 /// Sets SSM parameters based on current build information
 #[derive(Debug, Parser)]
+#[command(group(
+    ArgGroup::new("dry_run_requirements")
+        .arg("dry_run")
+        .requires("ssm_parameter_output")
+))]
 pub(crate) struct SsmArgs {
     // This is JSON output from `pubsys ami` like `{"us-west-2": "ami-123"}`
     /// Path to the JSON file containing regional AMI IDs to modify
@@ -69,6 +74,10 @@ pub(crate) struct SsmArgs {
     /// If set, writes the generated SSM parameters to this path
     #[arg(long)]
     ssm_parameter_output: Option<PathBuf>,
+
+    /// Enables dry-run mode (only generates parameter manifest, does not update SSM)
+    #[arg(long)]
+    dry_run: bool,
 }
 
 /// Wrapper struct over parameter update and AWS clients needed to execute on it.
@@ -141,6 +150,12 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
             ssm_parameter_output,
             &RenderedParametersMap::from(&new_parameters).rendered_parameters,
         )?;
+    }
+
+    // Exit early if `--dry-run` is enabled
+    if ssm_args.dry_run {
+        info!("Dry-run mode enabled: Exiting after writing parameter manifest.");
+        return Ok(());
     }
 
     // Generate AWS Clients to use for the updates.
