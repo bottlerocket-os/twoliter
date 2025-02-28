@@ -20,9 +20,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "^1.18"
-      # Install `patch`, needed to build `krane-bundle`
-      - run: sudo apt-get install -y patch
-      - run: make build
+      # Install `patch`, needed to build `krane-bundle`, and tools for linking against musl
+      - run: sudo apt-get install -y patch musl-tools musl-dev
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: CARGO_BUILD_TARGET=x86_64-unknown-linux-musl make build
 
   cross-build:
     runs-on:
