@@ -1473,7 +1473,8 @@ pubsys \
    --ssm-parameter-output "${ssm_parameter_output}" \
    \
    ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"} \
-   ${ALLOW_CLOBBER:+--allow-clobber}
+   ${ALLOW_CLOBBER:+--allow-clobber} \
+   ${PUBLISH_SSM_DRY_RUN:+--dry-run}
 '''
 ]
 
