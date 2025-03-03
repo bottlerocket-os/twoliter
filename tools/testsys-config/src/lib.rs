@@ -250,6 +250,8 @@ pub struct GenericVariantConfig {
     pub cluster_names: Vec<String>,
     /// The instance type that instances should be launched with
     pub instance_type: Option<String>,
+    /// The zones that instances should be launched to
+    pub zones: Option<Vec<String>>,
     /// Specify how Bottlerocket instances should be launched (ec2, karpenter)
     pub resource_agent_type: Option<ResourceAgentType>,
     /// Launch instances with the following Block Device Mapping
@@ -313,6 +315,7 @@ impl GenericVariantConfig {
         Self {
             cluster_names,
             instance_type: self.instance_type.or(other.instance_type),
+            zones: self.zones.or(other.zones),
             resource_agent_type: self.resource_agent_type.or(other.resource_agent_type),
             block_device_mapping,
             secrets,

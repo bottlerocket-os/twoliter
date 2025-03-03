@@ -151,6 +151,11 @@ struct CliConfig {
     #[arg(long, env = "TESTSYS_INSTANCE_TYPE")]
     instance_type: Option<String>,
 
+    /// Specify the zone that should be used. This is only applicable for aws-* variants.
+    /// It can be omitted for non-aws variants and can be omitted to use default instance types.
+    #[arg(long, env = "TESTSYS_ZONES")]
+    zones: Option<Vec<String>>,
+
     /// Add secrets to the testsys agents (`--secret awsCredentials=my-secret`)
     #[arg(long, short, value_parser = parse_key_val, number_of_values = 1)]
     secret: Vec<(String, SecretName)>,
@@ -187,6 +192,7 @@ impl From<CliConfig> for GenericVariantConfig {
         GenericVariantConfig {
             cluster_names: val.target_cluster_name.into_iter().collect(),
             instance_type: val.instance_type,
+            zones: val.zones,
             resource_agent_type: val.resource_agent_type,
             block_device_mapping: Default::default(),
             secrets: val.secret.into_iter().collect(),
@@ -223,6 +229,7 @@ impl Run {
             Some(self.config.into()),
             &self.test_flavor.to_string(),
         );
+
         let resolved_test_type = TestType::from_str(&test_type)
             .expect("All unrecognized test type become `TestType::Custom`");
 

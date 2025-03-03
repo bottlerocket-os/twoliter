@@ -80,7 +80,7 @@ impl CrdCreator for AwsK8sCreator {
                 EksctlConfig::Args {
                     cluster_name: cluster_input.cluster_name.to_string(),
                     region: Some(self.region.clone()),
-                    zones: None,
+                    zones: cluster_input.crd_input.config.zones.clone(),
                     version: Some(cluster_version),
                 },
             ),

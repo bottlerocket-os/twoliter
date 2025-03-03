@@ -220,6 +220,7 @@ impl CrdInput<'_> {
             "version".to_string() => some_or_null(&self.variant.version().map(str::to_string)),
             "cluster-name".to_string() => cluster_name.to_string(),
             "instance-type".to_string() => some_or_null(&self.config.instance_type),
+            "zones".to_string() => some_or_null(&self.config.zones.clone().map(|vec| vec.join(" "))),
             "agent-role".to_string() => some_or_null(&self.config.agent_role),
             "conformance-image".to_string() => some_or_null(&self.config.conformance_image),
             "conformance-registry".to_string() => some_or_null(&self.config.conformance_registry),
