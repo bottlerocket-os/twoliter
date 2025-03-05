@@ -563,6 +563,11 @@ done'''
 script_runner = "bash"
 script = [
 '''
+if [[ ! -s Release.toml ]]; then
+    echo "No Release.toml found, skipping checks for migrations."
+    exit 0
+fi
+
 # Collect all found problems and report in bulk; patterns become easier to see
 problems=()
 
