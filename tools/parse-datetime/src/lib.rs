@@ -97,6 +97,10 @@ pub fn parse_offset(input: &str) -> Result<Duration> {
         .context(error::DateArgCountSnafu { input })?;
 
     let duration = match unit_str {
+        "minute" | "minutes" => Duration::try_minutes(i64::from(count)).context(error::DateIntSnafu {
+            integer: count,
+            unit: "minutes",
+        })?,
         "hour" | "hours" => Duration::try_hours(i64::from(count)).context(error::DateIntSnafu {
             integer: count,
             unit: "hours",
@@ -112,7 +116,7 @@ pub fn parse_offset(input: &str) -> Result<Duration> {
         _ => {
             return error::DateArgInvalidSnafu {
                 input,
-                msg: "date argument's unit must be hours/days/weeks",
+                msg: "date argument's unit must be minutes/hours/days/weeks",
             }
             .fail();
         }
