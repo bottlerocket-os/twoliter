@@ -517,7 +517,7 @@ if ! docker run --rm \
   bash -c \
     'flagged_scripts=0 && \
     cd /tmp/tools && \
-    for shell_script in $(grep -l --directories=skip --regexp="^#\!.*bash$" * ); do
+    for shell_script in $(grep -l --directories=skip --regexp='^#!.*bash$' * ); do
       if ! shellcheck \
         --external-sources \
         --source-path=SCRIPTDIR \
