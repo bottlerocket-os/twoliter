@@ -582,7 +582,7 @@ if [[ -z ${version} ]]; then
     exit 1
 fi
 
-migrations_root="sources/api/migration/migrations/v${version}"
+migrations_root="sources/settings-migrations/v${version}"
 
 # First pass: Check all migrations explicitly listed in Release.toml
 
