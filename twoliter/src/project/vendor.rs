@@ -98,7 +98,7 @@ impl OverriddenVendor {
             .unwrap_or(&self.original_vendor.registry)
     }
 
-    pub(crate) fn repo_for<'a, V: VendedArtifact>(&'a self, image: &'a V) -> &str {
+    pub(crate) fn repo_for<'a, V: VendedArtifact>(&'a self, image: &'a V) -> &'a str {
         self.override_
             .name
             .as_deref()

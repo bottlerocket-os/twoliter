@@ -36,7 +36,7 @@ pub struct CrdInput<'a> {
     pub images: TestsysImages,
 }
 
-impl<'a> CrdInput<'a> {
+impl CrdInput<'_> {
     /// Retrieve the TUF repo information from `Infra.toml`
     pub fn tuf_repo_config(&self) -> Option<TufRepoConfig> {
         if let (Some(metadata_base_url), Some(targets_url)) = (
