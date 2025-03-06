@@ -120,6 +120,7 @@ impl CrdCreator for VmwareK8sCreator {
             .vcenter_resource_pool(&self.datacenter.resource_pool)
             .vcenter_workload_folder(&self.datacenter.folder)
             .mgmt_cluster_kubeconfig_base64(&self.encoded_mgmt_cluster_kubeconfig)
+            .assume_role(cluster_input.crd_input.config.agent_role.clone())
             .eks_a_release_manifest_url(
                 cluster_input
                     .crd_input
