@@ -97,10 +97,12 @@ pub fn parse_offset(input: &str) -> Result<Duration> {
         .context(error::DateArgCountSnafu { input })?;
 
     let duration = match unit_str {
-        "minute" | "minutes" => Duration::try_minutes(i64::from(count)).context(error::DateIntSnafu {
-            integer: count,
-            unit: "minutes",
-        })?,
+        "minute" | "minutes" => {
+            Duration::try_minutes(i64::from(count)).context(error::DateIntSnafu {
+                integer: count,
+                unit: "minutes",
+            })?
+        }
         "hour" | "hours" => Duration::try_hours(i64::from(count)).context(error::DateIntSnafu {
             integer: count,
             unit: "hours",
