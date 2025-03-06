@@ -517,7 +517,7 @@ if ! docker run --rm \
   bash -c \
     'flagged_scripts=0 && \
     cd /tmp/tools && \
-    for shell_script in $(grep -l --directories=skip --regexp="^#\!.*bash$" * ); do
+    for shell_script in $(grep -l --directories=skip --regexp='^#!.*bash$' * ); do
       if ! shellcheck \
         --external-sources \
         --source-path=SCRIPTDIR \
@@ -563,6 +563,11 @@ done'''
 script_runner = "bash"
 script = [
 '''
+if [[ ! -s Release.toml ]]; then
+    echo "No Release.toml found, skipping checks for migrations."
+    exit 0
+fi
+
 # Collect all found problems and report in bulk; patterns become easier to see
 problems=()
 
@@ -577,7 +582,7 @@ if [[ -z ${version} ]]; then
     exit 1
 fi
 
-migrations_root="sources/api/migration/migrations/v${version}"
+migrations_root="sources/settings-migrations/v${version}"
 
 # First pass: Check all migrations explicitly listed in Release.toml
 
