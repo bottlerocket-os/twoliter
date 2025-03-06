@@ -1,6 +1,13 @@
 use anyhow::{ensure, Context, Result};
+use fastrand;
+use filetime::FileTime;
 use log::{self, LevelFilter};
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::fs::OpenOptions;
 use tokio::process::Command;
+use tokio::time::sleep;
 use tracing::{debug, instrument};
 
 /// This is passed as an environment variable to Buildsys. Buildsys tells Cargo to watch this
@@ -69,6 +76,84 @@ pub(crate) async fn exec(cmd: &mut Command, quiet: bool) -> Result<Option<String
 /// We allow `dead_code` here because it is inconvenient to delete and replace these simple helper
 /// functions as we change calling code. The compiler will strip dead code in release builds anyway,
 /// so there is no real issue having these unused here.
+
+/// A utility for safely acquiring and releasing file locks in a concurrent environment.
+/// This provides atomic file-based locking with exponential backoff and stale lock detection.
+pub(crate) struct FileLocker {
+    lock_path: PathBuf,
+    stale_timeout_secs: u64,
+    max_attempts: u32,
+    base_delay_ms: u64,
+}
+
+impl FileLocker {
+    /// Create a new FileLocker for the specified lock path
+    pub(crate) fn new(lock_path: impl AsRef<Path>) -> Self {
+        Self {
+            lock_path: lock_path.as_ref().to_path_buf(),
+            stale_timeout_secs: 30,
+            max_attempts: 5,
+            base_delay_ms: 50,
+        }
+    }
+
+    /// Try to acquire the lock with exponential backoff
+    pub(crate) async fn try_acquire(&self) -> Result<Option<FileLock>> {
+        for attempt in 0..self.max_attempts {
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&self.lock_path)
+                .await
+            {
+                Ok(file) => {
+                    debug!("Acquired lock: {}", self.lock_path.display());
+                    return Ok(Some(FileLock {
+                        lock_path: self.lock_path.clone(),
+                        _file: file,
+                    }));
+                }
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                    // Check if lock is stale
+                    if let Ok(lock_meta) = fs::metadata(&self.lock_path).await {
+                        let now = FileTime::now();
+                        let lock_time = FileTime::from_last_modification_time(&lock_meta);
+                        if now.seconds() - lock_time.seconds() > self.stale_timeout_secs as i64 {
+                            debug!("Removing stale lock: {}", self.lock_path.display());
+                            let _ = fs::remove_file(&self.lock_path).await;
+                            continue;
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+
+            // Exponential backoff with jitter
+            let max_pow = attempt.min(3); // Cap at 2^3 to avoid excessive delays
+            let delay = (2_u64.pow(max_pow) * self.base_delay_ms) + (fastrand::u64(1..=50));
+            sleep(Duration::from_millis(delay)).await;
+        }
+
+        Ok(None) // Failed to acquire lock after max attempts
+    }
+}
+
+/// Represents an acquired file lock that is automatically released when dropped
+pub(crate) struct FileLock {
+    lock_path: PathBuf,
+    _file: tokio::fs::File, // Keep the file handle to maintain the lock
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        debug!("Releasing lock: {}", self.lock_path.display());
+
+        // Use a synchronous file removal on drop since we can't use async in Drop
+        // This is acceptable since the file is small and drop should be fast
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) mod fs {
     use anyhow::{Context, Result};
