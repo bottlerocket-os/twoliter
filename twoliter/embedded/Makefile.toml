@@ -354,10 +354,20 @@ dependencies = ["setup"]
 script_runner = "bash"
 script = [
 '''
+declare -a CARGO_MANIFESTS
+# We make sure there is an empty folder at least here
+# to make the docker mount happy later on
+mkdir -p .cargo/vendor
 for ws in sources variants .; do
-  [ -s "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml" ] || continue
-  cargo fetch --locked --manifest-path "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml"
+  [ -s "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.lock" ] || continue
+  CARGO_MANIFESTS+=(--sync "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml")
 done
+cargo vendor --locked --no-delete  --versioned-dirs --respect-source-config  ${CARGO_MANIFESTS[@]} .cargo/vendor > .cargo/config.toml 2> .cargo/vendor.log || {
+   echo "vendoring of cargo dependencies failed"
+   cat .cargo/vendor.log
+   exit 1
+}
+rm .cargo/vendor.log
 
 chmod -R o+r ${CARGO_HOME}
 '''
