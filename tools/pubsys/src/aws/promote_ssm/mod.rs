@@ -187,21 +187,21 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
         .map(|(k, v)| (v, &target_parameter_map[k]))
         .collect();
 
+    // Create full set of target parameters
+    let full_target_parameters = current_source_parameters
+        .into_iter()
+        .map(|(key, value)| {
+            (
+                SsmKey::new(key.region, source_target_map[&key.name].to_string()),
+                value.clone(),
+            )
+        })
+        .collect();
+
     // Show the difference between source and target parameters in SSM.  We use the
     // source_target_map we built above to map source keys to target keys (generated from the same
     // template) so that the diff code has common keys to compare.
-    let set_parameters = key_difference(
-        &current_source_parameters
-            .into_iter()
-            .map(|(key, value)| {
-                (
-                    SsmKey::new(key.region, source_target_map[&key.name].to_string()),
-                    value,
-                )
-            })
-            .collect(),
-        &current_target_parameters,
-    );
+    let set_parameters = key_difference(&full_target_parameters, &current_target_parameters);
     if set_parameters.is_empty() {
         info!("No changes necessary.");
         return Ok(());
@@ -211,7 +211,7 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     // write the newly promoted parameters to `ssm_parameter_output` along with the original
     // parameters
     if let Some(ssm_parameter_output) = &promote_args.ssm_parameter_output {
-        append_rendered_parameters(ssm_parameter_output, &set_parameters).await?;
+        append_rendered_parameters(ssm_parameter_output, &full_target_parameters).await?;
     }
 
     // SSM set   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
