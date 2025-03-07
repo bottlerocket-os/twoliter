@@ -11,16 +11,15 @@
 //!   [`LockfileVerifier`]s.
 use super::image::LockedImage;
 use super::{Lock, LockedSDK};
-use crate::common;
+use crate::common::{self, content};
 use anyhow::{anyhow, Context, Result};
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
 use std::path::Path;
 use strum::{EnumIter, IntoEnumIterator};
+use tokio::fs;
 use tracing::{debug, instrument};
 
 const SDK_VERIFIED_MARKER_FILE: &str = ".sdk-verified";
@@ -170,7 +169,7 @@ impl VerificationTagger {
 
             if !has_tag && flag_file.exists() {
                 debug!("Removing unused tag file '{}'", flag_file.display());
-                tokio::fs::remove_file(&flag_file).await.context(format!(
+                fs::remove_file(&flag_file).await.context(format!(
                     "Failed to remove tag file '{}'",
                     flag_file.display()
                 ))?;
@@ -182,31 +181,20 @@ impl VerificationTagger {
             let flag_file = external_kits_dir.join(tag.marker_file_name());
             let new_content = tag.manifest().as_canonical_json()?;
 
-            // Check if we need to update the file
-            let need_update = if flag_file.exists() {
-                match tokio::fs::read(&flag_file).await {
-                    Ok(existing) => {
-                        Self::calculate_hash(&existing) != Self::calculate_hash(&new_content)
-                    }
-                    Err(_) => true, // If we can't read it, we'll rewrite it
-                }
-            } else {
-                true // File doesn't exist, need to create it
-            };
+            // Check if we need to update the file using the shared utility
+            let need_update = content::needs_content_update(&flag_file, &new_content).await?;
 
             if need_update {
                 // If the file exists but content is different, remove it first
                 if flag_file.exists() {
-                    let _ = tokio::fs::remove_file(&flag_file).await;
+                    let _ = fs::remove_file(&flag_file).await;
                 }
 
                 debug!("Writing tag file '{}'", flag_file.display());
-                tokio::fs::write(&flag_file, &new_content)
-                    .await
-                    .context(format!(
-                        "Failed to write tag file '{}'",
-                        flag_file.display()
-                    ))?;
+                fs::write(&flag_file, &new_content).await.context(format!(
+                    "Failed to write tag file '{}'",
+                    flag_file.display()
+                ))?;
             } else {
                 debug!("Tag file '{}' unchanged, skipping", flag_file.display());
             }
@@ -215,12 +203,7 @@ impl VerificationTagger {
         Ok(())
     }
 
-    /// Calculate a hash for content
-    fn calculate_hash(content: &[u8]) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        content.hash(&mut hasher);
-        hasher.finish()
-    }
+    // Note: Using content::calculate_hash from common.rs instead of a local implementation
 
     /// Safely removes all verification tags using file-based locking
     ///

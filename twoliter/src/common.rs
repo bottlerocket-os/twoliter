@@ -294,6 +294,173 @@ impl Drop for FileLock {
     }
 }
 
+/// Utilities for content-based file comparison and tracking
+pub(crate) mod content {
+    use super::*;
+    use anyhow::Context;
+    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+    use std::path::Path;
+    use tokio::fs;
+    use tracing::debug;
+
+    /// Calculate a hash for content
+    pub(crate) fn calculate_hash(content: &[u8]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Check if a file's content needs to be updated based on hash comparison
+    pub(crate) async fn needs_content_update(
+        path: impl AsRef<Path>,
+        new_content: &[u8],
+    ) -> Result<bool> {
+        let path = path.as_ref();
+        if path.exists() {
+            match fs::read(path).await {
+                Ok(existing) => {
+                    let existing_hash = calculate_hash(&existing);
+                    let new_hash = calculate_hash(new_content);
+                    let needs_update = existing_hash != new_hash;
+
+                    if needs_update {
+                        debug!(
+                            "Content hash mismatch for '{}': existing={:x}, new={:x}",
+                            path.display(),
+                            existing_hash,
+                            new_hash
+                        );
+                    } else {
+                        debug!(
+                            "Content hash match for '{}': hash={:x}",
+                            path.display(),
+                            existing_hash
+                        );
+                    }
+
+                    Ok(needs_update)
+                }
+                Err(e) => {
+                    debug!("Error reading existing file '{}': {}", path.display(), e);
+                    Ok(true) // If we can't read it, we'll rewrite it
+                }
+            }
+        } else {
+            debug!("File '{}' doesn't exist, needs creation", path.display());
+            Ok(true) // File doesn't exist, need to create it
+        }
+    }
+
+    /// Compare two directories to determine if their contents are identical
+    /// Returns Ok(true) if directories differ, Ok(false) if they're identical, or an Error
+    pub(crate) async fn compare_directories(
+        dir1: impl AsRef<Path>,
+        dir2: impl AsRef<Path>,
+    ) -> Result<bool> {
+        let dir1 = dir1.as_ref();
+        let dir2 = dir2.as_ref();
+
+        debug!(
+            "Comparing directories: '{}' and '{}'",
+            dir1.display(),
+            dir2.display()
+        );
+
+        // Get the list of files in both directories
+        let dir1_entries = get_file_list(dir1).await?;
+        let dir2_entries = get_file_list(dir2).await?;
+
+        // First, check if the file lists are different
+        if dir1_entries.len() != dir2_entries.len() {
+            debug!(
+                "Directory sizes differ: {} vs {} files",
+                dir1_entries.len(),
+                dir2_entries.len()
+            );
+            return Ok(true); // Different number of files means directories differ
+        }
+
+        // Next check file by file to see if anything differs
+        for (file_path, hash1) in &dir1_entries {
+            match dir2_entries.get(file_path) {
+                Some(hash2) if hash1 == hash2 => {
+                    // File content is the same, continue checking
+                    continue;
+                }
+                Some(hash2) => {
+                    debug!(
+                        "Content hash mismatch for '{}': {:x} vs {:x}",
+                        file_path, hash1, hash2
+                    );
+                    return Ok(true); // File content is different
+                }
+                None => {
+                    debug!("File '{}' missing in second directory", file_path);
+                    return Ok(true); // File doesn't exist in dir2
+                }
+            }
+        }
+
+        // If we got here, directories are identical
+        debug!(
+            "Directories are identical: {} files with matching content",
+            dir1_entries.len()
+        );
+        Ok(false)
+    }
+
+    /// Get list of files in a directory with their content hashes
+    pub(crate) async fn get_file_list(dir: &Path) -> Result<HashMap<String, u64>> {
+        let mut result = HashMap::new();
+        let entries = fs::read_dir(dir)
+            .await
+            .context(format!("Unable to read directory '{}'", dir.display()))?;
+
+        let mut entries_vec = Vec::new();
+        let mut dir_entries = entries;
+        while let Some(entry) = dir_entries.next_entry().await? {
+            entries_vec.push(entry);
+        }
+
+        for entry in entries_vec {
+            let path = entry.path();
+            let metadata = entry.metadata().await?;
+
+            if metadata.is_file() {
+                // Get relative path
+                let rel_path = path
+                    .strip_prefix(dir)
+                    .context(format!("Unable to strip prefix from '{}'", path.display()))?
+                    .to_string_lossy()
+                    .into_owned();
+
+                // Calculate hash for file content
+                let content = fs::read(&path)
+                    .await
+                    .context(format!("Unable to read file '{}'", path.display()))?;
+                let hash = calculate_hash(&content);
+
+                result.insert(rel_path, hash);
+            } else if metadata.is_dir() {
+                // Handle subdirectories recursively using Box::pin for recursive async calls
+                let subdirectory = Box::pin(get_file_list(&path)).await?;
+                for (sub_path, hash) in subdirectory {
+                    let full_path = format!(
+                        "{}/{}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        sub_path
+                    );
+                    result.insert(full_path, hash);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
 #[tokio::test]
 async fn test_remove_dir_all_no_dir() {
     use crate::common::fs;

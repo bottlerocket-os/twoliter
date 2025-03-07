@@ -1,4 +1,4 @@
-use crate::common::{self, fs};
+use crate::common::{self, content, fs};
 use anyhow::{Context, Result};
 use filetime::{set_file_handle_times, set_file_mtime, FileTime};
 use flate2::read::ZlibDecoder;
@@ -8,7 +8,7 @@ use tar::Archive;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Handle;
-use tracing::debug;
+use tracing::{debug, info};
 
 const TAR_GZ_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tools.tar.gz"));
 const BUILDSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_BUILDSYS"));
@@ -90,15 +90,49 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
     // Perform the critical section operations while holding the lock
     let result = async {
         if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .await
-                .context("Unable to remove existing tools directory")?;
+            // Check if we need to update based on content hashes using common utilities
+            let need_update = match content::compare_directories(&temp_dir, &dir).await {
+                Ok(different) => {
+                    if different {
+                        debug!("Content differences detected, updating tools");
+                        true
+                    } else {
+                        info!("Tools directory content matches, skipping update");
+                        false
+                    }
+                }
+                Err(e) => {
+                    debug!("Error comparing directories, will reinstall: {}", e);
+                    true
+                }
+            };
+
+            if need_update {
+                fs::remove_dir_all(&dir)
+                    .await
+                    .context("Unable to remove existing tools directory")?;
+
+                fs::rename(&temp_dir, &dir).await.context(format!(
+                    "Unable to move temp directory to '{}'",
+                    dir.display()
+                ))?;
+                debug!("Successfully updated tools in '{}'", dir.display());
+            } else {
+                // If no update needed, clean up the temp directory
+                let _ = fs::remove_dir_all(&temp_dir).await;
+                debug!(
+                    "Tools in '{}' are up to date, no changes made",
+                    dir.display()
+                );
+            }
+        } else {
+            // Directory doesn't exist, just move the temp directory
+            fs::rename(&temp_dir, &dir).await.context(format!(
+                "Unable to move temp directory to '{}'",
+                dir.display()
+            ))?;
+            debug!("Successfully installed tools to '{}'", dir.display());
         }
-        fs::rename(&temp_dir, &dir).await.context(format!(
-            "Unable to move temp directory to '{}'",
-            dir.display()
-        ))?;
-        debug!("Successfully installed tools to '{}'", dir.display());
         Ok(())
     }
     .await;
@@ -149,7 +183,7 @@ async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {
         "Unable to unpack tarball into directory '{}'",
         tools_dir.display()
     ))?;
-    debug!("Installed tools to '{}'", tools_dir.display());
+    debug!("Unpacked tarball to '{}'", tools_dir.display());
     Ok(())
 }
 
@@ -193,4 +227,113 @@ async fn test_install_tools() {
     let buildsys_mtime = FileTime::from_last_modification_time(&buildsys_metadata);
 
     assert_eq!(dockerfile_mtime, buildsys_mtime);
+}
+
+#[tokio::test]
+async fn test_content_based_installation() {
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let toolsdir = tempdir.path().join("tools");
+
+    // First installation
+    install_tools(&toolsdir).await.unwrap();
+
+    // Get modification time of a file to check later
+    let test_file = toolsdir.join("Makefile.toml");
+    let original_metadata = test_file.metadata().unwrap();
+    let original_modified = original_metadata.modified().unwrap();
+
+    // Sleep to ensure potential timestamp difference would be detectable
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Second installation - should skip updates due to identical content
+    install_tools(&toolsdir).await.unwrap();
+
+    // Check that file wasn't modified (timestamp should be the same)
+    let new_metadata = test_file.metadata().unwrap();
+    let new_modified = new_metadata.modified().unwrap();
+
+    assert_eq!(
+        original_modified, new_modified,
+        "File was replaced despite identical content"
+    );
+}
+
+#[tokio::test]
+async fn test_content_update_when_different() {
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let toolsdir = tempdir.path().join("tools");
+
+    // First installation
+    install_tools(&toolsdir).await.unwrap();
+
+    // Get modification time of a file
+    let test_file = toolsdir.join("Makefile.toml");
+    let _original_content = tokio::fs::read_to_string(&test_file).await.unwrap(); // Keep for test clarity
+    let original_metadata = test_file.metadata().unwrap();
+    let original_modified = original_metadata.modified().unwrap();
+
+    // Sleep to ensure potential timestamp difference would be detectable
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Modify a file to force update on next installation
+    let modified_content = format!(
+        "modified content {}",
+        std::time::SystemTime::now().elapsed().unwrap().as_millis()
+    );
+    tokio::fs::write(&test_file, &modified_content)
+        .await
+        .unwrap();
+
+    // Verify the file was actually modified
+    let intermediate_content = tokio::fs::read_to_string(&test_file).await.unwrap();
+    assert_eq!(
+        intermediate_content, modified_content,
+        "Failed to modify file content for test"
+    );
+
+    // Sleep again to ensure timestamps would differ
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Second installation - should update due to content difference
+    install_tools(&toolsdir).await.unwrap();
+
+    // Check that file content was restored
+    let final_content = tokio::fs::read_to_string(&test_file).await.unwrap();
+    assert_ne!(
+        final_content, modified_content,
+        "File content wasn't updated by reinstallation"
+    );
+
+    // Get the new metadata to check modification time
+    let new_metadata = test_file.metadata().unwrap();
+    let new_modified = new_metadata.modified().unwrap();
+
+    // The file should have been replaced, so timestamps should differ
+    let timestamp_changed = original_modified != new_modified;
+    let content_changed = final_content != modified_content;
+
+    // At least one of these conditions should be true
+    assert!(
+        timestamp_changed || content_changed,
+        "Neither file timestamp nor content was updated despite modified content"
+    );
+}
+
+#[tokio::test]
+async fn test_concurrent_installation() {
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let toolsdir = tempdir.path().join("tools");
+
+    // Launch two concurrent installations
+    let install1 = install_tools(&toolsdir);
+    let install2 = install_tools(&toolsdir);
+
+    // Both should complete without errors
+    let (result1, result2) = tokio::join!(install1, install2);
+    assert!(result1.is_ok(), "First installation failed");
+    assert!(result2.is_ok(), "Second installation failed");
+
+    // Verify tools directory has expected files
+    assert!(toolsdir.join("Makefile.toml").is_file());
+    assert!(toolsdir.join("buildsys").is_file());
 }
