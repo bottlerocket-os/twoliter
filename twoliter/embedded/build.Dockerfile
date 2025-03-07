@@ -109,7 +109,11 @@ RUN --mount=target=/host \
     rm /bypass
 
 USER builder
-RUN --mount=source=.cargo,target=/home/builder/.cargo \
+    # We only mount the config.toml and the vendor directory instead of the whole .cargo directory
+    # because the .git and .registry directories are specific to the version of cargo and can cause
+    # incapatibility between the host cargo and the cargo in the sdk
+RUN --mount=source=.cargo/config.toml,target=/home/builder/rpmbuild/.cargo/config.toml \
+    --mount=source=.cargo/vendor,target=/home/builder/rpmbuild/.cargo/vendor \
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
     --mount=target=/host \
