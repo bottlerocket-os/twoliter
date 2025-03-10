@@ -7,9 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.7.3...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.0...HEAD
 
-## [0.7.3] - 2024-02-21
+## [0.8.0] - 2025-03-10
+
+### Changed
+
+- Add dry run mode to pubsys ssm command ([#469])
+- Transition to cargo vendor for better cross rust version compatibility ([#470])
+- Update rust nightly and update cargo-deny ([#471])
+- Add minutes option to parse-datetime for wave definitions ([#473])
+
+### Fixed
+
+- DNF5 compatibility in rpm2img [#457]
+- Fix migration and shell checks [#474]
+- Prevent SSM parameter promotion from partial parameters updates [#476]
+- Aligned GPU flag behavior across K8s and ECS workloads [#480]
+
+[#457]: https://github.com/bottlerocket-os/twoliter/pull/457
+[#469]: https://github.com/bottlerocket-os/twoliter/pull/469
+[#470]: https://github.com/bottlerocket-os/twoliter/pull/470
+[#471]: https://github.com/bottlerocket-os/twoliter/pull/471
+[#473]: https://github.com/bottlerocket-os/twoliter/pull/473
+[#474]: https://github.com/bottlerocket-os/twoliter/pull/474
+[#476]: https://github.com/bottlerocket-os/twoliter/pull/476
+[#480]: https://github.com/bottlerocket-os/twoliter/pull/480
+
+[0.8.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.7.3...v0.8.0
+
+## [0.7.3] - 2025-02-21
 
 ### Changed
 
