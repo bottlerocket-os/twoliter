@@ -837,13 +837,13 @@ else
   exit 1
 fi
 
-rm -f "${BUILDSYS_CARGO_METADATA_PATH}"
+temp_file=$(mktemp -p "$(dirname "${BUILDSYS_CARGO_METADATA_PATH}")" metadata.tmp.XXXXXX)
 cargo metadata \
   --format-version 1 \
   --manifest-path "${PROJECT_MANIFEST}" \
   --offline \
   --all-features \
-  > "${BUILDSYS_CARGO_METADATA_PATH}"
+  > "${temp_file}" && mv -f "${temp_file}" "${BUILDSYS_CARGO_METADATA_PATH}"
 '''
 ]
 
