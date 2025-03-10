@@ -1,4 +1,4 @@
-use bottlerocket_types::agent_config::KarpenterDeviceMapping;
+use bottlerocket_types::agent_config::BlockDeviceMappingConfig;
 use bottlerocket_variant::Variant;
 pub use error::Error;
 use handlebars::Handlebars;
@@ -254,7 +254,7 @@ pub struct GenericVariantConfig {
     pub resource_agent_type: Option<ResourceAgentType>,
     /// Launch instances with the following Block Device Mapping
     #[serde(default)]
-    pub block_device_mapping: Vec<KarpenterDeviceMapping>,
+    pub block_device_mapping: Vec<BlockDeviceMappingConfig>,
     /// The secrets needed by the agents
     #[serde(default)]
     pub secrets: BTreeMap<String, SecretName>,
