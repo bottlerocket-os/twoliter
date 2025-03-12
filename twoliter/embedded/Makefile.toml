@@ -362,13 +362,31 @@ for ws in sources variants .; do
   [ -s "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.lock" ] || continue
   CARGO_MANIFESTS+=(--sync "${BUILDSYS_ROOT_DIR}/${ws}/Cargo.toml")
 done
-cargo vendor --locked --no-delete  --versioned-dirs --respect-source-config  ${CARGO_MANIFESTS[@]} .cargo/vendor > .cargo/config.toml 2> .cargo/vendor.log || {
-   echo "vendoring of cargo dependencies failed"
-   cat .cargo/vendor.log
-   exit 1
-}
-rm .cargo/vendor.log
+exec 9<>.cargo/vendor.lock
+if ! flock -w 90 9; then
+    echo "failed to obtain lock" >&2
+    exit 1
+fi
 
+set +e
+cargo vendor \
+    --locked \
+    --no-delete \
+    --versioned-dirs \
+    --respect-source-config \
+    ${CARGO_MANIFESTS[@]} \
+    .cargo/vendor \
+    > .cargo/twoliter_cargo_config.toml \
+    2> .cargo/vendor.log
+
+if [ "${?}" -ne 0 ]; then
+   echo "vendoring of cargo dependencies failed" >&2
+   cat .cargo/vendor.log >&2
+   exit 1
+fi
+
+set -e
+rm .cargo/vendor.log
 chmod -R o+r ${CARGO_HOME}
 '''
 ]
@@ -459,7 +477,8 @@ done
 if ! docker run --rm \
    -u $(id -u):$(id -g) \
    -e CARGO_HOME="/tmp/.cargo" \
-   -v "${CARGO_HOME}":/tmp/.cargo \
+   -v "${CARGO_HOME}/twoliter_cargo_config.toml":/tmp/.cargo/config.toml \
+   -v "${CARGO_HOME}/vendor":/tmp/.cargo/vendor \
    -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
    "${TLPRIVATE_SDK_IMAGE}" \
    cargo fmt \
@@ -495,7 +514,8 @@ export VARIANT="${BUILDSYS_VARIANT}"
 if ! docker run --rm \
    -u $(id -u):$(id -g) \
    -e CARGO_HOME="/tmp/.cargo" \
-   -v "${CARGO_HOME}":/tmp/.cargo \
+   -v "${CARGO_HOME}/twoliter_cargo_config.toml":/tmp/.cargo/config.toml \
+   -v "${CARGO_HOME}/vendor":/tmp/.cargo/vendor \
    -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
    -e VARIANT \
    "${TLPRIVATE_SDK_IMAGE}" \
@@ -978,7 +998,8 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --security-opt="label=disable" \
   -e CARGO_HOME="/tmp/.cargo" \
-  -v "${CARGO_HOME}":/tmp/.cargo \
+  -v "${CARGO_HOME}/twoliter_cargo_config.toml":/tmp/.cargo/config.toml \
+  -v "${CARGO_HOME}/vendor":/tmp/.cargo/vendor \
   -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
   "${TLPRIVATE_SDK_IMAGE}" \
   bash -c "${run_cargo_deny}"
