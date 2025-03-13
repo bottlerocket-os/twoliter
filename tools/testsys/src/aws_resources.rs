@@ -3,7 +3,7 @@ use crate::error::{self, Result};
 use aws_sdk_ec2::config::Region;
 use aws_sdk_ec2::types::{Filter, Image};
 use bottlerocket_types::agent_config::{
-    ClusterType, CustomUserData, Ec2Config, Ec2KarpenterConfig, KarpenterDeviceMapping,
+    BlockDeviceMappingConfig, ClusterType, CustomUserData, Ec2Config, Ec2KarpenterConfig,
 };
 use maplit::btreemap;
 use serde::Deserialize;
@@ -119,17 +119,6 @@ pub(crate) async fn ec2_crd(
     cluster_type: ClusterType,
     region: &str,
 ) -> Result<Resource> {
-    if !bottlerocket_input
-        .crd_input
-        .config
-        .block_device_mapping
-        .is_empty()
-    {
-        return Err(error::Error::Invalid {
-            what: "Custom block mappings are not supported for ec2 instance launch".to_string(),
-        });
-    }
-
     let cluster_name = bottlerocket_input
         .cluster_crd_name
         .as_ref()
@@ -191,6 +180,18 @@ pub(crate) async fn ec2_crd(
                 .testsys_agent_pull_secret
                 .clone(),
         )
+        .device_mappings({
+            let mappings = bottlerocket_input
+                .crd_input
+                .config
+                .block_device_mapping
+                .clone();
+            if mappings.is_empty() {
+                None
+            } else {
+                Some(mappings)
+            }
+        })
         .set_labels(Some(labels))
         .set_conflicts_with(conflicting_resources.into())
         .set_secrets(Some(bottlerocket_input.crd_input.config.secrets.clone()))
@@ -264,13 +265,13 @@ pub(crate) async fn ec2_karpenter_crd(
         .is_empty()
     {
         vec![
-            KarpenterDeviceMapping {
+            BlockDeviceMappingConfig {
                 name: "/dev/xvda".to_string(),
                 volume_type: "gp3".to_string(),
                 volume_size: 4,
                 delete_on_termination: true,
             },
-            KarpenterDeviceMapping {
+            BlockDeviceMappingConfig {
                 name: "/dev/xvdb".to_string(),
                 volume_type: "gp3".to_string(),
                 volume_size: 20,
