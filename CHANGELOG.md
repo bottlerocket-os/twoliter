@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.1...HEAD
+
+## [0.8.1] - 2025-03-13
+
+### Added
+* TestSys: Add `assume_role` field to VSphereK8sClusterConfig ([#479])
+* TestSys: Support custom block mappings for EC2 instance launch ([#484])
+
+### Changed
+* Improve cargo vendor configuration to prevent conflicts with host cargo settings ([#487])
+* Acquire a file lock to prevent parallel builds from clashing ([#487])
+
+[#479]: https://github.com/bottlerocket-os/twoliter/pull/479
+[#484]: https://github.com/bottlerocket-os/twoliter/pull/484
+[#487]: https://github.com/bottlerocket-os/twoliter/pull/487
+
+[0.8.1]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.0...v0.8.1
 
 ## [0.8.0] - 2025-03-10
 
