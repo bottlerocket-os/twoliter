@@ -14,10 +14,10 @@ jobs:
       group: bottlerocket
       labels: bottlerocket_ubuntu-latest_16-core
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - run: cargo install cargo-deny --locked
       - run: cargo install cargo-make --locked
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34
         with:
           go-version: "^1.18"
       # Install `patch`, needed to build `krane-bundle`, and tools for linking against musl
@@ -37,7 +37,7 @@ jobs:
     env:
       TARGET_TRIPLE: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Install Cross
         # Pin cargo cross to a version that we know is working for us.
         run: |
