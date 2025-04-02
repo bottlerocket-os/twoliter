@@ -62,6 +62,11 @@ Provides: %{_cross_os}image-feature(fips)
 Provides: %{_cross_os}image-feature(no-fips)
 %endif
 
+%if %{with external_kmod_development}
+Provides: %{_cross_os}image-feature(external-kmod-development)
+%else
+Provides: %{_cross_os}image-feature(no-external-kmod-development)
+%endif
 %description
 %{summary}.
 

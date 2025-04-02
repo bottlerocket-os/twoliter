@@ -183,6 +183,8 @@ PUBLISH_AMI_NAME_DEFAULT = "${BUILDSYS_NAME}-${BUILDSYS_VARIANT}-${BUILDSYS_ARCH
 # The name of the kmod kit archive, used to ease building out-of-tree kernel modules.
 BUILDSYS_KMOD_KIT = "${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}-kmod-kit-v${BUILDSYS_VERSION_IMAGE}.tar.xz"
 BUILDSYS_KMOD_KIT_PATH = "${BUILDSYS_VARIANT_DIR}/${BUILDSYS_KMOD_KIT}"
+BUILDSYS_NO_KMOD_KIT = ".no-kmod-kit"
+BUILDSYS_NO_KMOD_KIT_PATH = "${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NO_KMOD_KIT}"
 
 # The name of the OVA bundle that will be built if the current variant builds VMDK artifacts
 BUILDSYS_OVA = "${BUILDSYS_NAME_VARIANT}-v${BUILDSYS_VERSION_IMAGE}.ova"
@@ -1073,8 +1075,10 @@ for file in ${MIGRATIONS_DIR}/*; do
 done
 
 # Include the kmod kit in the repo so it's easier to build out-of-tree kernel
-# modules for a given release.
-LINK_REPO_TARGETS=("--link-target ${BUILDSYS_KMOD_KIT_PATH}")
+# modules for a given release if the marker file is not present.
+if [[ ! -e ${BUILDSYS_NO_KMOD_KIT_PATH} ]]; then
+   LINK_REPO_TARGETS=("--link-target ${BUILDSYS_KMOD_KIT_PATH}")
+fi
 
 # Include the os and data disk images in the repo both with and without a
 # friendly name if they exist.  Check for the existence of the image and not

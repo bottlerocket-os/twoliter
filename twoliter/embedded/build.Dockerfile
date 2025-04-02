@@ -212,6 +212,7 @@ ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
 ARG HOST_CONTAINERS
 ARG FIPS
+ARG EXTERNAL_KMOD_DEVELOPMENT
 
 USER builder
 WORKDIR /home/builder
@@ -235,7 +236,8 @@ RUN \
    && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${EROFS_ROOT_PARTITION:+%bcond_without erofs_root_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${IN_PLACE_UPDATES:+%bcond_without in_place_updates\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}"
+   && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${EXTERNAL_KMOD_DEVELOPMENT:+%bcond_without external_kmod_development\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Creates an RPM repository from packages created in Section 1 and kits from Section 2.
@@ -436,6 +438,7 @@ ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
+ARG EXTERNAL_KMOD_DEVELOPMENT
 
 USER root
 
@@ -443,15 +446,20 @@ WORKDIR /tmp
 RUN --mount=target=/host \
     /host/build/tools/pipesys link --fd-socket "${BYPASS_SOCKET}" --target /bypass && \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
-    mkdir -p /local/archives && \
-    KERNEL="$(printf "%s\n" ${PACKAGES} | awk '/^kernel-/{print $1}')" && \
-    find /bypass/build/ -type f \
-        -name "bottlerocket-${KERNEL}-archive-*.${ARCH}.rpm" \
-        -exec cp '{}' '/local/archives/' ';' && \
-    /host/build/tools/rpm2kmodkit \
-        --archive-dir=/local/archives \
-        --toolchain-dir=/toolchain \
-        --output-dir=/output && \
+    mkdir -p /local/archives; \
+    if [[ -n "${EXTERNAL_KMOD_DEVELOPMENT}" ]]; then \
+        KERNEL="$(printf "%s\n" ${PACKAGES} | awk '/^kernel-/{print $1}')" && \
+        find /bypass/build/ -type f \
+            -name "bottlerocket-${KERNEL}-archive-*.${ARCH}.rpm" \
+            -exec cp '{}' '/local/archives/' ';' && \
+        /host/build/tools/rpm2kmodkit \
+            --archive-dir=/local/archives \
+            --toolchain-dir=/toolchain \
+            --output-dir=/output; \
+    else \
+        mkdir -p /output/${VERSION_ID}-${BUILD_ID} && \
+        touch /output/${VERSION_ID}-${BUILD_ID}/.no-kmod-kit; \
+    fi; \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm -rf /local/archives && \
     rm /output && \
