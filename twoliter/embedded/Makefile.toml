@@ -1066,13 +1066,17 @@ fi
 
 COPY_REPO_TARGETS=()
 
-# TODO: only add migrations from Release.toml, not all
 MIGRATIONS_DIR="$(mktemp -d)"
-tar xpf "${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-migrations.tar" -C "${MIGRATIONS_DIR}"
-for file in ${MIGRATIONS_DIR}/*; do
-   [ -e "${file}" ] || continue
-   COPY_REPO_TARGETS+=("--copy-target ${file}")
-done
+
+# Only try to unpack migrations if in place updates are turned on
+if [[ ! -e "${BUILDSYS_VARIANT_DIR}/.no-migrations" ]]; then
+   # TODO: only add migrations from Release.toml, not all
+   tar xpf "${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-migrations.tar" -C "${MIGRATIONS_DIR}"
+   for file in ${MIGRATIONS_DIR}/*; do
+       [ -e "${file}" ] || continue
+       COPY_REPO_TARGETS+=("--copy-target ${file}")
+   done
+fi
 
 # Include the kmod kit in the repo so it's easier to build out-of-tree kernel
 # modules for a given release if the marker file is not present.

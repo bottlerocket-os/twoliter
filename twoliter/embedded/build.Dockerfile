@@ -403,6 +403,7 @@ ARG VARIANT
 ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
+ARG IN_PLACE_UPDATES
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
 
@@ -410,14 +411,19 @@ USER root
 RUN --mount=target=/host \
     /host/build/tools/pipesys link --fd-socket "${BYPASS_SOCKET}" --target /bypass && \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
-    mkdir -p /local/migrations && \
-    find /bypass/build/rpms/ -maxdepth 2 -type f \
-        -name "bottlerocket-migrations-*.rpm" \
-        -not -iname '*debuginfo*' \
-        -exec cp '{}' '/local/migrations/' ';' && \
-    /host/build/tools/rpm2migrations \
-        --package-dir=/local/migrations \
-        --output-dir=/output && \
+    mkdir -p /local/migrations; \
+    if [[ -n "${IN_PLACE_UPDATES}" ]]; then \
+        find /bypass/build/rpms/ -maxdepth 2 -type f \
+            -name "bottlerocket-migrations-*.rpm" \
+            -not -iname '*debuginfo*' \
+            -exec cp '{}' '/local/migrations/' ';' && \
+        /host/build/tools/rpm2migrations \
+            --package-dir=/local/migrations \
+            --output-dir=/output; \
+    else \
+        mkdir -p /output/${VERSION_ID}-${BUILD_ID} && \
+        touch /output/${VERSION_ID}-${BUILD_ID}/.no-migrations; \
+    fi; \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output && \
     rm -rf /local/migrations && \
     rm /output && \
