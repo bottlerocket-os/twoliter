@@ -239,6 +239,14 @@ FIPS-compliant ciphers to be included in the image.
 fips = true
 ```
 
+`external-kmod-development` enables functionality for building custom kernel modules at runtime
+
+```ignore
+[package.metadata.build-variant.image-features]
+external-kmod-development = true
+```
+
+
 */
 
 mod error;
@@ -487,8 +495,11 @@ impl ManifestInfo {
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         let variant = self.build_variant()?;
-        let mut features =
-            HashSet::from([ImageFeature::InPlaceUpdates, ImageFeature::HostContainers]);
+        let mut features = HashSet::from([
+            ImageFeature::InPlaceUpdates,
+            ImageFeature::HostContainers,
+            ImageFeature::ExternalKmodDevelopment,
+        ]);
         if let Some(image_features) = &variant.image_features {
             for (feature, enabled) in image_features.iter() {
                 if *enabled {
@@ -800,6 +811,7 @@ pub enum ImageFeature {
     Fips,
     InPlaceUpdates,
     HostContainers,
+    ExternalKmodDevelopment,
 }
 
 const EXPERIMENTAL_IMAGE_FEATURES: [&ImageFeature; 1] = [&ImageFeature::ErofsRootPartition];
@@ -816,6 +828,7 @@ impl TryFrom<String> for ImageFeature {
             "fips" => Ok(ImageFeature::Fips),
             "in-place-updates" => Ok(ImageFeature::InPlaceUpdates),
             "host-containers" => Ok(ImageFeature::HostContainers),
+            "external-kmod-development" => Ok(ImageFeature::ExternalKmodDevelopment),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
@@ -832,6 +845,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::Fips => write!(f, "FIPS"),
             ImageFeature::InPlaceUpdates => write!(f, "IN_PLACE_UPDATES"),
             ImageFeature::HostContainers => write!(f, "HOST_CONTAINERS"),
+            ImageFeature::ExternalKmodDevelopment => write!(f, "EXTERNAL_KMOD_DEVELOPMENT"),
         }
     }
 }
