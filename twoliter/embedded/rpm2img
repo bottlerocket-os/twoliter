@@ -205,12 +205,12 @@ for kit in "${kits[@]}"; do
   kit_path="${EXTERNAL_KITS_PATH}/${kit_vendor}/${kit}/${ARCH}"
 
   # Query the kit repo of RPMs for all package names.
-  kit_inventory_query="%{NAME}"
+  kit_inventory_query="%{NAME}\n"
   # shellcheck disable=SC2312 # Array is validated elsewhere.
-  mapfile -t KIT_PKGS <<<"$(dnf --repofrompath \
+  mapfile -t KIT_PKGS <<<"$(dnf -q --repofrompath \
     kit,file://"${kit_path}" \
     --repo=kit repoquery \
-    --queryformat "${kit_inventory_query}")"
+    --queryformat "${kit_inventory_query}" | grep -v "^$")"
   # Convert the bash array of kit packages to a JSON array.
   kit_list="$(\
     jq \
@@ -241,6 +241,10 @@ INVENTORY_COUNT="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
 RPM_COUNT="$(find "${PACKAGE_DIR}" -maxdepth 1 -type f -name '*.rpm' | wc -l)"
 if [[ "${INVENTORY_COUNT}" -ne "${RPM_COUNT}" ]]; then
   echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/${RPM_COUNT}'" >&2
+  exit 1
+fi
+if grep -q "bottlerocket-release" <<<"${INVENTORY_DATA}"; then
+  echo "Inventory of RPMs includes packages prefixed with 'bottlerocket-'" >&2
   exit 1
 fi
 
