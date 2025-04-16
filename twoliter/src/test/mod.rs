@@ -33,7 +33,7 @@ pub(crate) fn projects_dir() -> PathBuf {
 pub(crate) fn project_dir(name: &str) -> PathBuf {
     let path = projects_dir().join(name);
     path.canonicalize()
-        .expect(&format!("Unable to canonicalize '{}'", path.display()))
+        .unwrap_or_else(|_| panic!("Unable to canonicalize '{}'", path.display()))
 }
 
 pub(crate) fn copy_project_to_temp_dir(project: &str) -> TempDir {
@@ -48,7 +48,7 @@ pub(crate) fn copy_project_to_temp_dir(project: &str) -> TempDir {
 /// user's checkout.
 fn copy_most_dirs_recursively(src: &Path, dst: &Path) {
     for entry in fs::read_dir(src).unwrap() {
-        fs::create_dir_all(&dst).unwrap();
+        fs::create_dir_all(dst).unwrap();
         let entry = entry.unwrap();
         let file_type = entry.file_type().unwrap();
         if file_type.is_dir() {

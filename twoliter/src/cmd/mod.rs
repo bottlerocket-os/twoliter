@@ -166,7 +166,7 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
     }
 
     #[tokio::test]
@@ -189,8 +189,8 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
-        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
+        expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
     }
 
     #[tokio::test]
@@ -213,8 +213,8 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
-        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
+        expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
     }
 
     #[tokio::test]
@@ -237,11 +237,11 @@ mod test {
         };
 
         command.run().await.unwrap();
-        expect_kit(&project_dir, "core-kit", arch, &["pkg-a"]).await;
-        expect_kit(&project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
-        expect_kit(&project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
+        expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
+        expect_kit(project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
+        expect_kit(project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
         expect_kit(
-            &project_dir,
+            project_dir,
             "extra-3-kit",
             arch,
             &["pkg-e", "pkg-f", "pkg-g"],

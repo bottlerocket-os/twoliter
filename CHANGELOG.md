@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.1...HEAD
 
+## [0.9.0-rc1] - 2025-04-16
+
+### Added
+* Add `external-kmod-development` image feature to control when to build kmod kits ([#512])
+* Set `VENDOR_NAME` in `/etc/os-release` of built variants to "Bottlerocket" ([#514])
+
+### Changed
+* Update dependencies and migrate to terminal_size ([#517])
+
+### Fixed
+* Fix an issue where the `bottlerocket-` prefix is not removed from packages names in `application-inventory.json` when the SDK uses dnf5 ([#515])
+
+[#512]: https://github.com/bottlerocket-os/twoliter/pull/512
+[#514]: https://github.com/bottlerocket-os/twoliter/pull/514
+[#515]: https://github.com/bottlerocket-os/twoliter/pull/515
+[#517]: https://github.com/bottlerocket-os/twoliter/pull/517
+
+[0.9.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.1..v0.9.0-rc1
+
 ## [0.8.1] - 2025-03-13
 
 ### Added

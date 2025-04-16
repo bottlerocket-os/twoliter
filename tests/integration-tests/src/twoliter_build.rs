@@ -59,7 +59,7 @@ fn copy_most_dirs_recursively(src: impl AsRef<Path>, dst: impl AsRef<Path>) {
     let src = src.as_ref();
     let dst = dst.as_ref();
     for entry in std::fs::read_dir(src).unwrap() {
-        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::create_dir_all(dst).unwrap();
         let entry = entry.unwrap();
         let file_type = entry.file_type().unwrap();
         if file_type.is_dir() {
@@ -67,7 +67,7 @@ fn copy_most_dirs_recursively(src: impl AsRef<Path>, dst: impl AsRef<Path>) {
             if matches!(name.as_ref(), "target" | "build" | ".gomodcache" | ".cargo") {
                 continue;
             }
-            copy_most_dirs_recursively(&entry.path(), &dst.join(entry.file_name()));
+            copy_most_dirs_recursively(entry.path(), dst.join(entry.file_name()));
         } else {
             std::fs::copy(entry.path(), dst.join(entry.file_name())).unwrap();
         }

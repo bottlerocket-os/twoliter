@@ -45,13 +45,6 @@ popd
 popd
 
 # =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=
-# cargo-make (we currently use cargo-make from the SDK, but will ship it in Twoliter in the future)
-echo "Clarifying bottlerocket-sdk & dependency licenses..."
-mkdir -p ${LICENSEDIR}/bottlerocket-sdk/
-cp -r /usr/share/licenses/cargo-make \
-    ${LICENSEDIR}/bottlerocket-sdk/
-
-# =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=
 # Twoliter licenses
 cp /src/COPYRIGHT /src/LICENSE-MIT /src/LICENSE-APACHE \
     ${LICENSEDIR}/

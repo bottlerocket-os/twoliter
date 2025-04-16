@@ -43,11 +43,11 @@ impl CommandLine {
 
         log::debug!(
             "[{debug_cmd}] stdout: {}",
-            String::from_utf8_lossy(&output.stdout).to_string()
+            String::from_utf8_lossy(&output.stdout)
         );
         log::debug!(
             "[{debug_cmd}] stderr: {}",
-            String::from_utf8_lossy(&output.stderr).to_string()
+            String::from_utf8_lossy(&output.stderr)
         );
 
         Ok(output.stdout)

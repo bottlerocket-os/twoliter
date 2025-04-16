@@ -8,7 +8,7 @@ use tempfile::TempDir;
 mod twoliter_build;
 mod twoliter_update;
 
-pub const TWOLITER_PATH: &'static str = env!("CARGO_BIN_FILE_TWOLITER");
+pub const TWOLITER_PATH: &str = env!("CARGO_BIN_FILE_TWOLITER");
 
 pub fn test_projects_dir() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -34,8 +34,8 @@ where
     );
 
     let output = Command::new(cmd)
-        .args(args.into_iter())
-        .envs(env.into_iter())
+        .args(args)
+        .envs(env)
         .output()
         .expect("failed to execute process");
 
