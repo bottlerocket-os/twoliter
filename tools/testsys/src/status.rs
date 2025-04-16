@@ -106,7 +106,9 @@ impl Status {
             }
         };
 
-        let (width, _) = term_size::dimensions().unwrap_or((80, 0));
+        let (width, _) = terminal_size::terminal_size()
+            .map(|(w, h)| (w.0 as usize, h.0))
+            .unwrap_or((80, 0));
         debug!("Window width '{}'", width);
         println!("{:width$}", status);
 
