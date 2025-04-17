@@ -801,36 +801,6 @@ fn check_docker_version() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use semver::Version;
-
-    #[test]
-    fn test_docker_version_req_25_0_5_passes() {
-        let version = Version::parse("25.0.5").unwrap();
-        assert!(MINIMUM_DOCKER_VERSION.matches(&version))
-    }
-
-    #[test]
-    fn test_docker_version_req_27_1_4_passes() {
-        let version = Version::parse("27.1.4").unwrap();
-        assert!(MINIMUM_DOCKER_VERSION.matches(&version))
-    }
-
-    #[test]
-    fn test_docker_version_req_18_0_9_fails() {
-        let version = Version::parse("18.0.9").unwrap();
-        assert!(!MINIMUM_DOCKER_VERSION.matches(&version))
-    }
-
-    #[test]
-    fn test_docker_version_req_20_10_27_fails() {
-        let version = Version::parse("20.10.27").unwrap();
-        assert!(!MINIMUM_DOCKER_VERSION.matches(&version))
-    }
-}
-
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
 /// Add secrets that might be needed for builds. Since most builds won't use
@@ -1145,4 +1115,34 @@ fn filename(p: impl AsRef<Path>) -> String {
         .unwrap()
         .to_string_lossy()
         .to_string()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use semver::Version;
+
+    #[test]
+    fn test_docker_version_req_25_0_5_passes() {
+        let version = Version::parse("25.0.5").unwrap();
+        assert!(MINIMUM_DOCKER_VERSION.matches(&version))
+    }
+
+    #[test]
+    fn test_docker_version_req_27_1_4_passes() {
+        let version = Version::parse("27.1.4").unwrap();
+        assert!(MINIMUM_DOCKER_VERSION.matches(&version))
+    }
+
+    #[test]
+    fn test_docker_version_req_18_0_9_fails() {
+        let version = Version::parse("18.0.9").unwrap();
+        assert!(!MINIMUM_DOCKER_VERSION.matches(&version))
+    }
+
+    #[test]
+    fn test_docker_version_req_20_10_27_fails() {
+        let version = Version::parse("20.10.27").unwrap();
+        assert!(!MINIMUM_DOCKER_VERSION.matches(&version))
+    }
 }

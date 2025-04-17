@@ -62,7 +62,7 @@ pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin
 testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
-twoliter = { version = "0.8.1", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter = { version = "0.9.0-rc1", path = "twoliter", artifact = [ "bin:twoliter" ] }
 unplug = { version = "0.1", path = "tools/unplug", artifact = [ "bin:unplug" ] }
 update-metadata = { version = "0.1", path = "tools/update-metadata" }
 
@@ -98,7 +98,7 @@ handlebars = "5"
 hex = "0.4"
 home = "0.5"
 indicatif = "0.17"
-inotify = "0.10.2"
+inotify = "0.11"
 lazy_static = "1"
 libc = "0.2"
 log = "0.4"
@@ -110,7 +110,7 @@ olpc-cjson = "0.1"
 rand = { version = "0.8", default-features = false }
 regex = "1"
 reqwest = { version = "0.11", default-features = false }
-seccompiler = "0.4"
+seccompiler = "0.5"
 semver = "1"
 serde = "1"
 serde_json = "1"
@@ -120,11 +120,11 @@ sha2 = "0.10"
 shell-words = "1"
 simplelog = "0.12"
 snafu = "0.8"
-strum = "0.26"
-tabled = "0.10"
+strum = "0.27"
+tabled = "0.15"
 tar = "0.4"
 tempfile = "3"
-term_size = "0.3"
+terminal_size = "0.4"
 test-case = "3"
 tinytemplate = "1"
 tokio = "1"

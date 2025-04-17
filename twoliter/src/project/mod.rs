@@ -832,7 +832,7 @@ mod test {
     #[tokio::test]
     async fn test_vendor_specifications() {
         let project = UnvalidatedProject {
-            schema_version: SchemaVersion::default(),
+            schema_version: SchemaVersion,
             release_version: "1.0.0".into(),
             sdk: Some(Image {
                 name: ValidIdentifier("bottlerocket-sdk".into()),

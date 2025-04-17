@@ -4,7 +4,7 @@ release-version = "1.0.0"
 [sdk]
 name = "bottlerocket-sdk"
 vendor = "bottlerocket"
-version = "0.41.0"
+version = "0.60.0"
 
 [vendor.bottlerocket]
 registry = "twoliter.alpha"

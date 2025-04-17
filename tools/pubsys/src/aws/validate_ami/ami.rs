@@ -116,7 +116,7 @@ pub(crate) async fn describe_images_in_region(
     client: &Ec2Client,
     expected_images: HashMap<String, ImageDef>,
 ) -> Result<HashMap<String, ImageDef>> {
-    info!("Retrieving images in {}", region.to_string());
+    info!("Retrieving images in {}", region);
     let mut images = HashMap::new();
 
     // Send the request
@@ -175,7 +175,7 @@ pub(crate) async fn describe_images_in_region(
         }
     }
 
-    info!("Images in {} have been retrieved", region.to_string());
+    info!("Images in {} have been retrieved", region);
     Ok(images)
 }
 

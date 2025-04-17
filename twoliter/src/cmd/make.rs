@@ -270,7 +270,7 @@ mod test {
     #[ignore] // integration test
     async fn test_fetch_sdk_succeeds_when_only_sdk_verified() {
         let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
-        assert!(run_makefile_target("fetch-sdk", &temp_dir.path(), false)
+        assert!(run_makefile_target("fetch-sdk", temp_dir.path(), false)
             .await
             .is_ok());
     }
@@ -279,7 +279,7 @@ mod test {
     #[ignore] // integration test
     async fn test_fetch_sdk_fails_when_nothing_verified() {
         let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
-        assert!(run_makefile_target("fetch-sdk", &temp_dir.path(), true)
+        assert!(run_makefile_target("fetch-sdk", temp_dir.path(), true)
             .await
             .is_err());
     }
@@ -288,10 +288,8 @@ mod test {
     #[ignore] // integration test
     async fn test_validate_kits_fails_when_only_sdk_verified() {
         let temp_dir = crate::test::copy_project_to_temp_dir(PROJECT);
-        assert!(
-            run_makefile_target("validate-kits", &temp_dir.path(), false)
-                .await
-                .is_err()
-        );
+        assert!(run_makefile_target("validate-kits", temp_dir.path(), false)
+            .await
+            .is_err());
     }
 }

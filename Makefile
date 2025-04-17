@@ -1,6 +1,6 @@
 TOP := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 
-BOTTLEROCKET_SDK_VERSION ?= v0.47.0
+BOTTLEROCKET_SDK_VERSION ?= v0.60.0
 BOTTLEROCKET_SDK_IMAGE ?= public.ecr.aws/bottlerocket/bottlerocket-sdk:$(BOTTLEROCKET_SDK_VERSION)
 
 .PHONY: design

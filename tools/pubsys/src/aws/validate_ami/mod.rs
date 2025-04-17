@@ -89,11 +89,7 @@ pub(crate) async fn validate(
             (
                 region,
                 result.map_err(|e| {
-                    error!(
-                        "Failed to retrieve images in region {}: {}",
-                        region.to_string(),
-                        e
-                    );
+                    error!("Failed to retrieve images in region {}: {}", region, e);
                     error::Error::UnreachableRegion {
                         region: region.to_string(),
                     }

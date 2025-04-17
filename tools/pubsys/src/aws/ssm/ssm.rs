@@ -226,7 +226,7 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
     client: &SsmClient,
     ssm_prefix: &str,
 ) -> Result<SsmParameters> {
-    info!("Retrieving SSM parameters in {}", region.to_string());
+    info!("Retrieving SSM parameters in {}", region);
     let mut parameters = HashMap::new();
 
     let paginated_response_stream = stream! {
@@ -278,10 +278,7 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
             );
         }
     }
-    info!(
-        "SSM parameters in {} have been retrieved",
-        region.to_string()
-    );
+    info!("SSM parameters in {} have been retrieved", region);
     Ok(parameters)
 }
 
