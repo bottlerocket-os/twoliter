@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.0-beta0...HEAD
+
+## [0.10.0-beta0] - 2025-04-18
+### Release Highlights
+We're working on releasing a system in Twoliter to make EBS block device mapping settings fully configurable for AWS variants. This beta release of Twoliter 0.10.0 changes the default EBS volume type from gp2 to gp3 so that we can run performance tests against gp3 in the meantime.
+
+### Changed
+* Update to use gp3 instead of gp2 for EBS volumes when registering AMIs.
+
+[0.10.0-beta0]: https://github.com/bottlerocket-os/twoliter/compare/v0.9.0..v0.10.0-beta0
 
 ## [0.9.0] - 2025-04-16
 
