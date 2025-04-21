@@ -1,23 +1,13 @@
 use super::{snapshot::snapshot_from_image, AmiArgs};
 use aws_sdk_ebs::Client as EbsClient;
-use aws_sdk_ec2::types::{
-    ArchitectureValues, BlockDeviceMapping, EbsBlockDevice, Filter, VolumeType,
-};
+use aws_sdk_ec2::types::Filter;
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
-use buildsys::manifest::{self, ImageFeature};
 use coldsnap::{SnapshotUploader, SnapshotWaiter};
 use log::{debug, info, warn};
 use snafu::{ensure, OptionExt, ResultExt};
-use tokio::fs;
 
-const ROOT_DEVICE_NAME: &str = "/dev/xvda";
-const DATA_DEVICE_NAME: &str = "/dev/xvdb";
-
-// Features we assume/enable for the images.
-const VIRT_TYPE: &str = "hvm";
-const VOLUME_TYPE: &str = "gp2";
-const SRIOV: &str = "simple";
-const ENA: bool = true;
+mod merge_toml;
+pub(crate) mod mk_amispec;
 
 #[derive(Debug)]
 pub(crate) struct RegisteredIds {
@@ -34,123 +24,24 @@ async fn _register_image(
     ec2_client: &Ec2Client,
     cleanup_snapshot_ids: &mut Vec<String>,
 ) -> Result<RegisteredIds> {
-    let variant_manifest = manifest::ManifestInfo::new(&ami_args.variant_manifest).context(
-        error::LoadVariantManifestSnafu {
-            path: &ami_args.variant_manifest,
-        },
-    )?;
+    let bottlerocket_snapshots = BottlerocketSnapshots::create_snapshots(
+        ami_args,
+        region,
+        ebs_client,
+        ec2_client,
+        cleanup_snapshot_ids,
+    )
+    .await?;
 
-    let image_layout = variant_manifest
-        .image_layout()
-        .context(error::MissingImageLayoutSnafu {
-            path: &ami_args.variant_manifest,
-        })?;
+    debug!("Creating AMI spec from variant definition and pubsys args");
+    let amispec = mk_amispec::create_amispec(ami_args, Some(&bottlerocket_snapshots))
+        .context(error::AmispecSnafu)?;
 
-    let (os_volume_size, data_volume_size) = image_layout.publish_image_sizes_gib();
-
-    let uefi_data =
-        fs::read_to_string(&ami_args.uefi_data)
-            .await
-            .context(error::LoadUefiDataSnafu {
-                path: &ami_args.uefi_data,
-            })?;
-
-    debug!("Uploading images into EBS snapshots in {}", region);
-    let uploader = SnapshotUploader::new(ebs_client);
-    let os_snapshot =
-        snapshot_from_image(&ami_args.os_image, &uploader, None, ami_args.no_progress)
-            .await
-            .context(error::SnapshotSnafu {
-                path: &ami_args.os_image,
-                region: region.as_ref(),
-            })?;
-    cleanup_snapshot_ids.push(os_snapshot.clone());
-
-    let mut data_snapshot = None;
-    if let Some(data_image) = &ami_args.data_image {
-        let snapshot = snapshot_from_image(data_image, &uploader, None, ami_args.no_progress)
-            .await
-            .context(error::SnapshotSnafu {
-                path: &ami_args.os_image,
-                region: region.as_ref(),
-            })?;
-        cleanup_snapshot_ids.push(snapshot.clone());
-        data_snapshot = Some(snapshot);
-    }
-
-    info!("Waiting for snapshots to become available in {}", region);
-    let waiter = SnapshotWaiter::new(ec2_client.clone());
-    waiter
-        .wait(&os_snapshot, Default::default())
-        .await
-        .context(error::WaitSnapshotSnafu {
-            snapshot_type: "root",
-        })?;
-
-    if let Some(ref data_snapshot) = data_snapshot {
-        waiter
-            .wait(&data_snapshot, Default::default())
-            .await
-            .context(error::WaitSnapshotSnafu {
-                snapshot_type: "data",
-            })?;
-    }
-
-    // Prepare parameters for AMI registration request
-    let os_bdm = BlockDeviceMapping::builder()
-        .set_device_name(Some(ROOT_DEVICE_NAME.to_string()))
-        .set_ebs(Some(
-            EbsBlockDevice::builder()
-                .set_delete_on_termination(Some(true))
-                .set_snapshot_id(Some(os_snapshot.clone()))
-                .set_volume_type(Some(VolumeType::from(VOLUME_TYPE)))
-                .set_volume_size(Some(os_volume_size))
-                .build(),
-        ))
-        .build();
-
-    let mut data_bdm = None;
-    if let Some(ref data_snapshot) = data_snapshot {
-        let mut bdm = os_bdm.clone();
-        bdm.device_name = Some(DATA_DEVICE_NAME.to_string());
-        if let Some(ebs) = bdm.ebs.as_mut() {
-            ebs.snapshot_id = Some(data_snapshot.clone());
-            ebs.volume_size = Some(data_volume_size);
-        }
-        data_bdm = Some(bdm);
-    }
-
-    let mut block_device_mappings = vec![os_bdm];
-    if let Some(data_bdm) = data_bdm {
-        block_device_mappings.push(data_bdm);
-    }
-
-    let uefi_secure_boot_enabled = variant_manifest
-        .image_features()
-        .iter()
-        .flatten()
-        .any(|f| *f == ImageFeature::UefiSecureBoot);
-
-    let (boot_mode, uefi_data) = if uefi_secure_boot_enabled {
-        (Some("uefi-preferred".into()), Some(uefi_data))
-    } else {
-        (None, None)
-    };
-
+    debug!("Registering AMI with amispec '{:?}'", amispec);
     info!("Making register image call in {}", region);
-    let register_response = ec2_client
-        .register_image()
-        .set_architecture(Some(ami_args.arch.clone()))
-        .set_block_device_mappings(Some(block_device_mappings))
-        .set_boot_mode(boot_mode)
-        .set_uefi_data(uefi_data)
-        .set_description(ami_args.description.clone())
-        .set_ena_support(Some(ENA))
-        .set_name(Some(ami_args.name.clone()))
-        .set_root_device_name(Some(ROOT_DEVICE_NAME.to_string()))
-        .set_sriov_net_support(Some(SRIOV.to_string()))
-        .set_virtualization_type(Some(VIRT_TYPE.to_string()))
-        .send()
+    let register_response = amispec
+        .as_register_image_call()
+        .send_with(ec2_client)
         .await
         .context(error::RegisterImageSnafu {
             region: region.as_ref(),
@@ -162,15 +53,83 @@ async fn _register_image(
             region: region.as_ref(),
         })?;
 
-    let mut snapshot_ids = vec![os_snapshot];
-    if let Some(data_snapshot) = data_snapshot {
-        snapshot_ids.push(data_snapshot);
-    }
-
     Ok(RegisteredIds {
         image_id,
-        snapshot_ids,
+        snapshot_ids: bottlerocket_snapshots.snapshot_ids(),
     })
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BottlerocketSnapshots {
+    pub(crate) os_snapshot: String,
+    pub(crate) data_snapshot: Option<String>,
+}
+
+impl BottlerocketSnapshots {
+    fn snapshot_ids(&self) -> Vec<String> {
+        let mut snapshot_ids = vec![self.os_snapshot.clone()];
+        if let Some(ref data_snapshot) = self.data_snapshot {
+            snapshot_ids.push(data_snapshot.clone());
+        }
+        snapshot_ids
+    }
+
+    /// Creates the EBS snapshots for the OS and (optional) data volume
+    ///
+    /// Snapshot IDs are added to `cleanup_snapshot_ids` so that they can be deleted on cleanup.
+    async fn create_snapshots(
+        ami_args: &AmiArgs,
+        region: &Region,
+        ebs_client: EbsClient,
+        ec2_client: &Ec2Client,
+        cleanup_snapshot_ids: &mut Vec<String>,
+    ) -> Result<BottlerocketSnapshots> {
+        debug!("Uploading images into EBS snapshots in {}", region);
+        let uploader = SnapshotUploader::new(ebs_client);
+        let os_snapshot =
+            snapshot_from_image(&ami_args.os_image, &uploader, None, ami_args.no_progress)
+                .await
+                .context(error::SnapshotSnafu {
+                    path: &ami_args.os_image,
+                    region: region.as_ref(),
+                })?;
+        cleanup_snapshot_ids.push(os_snapshot.clone());
+
+        let mut data_snapshot = None;
+        if let Some(data_image) = &ami_args.data_image {
+            let snapshot = snapshot_from_image(data_image, &uploader, None, ami_args.no_progress)
+                .await
+                .context(error::SnapshotSnafu {
+                    path: &ami_args.os_image,
+                    region: region.as_ref(),
+                })?;
+            cleanup_snapshot_ids.push(snapshot.clone());
+            data_snapshot = Some(snapshot);
+        }
+
+        info!("Waiting for snapshots to become available in {}", region);
+        let waiter = SnapshotWaiter::new(ec2_client.clone());
+        waiter
+            .wait(&os_snapshot, Default::default())
+            .await
+            .context(error::WaitSnapshotSnafu {
+                snapshot_type: "root",
+            })?;
+
+        if let Some(ref data_snapshot) = data_snapshot {
+            waiter
+                .wait(&data_snapshot, Default::default())
+                .await
+                .context(error::WaitSnapshotSnafu {
+                    snapshot_type: "data",
+                })?;
+        }
+
+        Ok(BottlerocketSnapshots {
+            os_snapshot,
+            data_snapshot,
+        })
+    }
 }
 
 /// Uploads the given images into snapshots and registers an AMI using them as its block device
@@ -181,7 +140,6 @@ pub(crate) async fn register_image(
     ebs_client: EbsClient,
     ec2_client: &Ec2Client,
 ) -> Result<RegisteredIds> {
-    info!("Registering '{}' in {}", ami_args.name, region);
     let mut cleanup_snapshot_ids = Vec::new();
     let register_result = _register_image(
         ami_args,
@@ -213,7 +171,7 @@ pub(crate) async fn register_image(
 /// Queries EC2 for the given AMI name. If found, returns Ok(Some(id)), if not returns Ok(None).
 pub(crate) async fn get_ami_id<S>(
     name: S,
-    arch: &ArchitectureValues,
+    arch: impl Into<String>,
     region: &Region,
     ec2_client: &Ec2Client,
 ) -> Result<Option<String>>
@@ -230,7 +188,7 @@ where
                 .build(),
             Filter::builder()
                 .set_name(Some("architecture".to_string()))
-                .set_values(Some(vec![arch.as_ref().to_string()]))
+                .set_values(Some(vec![arch.into()]))
                 .build(),
             Filter::builder()
                 .set_name(Some("image-type".to_string()))
@@ -238,7 +196,7 @@ where
                 .build(),
             Filter::builder()
                 .set_name(Some("virtualization-type".to_string()))
-                .set_values(Some(vec![VIRT_TYPE.to_string()]))
+                .set_values(Some(vec![mk_amispec::VIRT_TYPE.to_string()]))
                 .build(),
         ]))
         .send()
@@ -280,29 +238,19 @@ mod error {
     use snafu::Snafu;
     use std::path::PathBuf;
 
+    use super::mk_amispec;
+
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     pub(crate) enum Error {
+        #[snafu(display("Failed to create an amispec from publication inputs: {}", source))]
+        Amispec { source: mk_amispec::AmispecError },
+
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
             source: SdkError<DescribeImagesError>,
         },
-
-        #[snafu(display("Failed to load variant manifest from {}: {}", path.display(), source))]
-        LoadVariantManifest {
-            path: PathBuf,
-            source: buildsys::manifest::Error,
-        },
-
-        #[snafu(display("Failed to load UEFI data from {}: {}", path.display(), source))]
-        LoadUefiData {
-            path: PathBuf,
-            source: std::io::Error,
-        },
-
-        #[snafu(display("Could not find image layout for {}", path.display()))]
-        MissingImageLayout { path: PathBuf },
 
         #[snafu(display("Image response in {} did not include image ID", region))]
         MissingImageId { region: String },

@@ -392,7 +392,7 @@ struct ImageView {
 
 /// The nested structures here are somewhat complex, but they make it trivial
 /// to deserialize the structure we expect to find in the manifest.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct ManifestInfo {
     package: Package,
@@ -618,14 +618,14 @@ fn get_buildsys_package_name(pkg_metadata: &PackageMetadata) -> String {
         .to_string()
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 struct Package {
     name: String,
     metadata: Option<Metadata>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 struct Metadata {
     build_package: Option<BuildPackage>,
@@ -633,7 +633,7 @@ struct Metadata {
     build_variant: Option<BuildVariant>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 #[allow(dead_code)]
 pub struct BuildPackage {
@@ -645,7 +645,7 @@ pub struct BuildPackage {
     pub package_features: Option<Vec<ImageFeature>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 #[allow(dead_code)]
 pub struct BuildKit {
@@ -653,7 +653,7 @@ pub struct BuildKit {
     pub vendor: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 #[serde(untagged)]
 pub enum VariantSensitivity {
@@ -661,7 +661,7 @@ pub enum VariantSensitivity {
     Specific(SensitivityType),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub enum SensitivityType {
     Platform,
@@ -670,7 +670,7 @@ pub enum SensitivityType {
     Flavor,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct BuildVariant {
     pub included_packages: Option<Vec<String>>,
@@ -682,7 +682,7 @@ pub struct BuildVariant {
     pub image_features: Option<HashMap<ImageFeature, bool>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
     Qcow2,
@@ -850,13 +850,13 @@ impl fmt::Display for ImageFeature {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum BundleModule {
     Go,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct ExternalFile {
     pub path: Option<PathBuf>,

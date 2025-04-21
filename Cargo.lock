@@ -2776,6 +2776,7 @@ dependencies = [
 name = "pubsys"
 version = "0.1.0"
 dependencies = [
+ "amispec",
  "async-stream",
  "aws-config",
  "aws-credential-types",
@@ -2797,6 +2798,7 @@ dependencies = [
  "indicatif",
  "lazy_static",
  "log",
+ "maplit",
  "nonzero_ext",
  "num_cpus",
  "oci-cli-wrapper",
@@ -2810,6 +2812,7 @@ dependencies = [
  "snafu",
  "tabled",
  "tempfile",
+ "test-case",
  "tinytemplate",
  "tokio",
  "tokio-retry",

@@ -7,20 +7,23 @@ mod register;
 mod snapshot;
 pub(crate) mod wait;
 
+use self::register::mk_amispec;
 use crate::aws::ami::launch_permissions::get_launch_permissions;
 use crate::aws::ami::public::ami_is_public;
 use crate::aws::publish_ami::{get_snapshots, modify_image, modify_snapshots, ModifyOptions};
-use crate::aws::{client::build_client_config, parse_arch, region_from_string};
+use crate::aws::{client::build_client_config, region_from_string};
+use crate::frompath::FromPath;
 use crate::Args;
 use aws_sdk_ebs::Client as EbsClient;
 use aws_sdk_ec2::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_ec2::operation::copy_image::{CopyImageError, CopyImageOutput};
-use aws_sdk_ec2::types::{ArchitectureValues, OperationType};
+use aws_sdk_ec2::types::OperationType;
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
 use aws_sdk_sts::operation::get_caller_identity::{
     GetCallerIdentityError, GetCallerIdentityOutput,
 };
 use aws_sdk_sts::Client as StsClient;
+use buildsys::manifest::ManifestInfo;
 use clap::Parser;
 use futures::future::{join, lazy, ready, FutureExt};
 use futures::stream::{self, StreamExt};
@@ -47,16 +50,16 @@ pub(crate) struct AmiArgs {
     data_image: Option<PathBuf>,
 
     /// Path to the variant manifest
-    #[arg(short = 'v', long)]
-    variant_manifest: PathBuf,
+    #[arg(short = 'v', long, value_parser = parse_variant_manifest)]
+    variant_manifest: VariantManifest,
 
     /// Path to the UEFI data
-    #[arg(short = 'e', long)]
-    uefi_data: PathBuf,
+    #[arg(short = 'e', long, value_parser = parse_uefi_data)]
+    uefi_data: FromPath<String>,
 
     /// The architecture of the machine image
-    #[arg(short = 'a', long, value_parser = parse_arch)]
-    arch: ArchitectureValues,
+    #[arg(short = 'a', long)]
+    arch: String,
 
     /// The desired AMI name
     #[arg(short = 'n', long)]
@@ -73,6 +76,10 @@ pub(crate) struct AmiArgs {
     /// Regions where you want the AMI, the first will be used as the base for copying
     #[arg(long, value_delimiter = ',')]
     regions: Vec<String>,
+
+    /// amispec file containing AMI registration options.
+    #[arg(long, value_parser = parse_toml_file::<toml::Table>)]
+    amispec_file: Option<FromPath<toml::Table>>,
 
     /// If specified, save created regional AMI IDs in JSON at this path.
     #[arg(long)]
@@ -132,18 +139,31 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
 
     let base_ec2_client = Ec2Client::new(&client_config);
 
+    // Render an amispec without any defined snapshots.
+    //
+    // This is used to determine the desired name and architecture, so that we can see if our AMI
+    // already exists.
+    let tentative_amispec =
+        mk_amispec::create_amispec(ami_args, None).context(error::AmispecSnafu)?;
+
+    let arch = tentative_amispec
+        .architecture
+        .as_ref()
+        .map(ToString::to_string)
+        .context(error::MissingArchitectureSnafu)?;
+
     // Check if the AMI already exists, in which case we can use the existing ID, otherwise we
     // register a new one.
     let maybe_id = get_ami_id(
-        &ami_args.name,
-        &ami_args.arch,
+        &tentative_amispec.name,
+        &arch,
         &base_region,
         &base_ec2_client,
     )
     .await
     .context(error::GetAmiIdSnafu {
-        name: &ami_args.name,
-        arch: ami_args.arch.as_ref(),
+        arch: &arch,
+        name: &tentative_amispec.name,
         region: base_region.as_ref(),
     })?;
 
@@ -154,7 +174,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     let (ids_of_image, already_registered) = if let Some(found_id) = maybe_id {
         warn!(
             "\n{}\n\nFound '{}' already registered in {}: {}\n\n{0}",
-            WARN_SEPARATOR, ami_args.name, base_region, found_id
+            WARN_SEPARATOR, tentative_amispec.name, base_region, found_id
         );
         let snapshot_ids = get_snapshots(&found_id, &base_region, &base_ec2_client)
             .await
@@ -184,25 +204,34 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
 
         (found_ids, true)
     } else {
+        info!(
+            "Registering '{}' in {}",
+            tentative_amispec.name, base_region
+        );
         let new_ids = register_image(ami_args, &base_region, base_ebs_client, &base_ec2_client)
             .await
             .context(error::RegisterImageSnafu {
-                name: &ami_args.name,
-                arch: ami_args.arch.as_ref(),
+                name: &tentative_amispec.name,
+                arch: &arch,
                 region: base_region.as_ref(),
             })?;
         info!(
             "Registered AMI '{}' in {}: {}",
-            ami_args.name, base_region, new_ids.image_id
+            tentative_amispec.name, base_region, new_ids.image_id
         );
         (new_ids, false)
     };
+
+    // Eliminate our reference to `ami_args` to force the use of `tentative_amispec` to determine
+    // AMI properties.
+    #[expect(unused_variables)]
+    let ami_args = ();
 
     amis.insert(
         base_region.as_ref().to_string(),
         Image::new(
             &ids_of_image.image_id,
-            &ami_args.name,
+            &tentative_amispec.name,
             Some(public),
             Some(launch_permissions),
         ),
@@ -304,7 +333,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     let mut get_requests = Vec::with_capacity(regions.len());
     for region in regions.iter() {
         let ec2_client = &ec2_clients[region];
-        let get_request = get_ami_id(&ami_args.name, &ami_args.arch, region, ec2_client);
+        let get_request = get_ami_id(&tentative_amispec.name, &arch, region, ec2_client);
         let info_future = ready(region.clone());
         get_requests.push(join(info_future, get_request));
     }
@@ -316,14 +345,14 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     let mut copy_requests = Vec::with_capacity(regions.len());
     for (region, get_response) in get_responses {
         let get_response = get_response.context(error::GetAmiIdSnafu {
-            name: &ami_args.name,
-            arch: ami_args.arch.as_ref(),
+            name: &tentative_amispec.name,
+            arch: &arch,
             region: region.as_ref(),
         })?;
         if let Some(id) = get_response {
             info!(
                 "Found '{}' already registered in {}: {}",
-                ami_args.name, region, id
+                tentative_amispec.name, region, id
             );
             let public = ami_is_public(&ec2_clients[&region], region.as_ref(), &id)
                 .await
@@ -342,7 +371,12 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
 
             amis.insert(
                 region.as_ref().to_string(),
-                Image::new(&id, &ami_args.name, Some(public), Some(launch_permissions)),
+                Image::new(
+                    &id,
+                    &tentative_amispec.name,
+                    Some(public),
+                    Some(launch_permissions),
+                ),
             );
             continue;
         }
@@ -351,8 +385,8 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
         let base_region = base_region.to_owned();
         let copy_future = ec2_client
             .copy_image()
-            .set_description(ami_args.description.clone())
-            .set_name(Some(ami_args.name.clone()))
+            .set_description(tentative_amispec.description.clone())
+            .set_name(Some(tentative_amispec.name.clone()))
             .set_source_image_id(Some(ids_of_image.image_id.clone()))
             .set_source_region(Some(base_region.as_ref().to_string()))
             .send();
@@ -391,17 +425,22 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
                 if let Some(image_id) = success.image_id {
                     info!(
                         "Registered AMI '{}' in {}: {}",
-                        ami_args.name, region, image_id,
+                        tentative_amispec.name, region, image_id,
                     );
                     amis.insert(
                         region.as_ref().to_string(),
-                        Image::new(&image_id, &ami_args.name, Some(false), Some(vec![])),
+                        Image::new(
+                            &image_id,
+                            &tentative_amispec.name,
+                            Some(false),
+                            Some(vec![]),
+                        ),
                     );
                 } else {
                     saw_error = true;
                     error!(
                         "Registered AMI '{}' in {} but didn't receive an AMI ID!",
-                        ami_args.name, region,
+                        tentative_amispec.name, region,
                     );
                 }
             }
@@ -497,11 +536,39 @@ async fn get_account_ids(
     Ok(grant_accounts)
 }
 
+/// Parses a toml file, returning a `FromPath<T>`.
+pub(crate) fn parse_toml_file<'de, T: Deserialize<'de>>(filepath: &str) -> Result<FromPath<T>> {
+    let toml_str = std::fs::read_to_string(filepath).context(error::ReadFileSnafu { filepath })?;
+    let toml_deserializer = toml::Deserializer::new(&toml_str);
+    FromPath::deserialize_from_path(filepath, toml_deserializer)
+        .context(error::ParseTomlSnafu { filepath })
+}
+
+/// Helper type that wraps buildsys::manifest::ManifestInfo but includes the filepath from which
+/// it was loaded.
+///
+/// This allows us to emit more helpful error messages when an error occurs due to a variant
+/// definition.
+pub(crate) type VariantManifest = FromPath<ManifestInfo>;
+
+pub(crate) fn parse_variant_manifest(filepath: &str) -> Result<VariantManifest> {
+    let manifest =
+        ManifestInfo::new(filepath).context(error::LoadVariantManifestSnafu { filepath })?;
+    Ok(FromPath::new_from_path(manifest, filepath))
+}
+
+pub(crate) fn parse_uefi_data(filepath: &str) -> Result<FromPath<String>> {
+    let uefi_data = std::fs::read_to_string(filepath).context(error::ReadFileSnafu { filepath })?;
+    Ok(FromPath::new_from_path(uefi_data, filepath))
+}
+
 mod error {
+    use super::register::mk_amispec;
     use crate::aws::{ami, publish_ami};
     use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::modify_image_attribute::ModifyImageAttributeError;
     use aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityError;
+    use buildsys::manifest;
     use snafu::Snafu;
     use std::path::PathBuf;
 
@@ -512,6 +579,9 @@ mod error {
     pub(crate) enum Error {
         #[snafu(display("Some AMIs failed to copy, see above"))]
         AmiCopy,
+
+        #[snafu(display("Failed to create an amispec from publication inputs: {}", source))]
+        Amispec { source: mk_amispec::AmispecError },
 
         #[snafu(display("Error reading config: {}", source))]
         Config { source: pubsys_config::Error },
@@ -580,6 +650,18 @@ mod error {
             source: public::Error,
         },
 
+        #[snafu(display("Failed to load variant manifest from {}: {}", filepath.display(), source))]
+        LoadVariantManifest {
+            filepath: PathBuf,
+            #[snafu(source(from(manifest::Error, Box::new)))]
+            source: Box<manifest::Error>,
+        },
+
+        #[snafu(display(
+            "amispec rendered from pubsys inputs is missing a machine architecture."
+        ))]
+        MissingArchitecture,
+
         #[snafu(display("Infra.toml is missing {}", missing))]
         MissingConfig { missing: String },
 
@@ -587,6 +669,18 @@ mod error {
         MissingInResponse {
             request_type: String,
             missing: String,
+        },
+
+        #[snafu(display("Failed to parse file {} as toml: {}", filepath.display(), source))]
+        ParseToml {
+            filepath: PathBuf,
+            source: toml::de::Error,
+        },
+
+        #[snafu(display("Failed to read file {}: {}", filepath.display(), source))]
+        ReadFile {
+            filepath: PathBuf,
+            source: std::io::Error,
         },
 
         #[snafu(display("Error registering {} {} in {}: {}", arch, name, region, source))]
