@@ -14,7 +14,7 @@ use crate::aws::{
 use crate::Args;
 use aws_config::SdkConfig;
 use aws_sdk_ec2::{types::ArchitectureValues, Client as Ec2Client};
-use aws_sdk_ssm::{config::Region, Client as SsmClient};
+use aws_sdk_ssm::{config::Region, error::ProvideErrorMetadata, Client as SsmClient};
 use clap::{ArgGroup, Parser};
 use futures::stream::{StreamExt, TryStreamExt};
 use governor::{prelude::*, Quota, RateLimiter};
@@ -202,9 +202,20 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
     info!("Getting current SSM parameters");
     let new_parameter_names: Vec<&SsmKey> =
         new_parameters.iter().map(|param| &param.ssm_key).collect();
-    let current_parameters = ssm::get_parameters(&new_parameter_names, &ssm_clients)
-        .await
-        .context(error::FetchSsmSnafu)?;
+    let result = ssm::get_parameters(&new_parameter_names, &ssm_clients).await;
+
+    // Typically if a user calls GetParameters for a nonexistent parameter, the call will succeed
+    // and simply report the parameter as invalid. However, SSM has a special case error in
+    // GetParameters for keys under the `/aws/` namespace if the service prefix (e.g
+    // `/aws/service/bottlerocket`) does not contain any keys. This is an expected state when
+    // publishing parameters in a new region for the first time. We can assume when we see this
+    // error that there are no parameters under the prefix.
+    let current_parameters = if is_aws_service_access_denied_error(&result) {
+        HashMap::new()
+    } else {
+        result.context(error::FetchSsmSnafu)?
+    };
+
     trace!("Current SSM parameters: {:#?}", current_parameters);
 
     // Show the difference between source and target parameters in SSM.
@@ -239,6 +250,20 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
 
     info!("All parameters match requested values.");
     Ok(())
+}
+
+fn is_aws_service_access_denied_error(result: &ssm::Result<HashMap<SsmKey, String>>) -> bool {
+    if let Err(ssm::error::Error::GetParameters { source, .. }) = result {
+        if let Some(err) = source.as_service_error() {
+            return err.code() == Some("AccessDeniedException")
+                && err.message().is_some()
+                && err
+                    .message()
+                    .unwrap()
+                    .contains("No access to \"/aws/\" namespace");
+        }
+    }
+    false
 }
 
 /// Write rendered parameters to the file at `ssm_parameters_output`
