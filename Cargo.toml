@@ -11,6 +11,7 @@ members = [
     "tools/pubsys",
     "tools/pubsys-config",
     "tools/pubsys-setup",
+    "tools/serde-templated",
     "tools/testsys",
     "tools/testsys-config",
     "tools/unplug",
@@ -59,6 +60,7 @@ pipesys = { version = "0.1", path = "tools/pipesys", lib = true, artifact = [ "b
 pubsys = { version = "0.1", path = "tools/pubsys", artifact = [ "bin:pubsys" ] }
 pubsys-config = { version = "0.1", path = "tools/pubsys-config" }
 pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin:pubsys-setup" ] }
+serde-templated = { version = "0.1", path = "tools/serde-templated" }
 testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
@@ -81,6 +83,7 @@ aws-sdk-sts = "1"
 aws-smithy-types = "1"
 aws-types = "1"
 base64 = "0.22"
+bounded-integer = "0.5"
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
 clap = "4"

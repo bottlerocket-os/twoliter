@@ -1,0 +1,20 @@
+[package]
+name = "serde-templated"
+version = "0.1.0"
+authors = ["Sean P. Kelly <seankell@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2024"
+
+[dependencies]
+handlebars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+snafu.workspace = true
+
+[dev-dependencies]
+bounded-integer = { workspace = true, features = ["std", "serde1", "types", "num-traits02", "macro"] }
+maplit.workspace = true
+serde_json.workspace = true
+test-case.workspace = true
+
+[lints]
+workspace = true
