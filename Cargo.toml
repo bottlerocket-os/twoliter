@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+    "tools/amispec",
     "tools/bottlerocket-variant",
     "tools/buildsys",
     "tools/buildsys-config",
@@ -49,6 +50,7 @@ pre-build = [
 ]
 
 [workspace.dependencies]
+amispec = { version = "0.1", path = "tools/amispec" }
 bottlerocket-types = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
 bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
 buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys" ] }
@@ -85,6 +87,7 @@ aws-sdk-sts = "1"
 aws-smithy-types = "1"
 aws-types = "1"
 base64 = "0.22"
+bon = "3"
 bounded-integer = "0.5"
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
@@ -113,6 +116,7 @@ maplit = "1"
 nix = "0.28"
 nonzero_ext = "0.3"
 num_cpus = "1"
+num-traits = "0.2"
 once_cell = "1.21"
 olpc-cjson = "0.1"
 proc-macro2 = "1"

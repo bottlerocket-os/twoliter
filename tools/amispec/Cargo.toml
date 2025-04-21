@@ -1,0 +1,24 @@
+[package]
+name = "amispec"
+version = "0.1.0"
+authors = ["Sean P. Kelly <seankell@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2024"
+
+[dependencies]
+aws-sdk-ec2.workspace = true
+bon.workspace = true
+bounded-integer = { workspace = true, features = ["std", "serde1", "types", "num-traits02", "macro"] }
+num-traits.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_plain.workspace = true
+serde-templated.workspace = true
+snafu.workspace = true
+
+[dev-dependencies]
+maplit.workspace = true
+test-case.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true
