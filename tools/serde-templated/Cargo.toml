@@ -8,6 +8,7 @@ edition = "2024"
 [dependencies]
 handlebars.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde-templated-derive.workspace = true
 snafu.workspace = true
 
 [dev-dependencies]

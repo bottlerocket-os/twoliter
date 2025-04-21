@@ -8,6 +8,7 @@ use std::fmt::Debug;
 mod template_of;
 mod templated;
 
+pub use serde_templated_derive::Templated;
 pub use templated::Templated;
 
 /// Represents a type that can be rendered to another, interpolating values from some context.
