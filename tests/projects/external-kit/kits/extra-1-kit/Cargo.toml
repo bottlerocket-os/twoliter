@@ -13,3 +13,4 @@ path = "../kit.rs"
 
 [build-dependencies]
 pkg-b = { path = "../../packages/pkg-b" }
+

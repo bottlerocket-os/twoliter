@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
+mod appinventory;
 mod twoliter_build;
 mod twoliter_update;
 
