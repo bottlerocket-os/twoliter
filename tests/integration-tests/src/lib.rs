@@ -1,10 +1,12 @@
 #![cfg(test)]
 
+use rand::Rng;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
+mod appinventory;
 mod twoliter_build;
 mod twoliter_update;
 
@@ -46,13 +48,14 @@ where
 
 struct KitRegistry {
     temp_dir: TempDir,
+    port: u16,
     container_id: String,
 }
 
 impl KitRegistry {
     fn new() -> Self {
         let temp_dir = TempDir::new().expect("failed to create path for oci registry spinup");
-
+        let port = rand::thread_rng().gen_range(5111..7111);
         let cert_dir = temp_dir.path().join("certs");
         let cert_file = cert_dir.join("registry.crt");
         std::fs::create_dir_all(&cert_dir).expect("failed to create nginx dir");
@@ -94,7 +97,7 @@ impl KitRegistry {
                 "-e REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/registry.crt",
                 "-e REGISTRY_HTTP_TLS_KEY=/auth/certs/registry.key",
                 "-p",
-                "5000:5000",
+                &format!("{port}:5000"),
                 "public.ecr.aws/docker/library/registry:2.8.3",
             ],
             [],
@@ -104,6 +107,7 @@ impl KitRegistry {
 
         Self {
             temp_dir,
+            port,
             container_id,
         }
     }
@@ -113,6 +117,10 @@ impl KitRegistry {
             .path()
             .join("certs/registry.crt")
             .to_path_buf()
+    }
+
+    fn port(&self) -> u16 {
+        self.port
     }
 }
 

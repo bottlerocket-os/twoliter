@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.8.1...HEAD
+### Build
+* Add integration test to verify application-inventory generation ([#522])
+
+[#522]: https://github.com/bottlerocket-os/twoliter/pull/521
+
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.9.0...HEAD
 
 ## [0.9.0] - 2025-04-16
 

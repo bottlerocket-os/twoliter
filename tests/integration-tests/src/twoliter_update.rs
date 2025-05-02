@@ -1,13 +1,15 @@
+use crate::twoliter_build::copy_project_to_temp_dir;
+
 use super::{run_command, test_projects_dir, KitRegistry, TWOLITER_PATH};
 
-const INFRA_TOML: &str = r#"
+pub(crate) const INFRA_TOML: &str = r#"
 [vendor.bottlerocket]
-registry = "localhost:5000"
+registry = "localhost:__PORT__"
 "#;
 
-const TWOLITER_OVERRIDE: &str = r#"
+pub(crate) const TWOLITER_OVERRIDE: &str = r#"
 [custom-vendor.core-kit]
-registry = "localhost:5000"
+registry = "localhost:__PORT__"
 name = "core-kit-overridden"
 "#;
 
@@ -16,9 +18,10 @@ name = "core-kit-overridden"
 /// Generates a Twoliter.lock file for the `external-kit` project using crane
 fn test_twoliter_build_and_update() {
     let external_kit = test_projects_dir().join("external-kit");
-    let lockfile = external_kit.join("Twoliter.lock");
+    let tmp_dir = copy_project_to_temp_dir(&external_kit);
+    let lockfile = tmp_dir.path().join("Twoliter.lock");
     std::fs::remove_file(&lockfile).ok();
-    let override_file = external_kit.join("Twoliter.override");
+    let override_file = tmp_dir.path().join("Twoliter.override");
     std::fs::remove_file(&override_file).ok();
 
     // Build & push a local kit to the registry
@@ -26,13 +29,17 @@ fn test_twoliter_build_and_update() {
     LocalKit::build(&registry);
 
     // Point twoliter to the local registry as an override
-    std::fs::write(&override_file, TWOLITER_OVERRIDE).unwrap();
+    std::fs::write(
+        &override_file,
+        TWOLITER_OVERRIDE.replace("__PORT__", registry.port().to_string().as_str()),
+    )
+    .unwrap();
     let output = run_command(
         TWOLITER_PATH,
         [
             "update",
             "--project-path",
-            external_kit.join("Twoliter.toml").to_str().unwrap(),
+            tmp_dir.path().join("Twoliter.toml").to_str().unwrap(),
         ],
         [
             ("TWOLITER_KIT_IMAGE_TOOL", "crane"),
@@ -70,18 +77,19 @@ fn test_twoliter_build_and_update() {
     std::fs::remove_file(&override_file).ok();
 }
 
-struct LocalKit;
+pub(crate) struct LocalKit;
 
 impl LocalKit {
-    fn build(registry: &KitRegistry) {
+    pub(crate) fn build(registry: &KitRegistry) {
         let local_kit = test_projects_dir().join("local-kit");
+        let tmp_dir = copy_project_to_temp_dir(&local_kit);
 
         run_command(
             TWOLITER_PATH,
             [
                 "update",
                 "--project-path",
-                local_kit.join("Twoliter.toml").to_str().unwrap(),
+                tmp_dir.path().join("Twoliter.toml").to_str().unwrap(),
             ],
             [],
         );
@@ -91,7 +99,7 @@ impl LocalKit {
             [
                 "fetch",
                 "--project-path",
-                local_kit.join("Twoliter.toml").to_str().unwrap(),
+                tmp_dir.path().join("Twoliter.toml").to_str().unwrap(),
             ],
             [],
         );
@@ -103,19 +111,23 @@ impl LocalKit {
                 "kit",
                 "core-kit",
                 "--project-path",
-                local_kit.join("Twoliter.toml").to_str().unwrap(),
+                tmp_dir.path().join("Twoliter.toml").to_str().unwrap(),
             ],
             [],
         );
 
-        std::fs::write(local_kit.join("Infra.toml"), INFRA_TOML).unwrap();
+        std::fs::write(
+            tmp_dir.path().join("Infra.toml"),
+            INFRA_TOML.replace("__PORT__", registry.port().to_string().as_str()),
+        )
+        .unwrap();
         run_command(
             TWOLITER_PATH,
             [
                 "publish",
                 "kit",
                 "--project-path",
-                local_kit.join("Twoliter.toml").to_str().unwrap(),
+                tmp_dir.path().join("Twoliter.toml").to_str().unwrap(),
                 "core-kit",
                 "bottlerocket",
                 "core-kit-overridden",
