@@ -67,7 +67,10 @@ macro_rules! impl_block_device_types {
 
             properties {
                 volume_size: $size_ty:ty,
-                $($extra_attr:ident: $extra_ty:ty,)*
+                $(
+                    $(#[$extra_attr_meta:meta])*
+                    $extra_attr:ident: $extra_ty:ty,
+                )*
             }
 
             fn build(&$self:ident, $builder:ident) {
@@ -75,7 +78,6 @@ macro_rules! impl_block_device_types {
             }
         }
     )*) => {
-
         #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
         #[serde(rename_all = "kebab-case", tag = "volume-type")]
         pub enum EbsBlockDevice {
@@ -145,7 +147,10 @@ macro_rules! impl_block_device_types {
                     bounded_from_u64(size, $device::volume_type(), "volume-size")
                 })]
                 pub volume_size: $size_ty,
-                $(pub $extra_attr: $extra_ty,)*
+                $(
+                    $(#[$extra_attr_meta])*
+                    $extra_attr: $extra_ty,
+                )*
 
                 // Common EBS attributes
                 pub delete_on_termination: Option<bool>,
@@ -266,6 +271,9 @@ impl_block_device_types! {
 
         properties {
             volume_size: Option<BoundedU64<4, 16_384>>,
+            #[builder(with = |size: u64| -> Result<_, InvalidValueError> {
+                bounded_from_u64(size, "io1", "iops")
+            })]
             iops: BoundedU64<100, 64_000>,
         }
 
@@ -281,6 +289,9 @@ impl_block_device_types! {
 
         properties {
             volume_size: Option<BoundedU64<4, 65_536>>,
+            #[builder(with = |size: u64| -> Result<_, InvalidValueError> {
+                bounded_from_u64(size, "io2", "iops")
+            })]
             iops: BoundedU64<100, 256_000>,
         }
 
@@ -336,7 +347,13 @@ impl_block_device_types! {
 
         properties {
             volume_size: Option<BoundedU64<1, 16_384>>,
+            #[builder(with = |size: u64| -> Result<_, InvalidValueError> {
+                bounded_from_u64(size, "gp3", "iops")
+            })]
             iops: Option<BoundedU64<3_000, 16_000>>,
+            #[builder(with = |size: u64| -> Result<_, InvalidValueError> {
+                bounded_from_u64(size, "gp3", "throughput")
+            })]
             throughput: Option<BoundedU64<125, 1_000>>,
         }
 
