@@ -1,0 +1,24 @@
+[package]
+name = "serde-templated-derive"
+version = "0.1.0"
+authors = ["Sean P. Kelly <seankell@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+darling.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full"] }
+
+[dev-dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace= true
+serde-templated.workspace = true
+test-case.workspace = true
+
+[lints]
+workspace = true
