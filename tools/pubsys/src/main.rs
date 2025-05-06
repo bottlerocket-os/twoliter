@@ -36,11 +36,12 @@ use semver::Version;
 use simplelog::{CombinedLogger, Config as LogConfig, ConfigBuilder, LevelFilter, SimpleLogger};
 use snafu::ResultExt;
 use std::path::PathBuf;
-use std::process::ExitCode;
 use std::result::Result as StdResult;
 use tough::error::Error as ToughError;
 
-async fn run() -> Result<()> {
+#[tokio::main]
+#[snafu::report]
+async fn main() -> Result<()> {
     // Parse and store the args passed to the program
     let args = Args::parse();
 
@@ -131,16 +132,6 @@ async fn run() -> Result<()> {
                 .await
                 .context(error::PublishKitSnafu)
         }
-    }
-}
-
-#[tokio::main]
-async fn main() -> ExitCode {
-    if let Err(e) = run().await {
-        eprintln!("{}", e);
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
     }
 }
 
