@@ -180,6 +180,9 @@ PUBLISH_REPO_OUTPUT_DIR = "${PUBLISH_REPO_BASE_DIR}/${PUBLISH_REPO}/${BUILDSYS_N
 # The default name of registered AMIs; override by setting PUBLISH_AMI_NAME.
 PUBLISH_AMI_NAME_DEFAULT = "${BUILDSYS_NAME}-${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}-v${BUILDSYS_VERSION_IMAGE}-${BUILDSYS_VERSION_BUILD}"
 
+# The name of the amispec template that will be used to derive AWS AMI attributes
+BUILDSYS_AMISPEC_TEMPLATE = "${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/amispec.toml"
+
 # The name of the kmod kit archive, used to ease building out-of-tree kernel modules.
 BUILDSYS_KMOD_KIT = "${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}-kmod-kit-v${BUILDSYS_VERSION_IMAGE}.tar.xz"
 BUILDSYS_KMOD_KIT_PATH = "${BUILDSYS_VARIANT_DIR}/${BUILDSYS_KMOD_KIT}"
@@ -1307,6 +1310,10 @@ if [ "${is_split}" == "yes" ] ; then
    data_volume_args+=(--data-image "${data_image}")
 fi
 
+if [ -s "${BUILDSYS_AMISPEC_TEMPLATE}" ]; then
+   AMISPEC_EXISTS=1
+fi
+
 ami_output="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-${AMI_DATA_FILE_SUFFIX}"
 ami_output_latest="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_VARIANT}-${AMI_DATA_FILE_SUFFIX}"
 
@@ -1326,6 +1333,7 @@ pubsys \
    --arch "${BUILDSYS_ARCH}" \
    --name "${ami_name}" \
    --description "${PUBLISH_AMI_DESCRIPTION:-${ami_name}}" \
+   ${AMISPEC_EXISTS:+--amispec-file "${BUILDSYS_AMISPEC_TEMPLATE}"} \
    \
    --ami-output "${ami_output}" \
    \

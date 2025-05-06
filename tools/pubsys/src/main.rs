@@ -23,6 +23,7 @@ Configuration comes from:
 */
 
 mod aws;
+pub mod frompath;
 mod kit;
 mod repo;
 mod vmware;

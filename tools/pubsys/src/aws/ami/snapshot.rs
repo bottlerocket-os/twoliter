@@ -3,11 +3,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use snafu::{OptionExt, ResultExt};
 use std::path::Path;
 
-/// Create a progress bar to show status of snapshot blocks, if wanted.
-fn build_progress_bar(no_progress: bool, verb: &str) -> Result<Option<ProgressBar>> {
-    if no_progress {
-        return Ok(None);
-    }
+/// Create a progress bar to show status of snapshot blocks.
+pub(crate) fn build_progress_bar(verb: &str) -> Result<ProgressBar> {
     let progress_bar = ProgressBar::new(0);
     progress_bar.set_style(
         ProgressStyle::default_bar()
@@ -15,7 +12,7 @@ fn build_progress_bar(no_progress: bool, verb: &str) -> Result<Option<ProgressBa
             .context(error::ProgressBarTemplateSnafu)?
             .progress_chars("=> "),
     );
-    Ok(Some(progress_bar))
+    Ok(progress_bar)
 }
 
 /// Uploads the given path into a snapshot.
@@ -23,20 +20,19 @@ pub(crate) async fn snapshot_from_image<P>(
     path: P,
     uploader: &SnapshotUploader,
     desired_size: Option<i64>,
-    no_progress: bool,
+    progress_bar: Option<ProgressBar>,
 ) -> Result<String>
 where
     P: AsRef<Path>,
 {
     let path = path.as_ref();
-    let progress_bar = build_progress_bar(no_progress, "Uploading snapshot");
     let filename = path
         .file_name()
         .context(error::InvalidImagePathSnafu { path })?
         .to_string_lossy();
 
     uploader
-        .upload_from_file(path, desired_size, Some(&filename), progress_bar?)
+        .upload_from_file(path, desired_size, Some(&filename), progress_bar.clone())
         .await
         .context(error::UploadSnapshotSnafu)
 }

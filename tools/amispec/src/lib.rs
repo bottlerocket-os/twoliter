@@ -196,6 +196,7 @@ pub enum Architecture {
     Arm64Mac,
 }
 serde_plain::derive_fromstr_from_deserialize!(Architecture);
+serde_plain::derive_display_from_serialize!(Architecture);
 
 impl From<Architecture> for aws_sdk_ec2::types::ArchitectureValues {
     fn from(value: Architecture) -> Self {
@@ -217,6 +218,7 @@ pub enum BootMode {
     UefiPreferred,
 }
 serde_plain::derive_fromstr_from_deserialize!(BootMode);
+serde_plain::derive_display_from_serialize!(BootMode);
 
 impl From<BootMode> for aws_sdk_ec2::types::BootModeValues {
     fn from(value: BootMode) -> Self {
@@ -234,6 +236,7 @@ pub enum ImdsSupport {
     V2_0,
 }
 serde_plain::derive_fromstr_from_deserialize!(ImdsSupport);
+serde_plain::derive_display_from_serialize!(ImdsSupport);
 
 impl From<ImdsSupport> for aws_sdk_ec2::types::ImdsSupportValues {
     fn from(value: ImdsSupport) -> Self {
@@ -249,6 +252,7 @@ pub enum TpmSupport {
     V2_0,
 }
 serde_plain::derive_fromstr_from_deserialize!(TpmSupport);
+serde_plain::derive_display_from_serialize!(TpmSupport);
 
 impl From<TpmSupport> for aws_sdk_ec2::types::TpmSupportValues {
     fn from(value: TpmSupport) -> Self {
@@ -264,15 +268,7 @@ pub enum SriovNetSupport {
     Simple,
 }
 serde_plain::derive_fromstr_from_deserialize!(SriovNetSupport);
-
-impl std::fmt::Display for SriovNetSupport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let repr = match self {
-            SriovNetSupport::Simple => "simple",
-        };
-        write!(f, "{}", repr)
-    }
-}
+serde_plain::derive_display_from_serialize!(SriovNetSupport);
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -281,15 +277,7 @@ pub enum VirtualizationType {
     // Paravirtual is not supported
 }
 serde_plain::derive_fromstr_from_deserialize!(VirtualizationType);
-
-impl std::fmt::Display for VirtualizationType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let repr = match self {
-            VirtualizationType::Hvm => "hvm",
-        };
-        write!(f, "{}", repr)
-    }
-}
+serde_plain::derive_display_from_serialize!(VirtualizationType);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Default, Builder, Templated)]
 #[templated(
