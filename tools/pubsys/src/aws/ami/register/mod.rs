@@ -5,6 +5,7 @@ use aws_sdk_ec2::types::Filter;
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
 use coldsnap::{SnapshotUploader, SnapshotWaiter};
 use futures::future::OptionFuture;
+use futures::TryFutureExt as _;
 use indicatif::{MultiProgress, ProgressBar};
 use log::{debug, info, warn};
 use snafu::{ensure, futures::TryFutureExt as _, OptionExt, ResultExt, Snafu};
@@ -99,7 +100,7 @@ impl BottlerocketSnapshots {
 
         cleanup_snapshot_ids.lock().await.push(snapshot_id.clone());
 
-        info!("Waiting for snapshot {snapshot_id} to become available");
+        debug!("Waiting for snapshot {snapshot_id} to become available");
         snapshot_waiter
             .wait(&snapshot_id, Default::default())
             .await
@@ -123,6 +124,7 @@ impl BottlerocketSnapshots {
         let multi_progress = MultiProgress::new();
 
         let create_snapshot_task = |image_path: PathBuf, image_name: &'static str| {
+            info!("Registering '{image_name}' snapshot in region '{region}'");
             let progress_bar = (!ami_args.no_progress)
                 .then_some({
                     let pb = build_progress_bar(&format!("Upload {image_name} snapshot"))
@@ -131,12 +133,11 @@ impl BottlerocketSnapshots {
                 })
                 .transpose()?;
 
-            Ok(async move {
-                info!("Registering '{image_name}' snapshot in region '{region}'");
-                let uploader = SnapshotUploader::new(ebs_client.clone());
-                let waiter = SnapshotWaiter::new(ec2_client.clone());
-                let cloned_image_path = image_path.clone();
+            let uploader = SnapshotUploader::new(ebs_client.clone());
+            let waiter = SnapshotWaiter::new(ec2_client.clone());
+            let cloned_image_path = image_path.clone();
 
+            Ok(tokio::spawn(async move {
                 Self::create_snapshot(
                     &uploader,
                     &waiter,
@@ -144,13 +145,17 @@ impl BottlerocketSnapshots {
                     Arc::clone(&cleanup_snapshot_ids),
                     progress_bar.clone(),
                 )
-                .context(error::SnapshotSnafu {
-                    snapshot_type: image_name.to_string(),
-                    path: image_path,
-                    region: region.to_string(),
-                })
+                .err_into()
                 .await
             })
+            .err_into()
+            .map_ok(std::future::ready)
+            .try_flatten()
+            .context(error::SnapshotSnafu {
+                snapshot_type: image_name.to_string(),
+                path: image_path,
+                region: region.to_string(),
+            }))
         };
 
         let os_upload = create_snapshot_task.clone()(ami_args.os_image.clone(), "root")?;
@@ -163,6 +168,8 @@ impl BottlerocketSnapshots {
             .into();
 
         let (os_snapshot, data_snapshot) = tokio::join!(os_upload, data_upload);
+        multi_progress.clear().context(error::ClearProgressSnafu)?;
+
         let (os_snapshot, data_snapshot) = (os_snapshot?, data_snapshot.transpose()?);
 
         Ok(BottlerocketSnapshots {
@@ -282,7 +289,7 @@ where
 }
 
 mod error {
-    use super::{mk_amispec, CreateSnapshotError};
+    use super::mk_amispec;
     use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::{
         describe_images::DescribeImagesError, register_image::RegisterImageError,
@@ -295,6 +302,9 @@ mod error {
     pub(crate) enum Error {
         #[snafu(display("Failed to create an amispec from publication inputs: {}", source))]
         Amispec { source: mk_amispec::AmispecError },
+
+        #[snafu(display("Failed to clear progress bar: {}", source))]
+        ClearProgress { source: std::io::Error },
 
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
@@ -324,7 +334,7 @@ mod error {
             snapshot_type: String,
             path: PathBuf,
             region: String,
-            source: CreateSnapshotError,
+            source: Box<dyn std::error::Error + Send + Sync>,
         },
     }
 }

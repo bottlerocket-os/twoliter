@@ -32,7 +32,13 @@ where
         .to_string_lossy();
 
     uploader
-        .upload_from_file(path, desired_size, Some(&filename), progress_bar.clone())
+        .upload_from_file(
+            path,
+            desired_size,
+            Some(&filename),
+            None,
+            progress_bar.clone(),
+        )
         .await
         .context(error::UploadSnapshotSnafu)
 }

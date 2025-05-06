@@ -21,7 +21,6 @@ allow = [
 
 exceptions = [
     { name = "webpki-roots", allow = ["MPL-2.0"], version = "*" },
-    { name = "unicode-ident", version = "1.0.4", allow = ["MIT", "Apache-2.0", "Unicode-DFS-2016"] },
 ]
 
 # https://github.com/hsivonen/encoding_rs The non-test code that isn't generated from the WHATWG data in this crate is
@@ -63,32 +62,13 @@ wildcards = "deny"
 skip = [
     # several dependencies are using multiple versions of base64
     { name = "base64" },
-    # several dependencies are using an old version of bitflags
-    { name = "bitflags", version = "=1.3" },
-    # guppy is still using an old version of getrandom
-    { name = "getrandom", version = "=0.2"},
-    # dependencies are using different versions of heck
-    { name = "heck", version = "=0.4" },
-    # dependencies are using different versions of http
-    { name = "http", version = "=0.2" },
-    # dependencies are using different versions of http-body
-    { name = "http-body", version = "=0.4" },
-    # due to the terminal-size rustix it also brings a conflict here
-    { name = "linux-raw-sys", version = "=0.4" },
-    # terminal_size brings in a newer version of rustix than tar
-    { name = "rustix", version = "=0.38" },
-    # multiple deps are using an older version of syn
-    { name = "syn", version = "1" },
-    # multiple deps are using an older version of wasi
-    { name = "wasi", version = "=0.11.0" }
 ]
 
 skip-tree = [
-    # windows-sys is not a direct dependency. mio and schannel
-    # are using different versions of windows-sys. we skip the
-    # dependency tree because windows-sys has many sub-crates
-    # that differ in major version.
-    { name = "windows-sys" },
+    # we are considering removing testsys from twoliter's source tree
+    # ignoring the dependency closure for now to ensure twoliter stays
+    # up-to-date
+    { name = "testsys" },
 ]
 
 [bans.workspace-dependencies]

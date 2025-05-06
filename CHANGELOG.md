@@ -7,12 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.0...HEAD
+
+## [0.10.0] - 2025-05-06
+
+### Added
+* Add `amispec` system for customizing AMI registration parameters ([#521], [#524])
+
+### Changed
+* Update rust dependencies ([#521], [#522], [#525])
+* Fix bug which could prevent pubsys from publishing SSM parameters in new regions ([#518])
+* Add more error context to pubsys output on failure ([#525])
+
 ### Build
 * Add integration test to verify application-inventory generation ([#522])
 
-[#522]: https://github.com/bottlerocket-os/twoliter/pull/521
+[#518]: https://github.com/bottlerocket-os/twoliter/pull/518
+[#521]: https://github.com/bottlerocket-os/twoliter/pull/521
+[#522]: https://github.com/bottlerocket-os/twoliter/pull/522
+[#524]: https://github.com/bottlerocket-os/twoliter/pull/524
+[#525]: https://github.com/bottlerocket-os/twoliter/pull/525
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.9.0...HEAD
+[0.10.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.9.0..v0.10.0
 
 ## [0.9.0] - 2025-04-16
 

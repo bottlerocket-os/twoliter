@@ -68,7 +68,7 @@ serde-templated-derive = { version = "0.1", path = "tools/serde-templated-derive
 testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
-twoliter = { version = "0.9.0", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter = { version = "0.10.0-rc1", path = "twoliter", artifact = [ "bin:twoliter" ] }
 unplug = { version = "0.1", path = "tools/unplug", artifact = [ "bin:unplug" ] }
 update-metadata = { version = "0.1", path = "tools/update-metadata" }
 
@@ -77,13 +77,13 @@ async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 async-walkdir = "1"
-aws-config = "1"
+aws-config = { version = "1", default-features = false, features = ["credentials-process", "default-https-client", "rt-tokio" ] }
 aws-credential-types = "1"
-aws-sdk-ebs = "1"
-aws-sdk-ec2 = "1"
-aws-sdk-kms = "1"
-aws-sdk-ssm = "1"
-aws-sdk-sts = "1"
+aws-sdk-ebs = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-ec2 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-kms = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-ssm = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-smithy-types = "1"
 aws-types = "1"
 base64 = "0.22"
@@ -92,7 +92,7 @@ bounded-integer = "0.5"
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
 clap = "4"
-coldsnap = { version = "0.6", default-features = false }
+coldsnap = { version = "0.7", default-features = false }
 daemonize = "0.5"
 darling = "0.20"
 duct = "0.13"
@@ -113,7 +113,7 @@ libc = "0.2"
 log = "0.4"
 lzma-rs = "0.3"
 maplit = "1"
-nix = "0.28"
+nix = "0.29"
 nonzero_ext = "0.3"
 num_cpus = "1"
 num-traits = "0.2"
@@ -123,7 +123,7 @@ proc-macro2 = "1"
 quote = "1"
 rand = { version = "0.8", default-features = false }
 regex = "1"
-reqwest = { version = "0.11", default-features = false }
+reqwest = { version = "0.12", default-features = false }
 seccompiler = "0.5"
 semver = "1"
 serde = "1"
@@ -146,11 +146,11 @@ tokio = "1"
 tokio-stream = "0.1"
 tokio-retry = "0.3"
 toml = "0.8"
-tough = "0.18"
-tough-kms = "0.10"
-tough-ssm = "0.13"
+tough = "0.21"
+tough-kms = "0.13"
+tough-ssm = "0.16"
 tracing = "0.1"
-tuftool = { version = "0.11.1", artifact = [ "bin:tuftool" ] }
+tuftool = { version = "0.14", artifact = [ "bin:tuftool" ] }
 uds = "0.4.1"
 unescape = "0.1"
 url = "2"
