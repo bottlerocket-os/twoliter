@@ -9,7 +9,7 @@ use crate::aws::{parse_arch, region_from_string};
 use crate::Args;
 use aws_sdk_ec2::types::ArchitectureValues;
 use aws_sdk_ssm::{config::Region, Client as SsmClient};
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use log::{info, trace};
 use pubsys_config::InfraConfig;
 use snafu::{ensure, ResultExt};
@@ -18,6 +18,11 @@ use std::path::PathBuf;
 
 /// Copies sets of SSM parameters
 #[derive(Debug, Parser)]
+#[command(group(
+    ArgGroup::new("dry_run_requirements")
+        .arg("dry_run")
+        .requires("ssm_parameter_output")
+))]
 pub(crate) struct PromoteArgs {
     /// The architecture of the machine image
     #[arg(long, value_parser = parse_arch)]
@@ -47,6 +52,10 @@ pub(crate) struct PromoteArgs {
     /// and where the newly promoted parameters will be written
     #[arg(long)]
     ssm_parameter_output: Option<PathBuf>,
+
+    /// If enabled, only parameter manifest will generated, and SSM will not promoted
+    #[arg(long)]
+    dry_run: bool,
 }
 
 /// Common entrypoint from main()
@@ -212,6 +221,12 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     // parameters
     if let Some(ssm_parameter_output) = &promote_args.ssm_parameter_output {
         append_rendered_parameters(ssm_parameter_output, &full_target_parameters).await?;
+    }
+
+    // Exit early if `--dry-run` is enabled
+    if promote_args.dry_run {
+        info!("Dry-run mode enabled: Exiting after writing parameter manifest.");
+        return Ok(());
     }
 
     // SSM set   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
