@@ -1560,7 +1560,8 @@ pubsys \
    --template-path "${PUBLISH_SSM_TEMPLATES_PATH}" \
    --ssm-parameter-output "${ssm_parameter_output}" \
    \
-   ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"}
+   ${PUBLISH_REGIONS:+--regions "${PUBLISH_REGIONS}"} \
+   ${PUBLISH_SSM_DRY_RUN:+--dry-run}
 '''
 ]
 
