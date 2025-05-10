@@ -20,7 +20,9 @@ members = [
     "tools/testsys-config",
     "tools/unplug",
     "tools/update-metadata",
+
     "twoliter",
+    "twoliter/src/tool-crates/*",
 
     "tests/integration-tests",
 ]
@@ -39,6 +41,7 @@ ci = ["github"]
 installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
+features = ["pubsys", "testsys"]
 
 [workspace.metadata.cross.build]
 pre-build = [
@@ -71,7 +74,17 @@ serde-templated-derive = { version = "0.1", path = "tools/serde-templated-derive
 testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
+
 twoliter = { version = "0.10.1", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter-tool-buildsys = { version = "0.1", path = "twoliter/src/tool-crates/buildsys" }
+twoliter-tool-embedded-bundle = { version = "0.1", path = "twoliter/src/tool-crates/embedded-bundle" }
+twoliter-tool-pipesys = { version = "0.1", path = "twoliter/src/tool-crates/pipesys" }
+twoliter-tool-pubsys = { version = "0.1", path = "twoliter/src/tool-crates/pubsys" }
+twoliter-tool-pubsys-setup = { version = "0.1", path = "twoliter/src/tool-crates/pubsys-setup" }
+twoliter-tool-testsys = { version = "0.1", path = "twoliter/src/tool-crates/testsys" }
+twoliter-tool-tuftool = { version = "0.1", path = "twoliter/src/tool-crates/tuftool" }
+twoliter-tool-unplug = { version = "0.1", path = "twoliter/src/tool-crates/unplug" }
+
 unplug = { version = "0.1", path = "tools/unplug", artifact = [ "bin:unplug" ] }
 update-metadata = { version = "0.1", path = "tools/update-metadata" }
 

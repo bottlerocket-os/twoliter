@@ -2,23 +2,13 @@ use crate::common::fs;
 use anyhow::{Context, Result};
 use filetime::{set_file_handle_times, set_file_mtime, FileTime};
 use flate2::read::ZlibDecoder;
-use krane_bundle::KRANE;
+use futures::future::try_join_all;
+use std::fs::OpenOptions;
+use std::io::{Read, Write as _};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use tar::Archive;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
-use tokio::runtime::Handle;
 use tracing::debug;
-
-const TAR_GZ_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tools.tar.gz"));
-const BUILDSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_BUILDSYS"));
-const PIPESYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_PIPESYS"));
-#[cfg(feature = "pubsys")]
-const PUBSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_PUBSYS"));
-const PUBSYS_SETUP: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_PUBSYS_SETUP"));
-const TESTSYS: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_TESTSYS"));
-const TUFTOOL: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_TUFTOOL"));
-const UNPLUG: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_UNPLUG"));
 
 /// Install tools into the given `tools_dir`. If you use a `TempDir` object, make sure to pass it by
 /// reference and hold on to it until you no longer need the tools to still be installed (it will
@@ -44,53 +34,103 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
         .context("Unable to get Dockerfile metadata")?;
     let mtime = FileTime::from_last_modification_time(&metadata);
 
-    write_bin("buildsys", BUILDSYS, &dir, mtime).await?;
-    write_bin("pipesys", PIPESYS, &dir, mtime).await?;
+    let mut write_tasks = vec![
+        write_bin(
+            "buildsys",
+            twoliter_tool_buildsys::BUILDSYS.reader(),
+            &dir,
+            mtime,
+        ),
+        write_bin(
+            "pipesys",
+            twoliter_tool_pipesys::PIPESYS.reader(),
+            &dir,
+            mtime,
+        ),
+        write_bin(
+            "tuftool",
+            twoliter_tool_tuftool::TUFTOOL.reader(),
+            &dir,
+            mtime,
+        ),
+        write_bin("unplug", twoliter_tool_unplug::UNPLUG.reader(), &dir, mtime),
+        write_bin("krane", krane_bundle::KRANE_BIN.reader(), &dir, mtime),
+    ];
+
     #[cfg(feature = "pubsys")]
-    write_bin("pubsys", PUBSYS, &dir, mtime).await?;
-    write_bin("pubsys-setup", PUBSYS_SETUP, &dir, mtime).await?;
-    write_bin("testsys", TESTSYS, &dir, mtime).await?;
-    write_bin("tuftool", TUFTOOL, &dir, mtime).await?;
-    write_bin("unplug", UNPLUG, &dir, mtime).await?;
-    fs::copy(KRANE.path(), dir.join("krane")).await?;
+    {
+        write_tasks.push(write_bin(
+            "pubsys-setup",
+            twoliter_tool_pubsys_setup::PUBSYS_SETUP.reader(),
+            &dir,
+            mtime,
+        ));
+        write_tasks.push(write_bin(
+            "pubsys",
+            twoliter_tool_pubsys::PUBSYS.reader(),
+            &dir,
+            mtime,
+        ));
+    }
+
+    #[cfg(feature = "testsys")]
+    write_tasks.push(write_bin(
+        "testsys",
+        twoliter_tool_testsys::TESTSYS.reader(),
+        &dir,
+        mtime,
+    ));
+
+    try_join_all(write_tasks.into_iter()).await?;
 
     // Apply the mtime to the directory now that the writes are done.
     set_file_mtime(dir, mtime).context(format!("Unable to set mtime for '{}'", dir.display()))?;
 
+    debug!("Finished installing tools");
+
     Ok(())
 }
 
-async fn write_bin(name: &str, data: &[u8], dir: impl AsRef<Path>, mtime: FileTime) -> Result<()> {
+async fn write_bin(
+    name: &str,
+    mut data: Box<dyn Read + Send + Sync + 'static>,
+    dir: impl AsRef<Path>,
+    mtime: FileTime,
+) -> Result<()> {
     let path = dir.as_ref().join(name);
-    let mut f = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .read(false)
-        .write(true)
-        .mode(0o755)
-        .open(&path)
-        .await
-        .context(format!("Unable to create file '{}'", path.display()))?;
-    f.write_all(data)
-        .await
-        .context(format!("Unable to write to '{}'", path.display()))?;
-    f.flush()
-        .await
-        .context(format!("Unable to finalize '{}'", path.display()))?;
 
-    let f = f.into_std().await;
-    let rt = Handle::current();
-    rt.spawn_blocking(move || {
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || {
+        let mut f = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .read(false)
+            .write(true)
+            .mode(0o755)
+            .open(&path)
+            .context(format!("Unable to create file '{}'", path.display()))?;
+
+        {
+            let mut writer = std::io::BufWriter::new(&mut f);
+            std::io::copy(&mut data, &mut writer).context(format!(
+                "Failed to decompress `{name}` to `{}`",
+                path.display()
+            ))?;
+        }
+
+        f.flush()
+            .context(format!("Unable to finalize '{}'", path.display()))?;
+
         set_file_handle_times(&f, None, Some(mtime))
-            .context(format!("Unable to set mtime for '{}'", path.display()))
+            .context(format!("Unable to set mtime for '{}'", path.display()))?;
+        Ok(())
     })
-    .await
-    .context("Unable to run and join async task for reading handle time".to_string())?
+    .await?
 }
 
 async fn unpack_tarball(tools_dir: impl AsRef<Path>) -> Result<()> {
     let tools_dir = tools_dir.as_ref();
-    let tar = ZlibDecoder::new(TAR_GZ_DATA);
+    let tar = ZlibDecoder::new(twoliter_tool_embedded_bundle::EMBEDDED_BUNDLE);
     let mut archive = Archive::new(tar);
     archive.unpack(tools_dir).context(format!(
         "Unable to unpack tarball into directory '{}'",

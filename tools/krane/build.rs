@@ -1,6 +1,5 @@
-use flate2::{read::GzDecoder, write::GzEncoder};
+use flate2::read::GzDecoder;
 use std::fs::File;
-use std::io::{self, prelude::*};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
@@ -53,32 +52,7 @@ fn main() {
         .status()
         .expect("Failed to build crane");
 
-    // compress krane
-    let krane_gz_path = out_dir.join("krane.gz");
-    let compressed_output_file =
-        File::create(&krane_gz_path).expect("Failed to crate krane.gz file");
-
-    let krane_binary = File::open(&build_output_loc).expect("Failed to open krane binary");
-    let mut reader = io::BufReader::new(&krane_binary);
-    let mut encoder = GzEncoder::new(&compressed_output_file, flate2::Compression::best());
-
-    let mut buffer = Vec::with_capacity(
-        krane_binary
-            .metadata()
-            .expect("Failed to get krane binary metadata")
-            .len() as usize,
-    );
-    reader
-        .read_to_end(&mut buffer)
-        .expect("Failed to read krane binary");
-    encoder
-        .write_all(&buffer)
-        .expect("Failed to write compressed krane binary");
-    encoder
-        .finish()
-        .expect("Failed to finish writing compressed krane binary");
-
-    println!("cargo::rustc-env=KRANE_GZ_PATH={}", krane_gz_path.display());
+    println!("cargo::rustc-env=KRANE_PATH={}", build_output_loc.display());
 }
 
 fn ensure_required_tools_installed() {

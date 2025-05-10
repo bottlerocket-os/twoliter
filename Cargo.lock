@@ -2360,6 +2360,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "flate2",
+ "include-env-compressed",
  "lazy_static",
  "tar",
  "tempfile",
@@ -4709,7 +4710,6 @@ dependencies = [
  "async-trait",
  "async-walkdir",
  "base64 0.22.1",
- "buildsys",
  "buildsys-config",
  "bytes",
  "clap",
@@ -4723,9 +4723,6 @@ dependencies = [
  "oci-cli-wrapper",
  "olpc-cjson",
  "path-absolutize",
- "pipesys",
- "pubsys",
- "pubsys-setup",
  "semver",
  "serde",
  "serde_json",
@@ -4734,14 +4731,85 @@ dependencies = [
  "tar",
  "tempfile",
  "test-case",
- "testsys",
  "tokio",
  "toml",
  "tracing",
- "tuftool",
- "unplug",
+ "twoliter-tool-buildsys",
+ "twoliter-tool-embedded-bundle",
+ "twoliter-tool-pipesys",
+ "twoliter-tool-pubsys",
+ "twoliter-tool-pubsys-setup",
+ "twoliter-tool-testsys",
+ "twoliter-tool-tuftool",
+ "twoliter-tool-unplug",
  "uuid",
  "which 6.0.3",
+ "zstd",
+]
+
+[[package]]
+name = "twoliter-tool-buildsys"
+version = "0.1.0"
+dependencies = [
+ "buildsys",
+ "include-env-compressed",
+]
+
+[[package]]
+name = "twoliter-tool-embedded-bundle"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "flate2",
+ "tar",
+]
+
+[[package]]
+name = "twoliter-tool-pipesys"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "pipesys",
+]
+
+[[package]]
+name = "twoliter-tool-pubsys"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "pubsys",
+]
+
+[[package]]
+name = "twoliter-tool-pubsys-setup"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "pubsys-setup",
+]
+
+[[package]]
+name = "twoliter-tool-testsys"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "testsys",
+]
+
+[[package]]
+name = "twoliter-tool-tuftool"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "tuftool",
+]
+
+[[package]]
+name = "twoliter-tool-unplug"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "unplug",
 ]
 
 [[package]]
