@@ -5,10 +5,13 @@ pub(crate) mod fetch_variant;
 pub(crate) mod refresh_repo;
 pub(crate) mod validate_repo;
 
+mod env_key_source;
+
 use crate::{friendly_version, read_stream, Args};
 use aws_sdk_kms::{config::Region, Client as KmsClient};
 use chrono::{DateTime, Utc};
 use clap::Parser;
+use env_key_source::EnvKeySource;
 use lazy_static::lazy_static;
 use log::{debug, info, trace, warn};
 use parse_datetime::parse_datetime;
@@ -428,6 +431,9 @@ fn get_signing_key_source(signing_key_config: &SigningKeyConfig) -> Result<Box<d
             profile: None,
             parameter_name: parameter.clone(),
             key_id: None,
+        })),
+        SigningKeyConfig::env { var_name } => Ok(Box::new(EnvKeySource {
+            var_name: var_name.clone(),
         })),
     }
 }

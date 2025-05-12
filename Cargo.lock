@@ -3013,6 +3013,7 @@ version = "0.1.0"
 dependencies = [
  "amispec",
  "async-stream",
+ "async-trait",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-ebs",

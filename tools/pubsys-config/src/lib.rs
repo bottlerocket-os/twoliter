@@ -163,6 +163,9 @@ pub enum SigningKeyConfig {
     ssm {
         parameter: String,
     },
+    env {
+        var_name: String,
+    },
 }
 
 /// AWS region-specific configuration
@@ -201,6 +204,9 @@ impl TryFrom<SigningKeyConfig> for Url {
                     format!("/{}", parameter)
                 };
                 Url::parse(&format!("aws-ssm://{}", parameter)).map_err(|_| ())
+            }
+            SigningKeyConfig::env { var_name } => {
+                Url::parse(&format!("env://{}", var_name)).map_err(|_| ())
             }
         }
     }
