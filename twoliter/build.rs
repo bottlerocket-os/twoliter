@@ -14,8 +14,6 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::{env, fs};
 
-const DATA_INPUT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded");
-
 fn main() {
     let paths = Paths::new();
     println!("cargo:rerun-if-changed={}", paths.data_input_dir.display());
@@ -79,11 +77,13 @@ impl Paths {
     fn new() -> Self {
         // This is the directory that cargo creates for us so that we can pass things from the build
         // script to the main compilation phase.
+        let cargo_manifest_dir =
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("The cargo variable 'CARGO_MANIFEST_DIR' is missing"));
         let out_dir =
             PathBuf::from(env::var("OUT_DIR").expect("The cargo variable 'OUT_DIR' is missing"));
 
         Self {
-            data_input_dir: PathBuf::from(DATA_INPUT_DIR),
+            data_input_dir: cargo_manifest_dir.join("embedded"),
             prep_dir: out_dir.join("tools"),
             tar_gz: out_dir.join("tools.tar.gz"),
         }
