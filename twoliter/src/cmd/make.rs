@@ -54,7 +54,7 @@ pub(crate) struct Make {
 impl Make {
     pub(super) async fn run(&self) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
-        let sdk_source = self.locked_sdk(&project).await?;
+        let sdk_source = self.lock_and_fetch(&project).await?;
         let toolsdir = project.project_dir().join("build/tools");
         install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
@@ -77,11 +77,15 @@ impl Make {
     }
 
     /// Returns the locked SDK image for the project.
-    async fn locked_sdk(&self, project: &project::Project<Unlocked>) -> Result<String> {
+    ///
+    /// Fetches kits if needed.
+    async fn lock_and_fetch(&self, project: &project::Project<Unlocked>) -> Result<String> {
         Ok(if self.can_skip_kit_verification(project) {
             project.load_lock::<SDKLocked>().await?.sdk_image()
         } else {
-            project.load_lock::<Locked>().await?.sdk_image()
+            let project = project.load_lock::<Locked>().await?;
+            project.fetch(self.arch.as_str()).await?;
+            project.sdk_image()
         }
         .project_image_uri()
         .to_string())
