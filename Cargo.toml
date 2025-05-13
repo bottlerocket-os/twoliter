@@ -25,8 +25,7 @@ members = [
 
 [profile.release]
 strip = "debuginfo"
-codegen-units = 1
-lto = true
+lto = "thin"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]
@@ -161,7 +160,8 @@ which = "6"
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
-lto = "thin"
+lto = "fat"
+codegen-units = 1
 
 [workspace.lints.clippy]
 disallowed-methods = "deny"
