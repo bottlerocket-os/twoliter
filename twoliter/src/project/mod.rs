@@ -86,12 +86,8 @@ impl Project<Unlocked> {
         ))?;
         let project = unvalidated.validate(path).await?;
 
-        // When projects are resolved, tags are written indicating which artifacts have been checked
-        // against the lockfile.
-        // We clean these up as early as possible to avoid situations in which artifacts are
-        // incorrectly flagged as having been resolved.
-        VerificationTagger::cleanup_existing_tags(project.external_kits_dir()).await?;
-
+        // No cleanup of verification tags needed here - will be handled properly in load_lock
+        // when write_tags is called
         Ok(project)
     }
 
@@ -130,8 +126,7 @@ impl Project<Unlocked> {
     }
 
     pub(crate) async fn load_lock<NL: ProjectLock>(&self) -> Result<Project<NL>> {
-        VerificationTagger::cleanup_existing_tags(self.external_kits_dir()).await?;
-
+        // No need to remove tags first as write_tags will handle existing tags properly
         let resolved_lock = NL::load_lock(self, private::SealToken).await?;
 
         resolved_lock

@@ -4689,6 +4689,7 @@ dependencies = [
  "bytes",
  "clap",
  "env_logger",
+ "fastrand",
  "filetime",
  "flate2",
  "futures",
