@@ -77,8 +77,10 @@ impl Paths {
     fn new() -> Self {
         // This is the directory that cargo creates for us so that we can pass things from the build
         // script to the main compilation phase.
-        let cargo_manifest_dir =
-            PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("The cargo variable 'CARGO_MANIFEST_DIR' is missing"));
+        let cargo_manifest_dir = PathBuf::from(
+            env::var("CARGO_MANIFEST_DIR")
+                .expect("The cargo variable 'CARGO_MANIFEST_DIR' is missing"),
+        );
         let out_dir =
             PathBuf::from(env::var("OUT_DIR").expect("The cargo variable 'OUT_DIR' is missing"));
 
