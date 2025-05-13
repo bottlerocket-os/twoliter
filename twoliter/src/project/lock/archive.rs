@@ -1,11 +1,14 @@
 use super::views::{IndexView, ManifestLayoutView};
 use crate::common::fs::{create_dir_all, read, read_to_string, remove_dir_all, write};
 use anyhow::{Context, Result};
+use futures::TryStreamExt;
 use oci_cli_wrapper::ImageTool;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tar::Archive as TarArchive;
 use tracing::{debug, instrument, trace};
+
+const CONCURRENT_LAYER_EXTRACTIONS: usize = 4;
 
 #[derive(Debug)]
 pub(crate) struct OCIArchive {
@@ -64,7 +67,7 @@ impl OCIArchive {
     where
         P: AsRef<Path>,
     {
-        let path = out_dir.as_ref();
+        let path = out_dir.as_ref().to_path_buf();
         let digest_file = path.join("digest");
         let digest_uri = self.uri();
         if digest_file.exists() {
@@ -83,8 +86,8 @@ impl OCIArchive {
         }
 
         debug!("Unpacking layers for image from '{}'", digest_uri);
-        remove_dir_all(path).await?;
-        create_dir_all(path).await?;
+        remove_dir_all(&path).await?;
+        create_dir_all(&path).await?;
         let index_bytes = read(self.archive_path().join("index.json")).await?;
         let index: IndexView = serde_json::from_slice(index_bytes.as_slice())
             .context("failed to deserialize oci image index")?;
@@ -105,21 +108,44 @@ impl OCIArchive {
 
         // Extract each layer into the target directory
         trace!(from = %digest_uri, "Extracting image layers");
-        for layer in manifest_layout.layers {
-            let digest = layer.digest.to_string().replace(':', "/");
-            let layer_blob = File::open(self.archive_path().join(format!("blobs/{digest}")))
-                .context("failed to read layer of oci image")?;
-            let mut layer_archive = TarArchive::new(layer_blob);
-            layer_archive
-                .unpack(path)
-                .context("failed to unpack layer to disk")?;
-        }
-        write(&digest_file, self.digest.as_str())
-            .await
-            .context(format!(
-                "failed to record digest to {}",
-                digest_file.display()
-            ))?;
+        let layer_unpack_stream =
+            futures::stream::iter(manifest_layout.layers.iter().map(|layer| {
+                let digest = layer.digest.to_string().replace(':', "/");
+                let archive_path = self.archive_path().join(format!("blobs/{digest}"));
+                let dest_path = path.clone();
+                Ok(async {
+                    tokio::task::spawn_blocking(move || {
+                        let layer_blob = File::open(archive_path)
+                            .context("failed to read layer of oci image")?;
+                        let mut layer_archive = TarArchive::new(layer_blob);
+                        layer_archive
+                            .unpack(dest_path)
+                            .context("failed to unpack layer to disk")?;
+
+                        Result::<_, anyhow::Error>::Ok(())
+                    })
+                    .await
+                    .context("Faild to join layer extraction task")
+                    .and_then(std::convert::identity)
+                })
+            }))
+            .try_buffer_unordered(CONCURRENT_LAYER_EXTRACTIONS)
+            .try_collect::<Vec<_>>();
+
+        let digest_write_task = async {
+            write(&digest_file, self.digest.as_str())
+                .await
+                .context(format!(
+                    "failed to record digest to {}",
+                    digest_file.display()
+                ))?;
+            Ok(())
+        };
+
+        tokio::try_join! {
+            layer_unpack_stream,
+            digest_write_task,
+        }?;
 
         Ok(())
     }
