@@ -998,6 +998,11 @@ run_cargo_deny="
 (cd /tmp/sources && cargo deny --all-features check --disable-fetch licenses bans sources)
 "
 set +e
+exec 9<>.cargo/vendor.lock
+if ! flock -w 90 9; then
+    echo "failed to obtain lock" >&2
+    exit 1
+fi
 docker run --rm \
   --network=none \
   --user "$(id -u):$(id -g)" \
