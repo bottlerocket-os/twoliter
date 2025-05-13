@@ -80,36 +80,77 @@ pub(crate) fn create_amispec(
     ami_args: &AmiArgs,
     bottlerocket_snapshots: Option<&BottlerocketSnapshots>,
 ) -> Result<AmiSpec> {
-    use amispec_error::*;
-
-    let mut amispec_template_toml = default_amispec_template(
+    let amispec_template_toml = default_amispec_template(
         &ami_args.variant_manifest,
         bottlerocket_snapshots,
-        &ami_args.uefi_data,
+        ami_args.uefi_data.as_ref().map(|s| s.as_str()),
     )?;
-
-    if let Some(user_amispec_template) = &ami_args.amispec_file {
-        info!("Merging user-defined amispec template for AMI properties");
-        amispec_template_toml.merge(user_amispec_template);
-    } else {
-        info!("Using default amispec for AMI properties");
-    }
-
-    debug!("Creating amispec with template:\n{amispec_template_toml}");
-    let amispec_template: TemplatedAmiSpec = amispec_template_toml
-        .try_into()
-        .context(ParseAmiSpecTemplateSnafu)?;
 
     let render_context = AmispecRenderContext::from_ami_args(ami_args, bottlerocket_snapshots)?;
     debug!("Creating amispec with render context:\n{render_context:#?}",);
 
-    let mut amispec = amispec_template
-        .render(&render_context)
-        .context(RenderAmiSpecSnafu)?;
+    let mut amispec = create_amispec_from_base(amispec_template_toml, &render_context, ami_args)?;
 
     ensure_amispec_volume_sizes(&mut amispec, &render_context.block_devices)?;
 
     Ok(amispec)
+}
+
+fn create_amispec_from_base(
+    mut base_amispec_template: toml::Table,
+    render_context: &AmispecRenderContext,
+    ami_args: &AmiArgs,
+) -> Result<AmiSpec> {
+    use amispec_error::*;
+
+    if let Some(user_amispec_template) = &ami_args.amispec_file {
+        info!("Merging user-defined amispec template for AMI properties");
+        base_amispec_template.merge(user_amispec_template);
+    } else {
+        info!("Using default amispec for AMI properties");
+    }
+
+    debug!("Creating amispec with template:\n{base_amispec_template}");
+    let amispec_template: TemplatedAmiSpec = base_amispec_template
+        .try_into()
+        .context(ParseAmiSpecTemplateSnafu)?;
+
+    amispec_template
+        .render(&render_context)
+        .context(RenderAmiSpecSnafu)
+}
+
+/// A partial rendered AmiSpec
+///
+/// Useful for determining the desired name, description, and architecture of an AMI prior to the
+/// creation of EBS snapshots.
+pub(crate) struct MinimalAmiSpec {
+    pub name: String,
+    pub description: Option<String>,
+    pub architecture: Option<amispec::Architecture>,
+}
+
+impl From<AmiSpec> for MinimalAmiSpec {
+    fn from(amispec: AmiSpec) -> Self {
+        let AmiSpec {
+            name,
+            description,
+            architecture,
+            ..
+        } = amispec;
+
+        Self {
+            name,
+            description,
+            architecture,
+        }
+    }
+}
+
+pub(crate) fn create_minimal_amispec(ami_args: &AmiArgs) -> Result<MinimalAmiSpec> {
+    let render_context = AmispecRenderContext::from_ami_args(ami_args, None)?;
+    create_amispec_from_base(DEFAULT_AMISPEC_TEMPLATE.clone(), &render_context, ami_args)
+        .map(Into::into)
 }
 
 /// Configure's the volume sizes for an AmiSpec based on a desired block device layout.
@@ -185,8 +226,10 @@ fn ensure_amispec_volume_sizes(
 fn default_amispec_template(
     variant_manifest: &VariantManifest,
     bottlerocket_snapshots: Option<&BottlerocketSnapshots>,
-    uefi_data: &str,
+    uefi_data: Option<&str>,
 ) -> Result<toml::Table> {
+    use amispec_error::*;
+
     let mut amispec_template = DEFAULT_AMISPEC_TEMPLATE.clone();
     let mut block_device_mappings = toml::Table::new();
 
@@ -213,7 +256,10 @@ fn default_amispec_template(
         .any(|f| *f == ImageFeature::UefiSecureBoot)
     {
         amispec_template.insert("boot-mode".into(), "uefi-preferred".into());
-        amispec_template.insert("uefi-data".into(), uefi_data.into());
+        amispec_template.insert(
+            "uefi-data".into(),
+            uefi_data.context(MissingUefiDataSnafu)?.into(),
+        );
     }
 
     Ok(amispec_template)
@@ -331,6 +377,11 @@ pub(crate) enum AmispecError {
     MissingImageLayout {
         variant_manifest: Box<VariantManifest>,
     },
+
+    #[snafu(display(
+        "No uefi-data provided. Cannot register 'uefi-secure-boot' without uefi-data."
+    ))]
+    MissingUefiData,
 
     #[snafu(display("Failed to parse AMI spec template: {}", source))]
     ParseAmiSpecTemplate { source: toml::de::Error },
@@ -482,7 +533,7 @@ mod test {
                     uefi-secure-boot = true
                 }.try_into().unwrap(),
             ),
-            uefi_data: "uefi-data!".to_string().into(),
+            uefi_data: Some("uefi-data!".to_string().into()),
             arch: "x86_64".into(),
             name: "test-ami".into(),
             description: Some("test description".into()),
@@ -553,7 +604,7 @@ mod test {
                     partition-plan = "unified"
                 }.try_into().unwrap(),
             ),
-            uefi_data: "uefi-data!".to_string().into(),
+            uefi_data: Some("uefi-data!".to_string().into()),
             arch: "x86_64".into(),
             name: "test-ami".into(),
             description: Some("test description".into()),
@@ -802,7 +853,7 @@ mod test {
         let actual_template = default_amispec_template(
             &VariantManifest::new(variant_manifest),
             Some(&bottlerocket_snapshots),
-            uefi_data,
+            Some(uefi_data),
         )
         .unwrap();
 

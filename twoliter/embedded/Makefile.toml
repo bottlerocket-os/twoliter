@@ -1311,13 +1311,17 @@ if [ "${is_split}" == "yes" ] ; then
 fi
 
 if [ -s "${BUILDSYS_AMISPEC_TEMPLATE}" ]; then
-   AMISPEC_EXISTS=1
+   amispec_exists=1
 fi
 
 ami_output="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-${AMI_DATA_FILE_SUFFIX}"
 ami_output_latest="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_VARIANT}-${AMI_DATA_FILE_SUFFIX}"
 
 ami_name="${PUBLISH_AMI_NAME:-${PUBLISH_AMI_NAME_DEFAULT}}"
+
+if [ -s "${BUILDSYS_SBKEYS_PROFILE_DIR}/efi-vars.aws" ]; then
+   has_uefi_data=1
+fi
 
 pubsys \
    --log-level "${PUBLISH_LOG_LEVEL}" \
@@ -1329,11 +1333,11 @@ pubsys \
    "${data_volume_args[@]}" \
    \
    --variant-manifest "${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/Cargo.toml" \
-   --uefi-data "${BUILDSYS_SBKEYS_PROFILE_DIR}/efi-vars.aws" \
+   ${has_uefi_data:+--uefi-data "${BUILDSYS_SBKEYS_PROFILE_DIR}/efi-vars.aws"} \
    --arch "${BUILDSYS_ARCH}" \
    --name "${ami_name}" \
    --description "${PUBLISH_AMI_DESCRIPTION:-${ami_name}}" \
-   ${AMISPEC_EXISTS:+--amispec-file "${BUILDSYS_AMISPEC_TEMPLATE}"} \
+   ${amispec_exists:+--amispec-file "${BUILDSYS_AMISPEC_TEMPLATE}"} \
    \
    --ami-output "${ami_output}" \
    \
