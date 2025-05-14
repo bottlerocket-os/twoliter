@@ -1,0 +1,19 @@
+[package]
+name = "include-env-compressed-macro"
+version = "0.1.0"
+authors = ["Sean P. Kelly <seankell@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+snafu.workspace = true
+syn = { workspace = true, features = ["full"] }
+zstd.workspace = true
+
+[lints]
+workspace = true

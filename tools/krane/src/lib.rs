@@ -1,12 +1,12 @@
 use anyhow::Result;
-use flate2::read::GzDecoder;
+use include_env_compressed::{include_archive_from_env, Archive};
 use std::fs::{File, Permissions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-const COMPRESSED_KRANE_BIN: &[u8] = include_bytes!(env!("KRANE_GZ_PATH"));
+pub const KRANE_BIN: Archive = include_archive_from_env!("KRANE_PATH");
 
 lazy_static::lazy_static! {
     pub static ref KRANE: Krane = Krane::seal().unwrap();
@@ -28,7 +28,7 @@ impl Krane {
         let permissions = Permissions::from_mode(0o755);
         krane_file.set_permissions(permissions)?;
 
-        let mut krane_reader = GzDecoder::new(COMPRESSED_KRANE_BIN);
+        let mut krane_reader = KRANE_BIN.reader();
 
         std::io::copy(&mut krane_reader, &mut krane_file)?;
 
