@@ -55,7 +55,7 @@ pub(crate) struct AmiArgs {
 
     /// Path to the UEFI data
     #[arg(short = 'e', long, value_parser = parse_uefi_data)]
-    uefi_data: FromPath<String>,
+    uefi_data: Option<FromPath<String>>,
 
     /// The architecture of the machine image
     #[arg(short = 'a', long)]
@@ -144,7 +144,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     // This is used to determine the desired name and architecture, so that we can see if our AMI
     // already exists.
     let tentative_amispec =
-        mk_amispec::create_amispec(ami_args, None).context(error::AmispecSnafu)?;
+        mk_amispec::create_minimal_amispec(ami_args).context(error::AmispecSnafu)?;
 
     let arch = tentative_amispec
         .architecture
