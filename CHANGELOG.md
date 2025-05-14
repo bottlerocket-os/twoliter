@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...HEAD
+
+## [0.10.1] - 2025-05-14
+
+### Fixed
+* Fix a bug which could prevent pubsys from copying existing AMIs when a secureboot profile is not present in the workspace ([#534])
+
+### Added
+* Add a `--dry-run` mode to `pubsys promote-ssm` ([#529])
+
+[#529]: https://github.com/bottlerocket-os/twoliter/pull/529
+[#534]: https://github.com/bottlerocket-os/twoliter/pull/534
+
+[0.10.1]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.0..v0.10.1
 
 ## [0.10.0] - 2025-05-06
 
