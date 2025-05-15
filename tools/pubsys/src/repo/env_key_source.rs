@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use log::{debug,warn};
+use log::{debug, warn};
 use snafu::Snafu;
 use std::env;
 use tough::key_source::KeySource;
