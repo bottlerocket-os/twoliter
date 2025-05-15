@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 amispec.workspace = true
 async-stream.workspace = true
+async-trait.workspace = true
 aws-config.workspace = true
 aws-credential-types.workspace = true
 aws-sdk-ebs.workspace = true
