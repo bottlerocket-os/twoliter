@@ -821,6 +821,23 @@ fn secrets_args() -> Result<Vec<String>> {
         );
     }
 
+    // Add environment variables for secure boot signing keys, mapping them to the
+    // corresponding file names that the local profile expects
+    let env_to_file_map = [
+        ("BUILDSYS_SBKEY_SHIM_SIGN_KEY_CONTENT", "shim-sign.key"),
+        ("BUILDSYS_SBKEY_CODE_SIGN_KEY_CONTENT", "code-sign.key"),
+        ("BUILDSYS_SBKEY_CONFIG_SIGN_KEY_CONTENT", "config-sign.key"),
+    ];
+
+    for (env_var, file_name) in env_to_file_map {
+        if let Ok(content) = env::var(env_var) {
+            if !content.is_empty() {
+                // Only add this secret if the environment variable is set and not empty
+                args.build_secret("env", file_name, env_var);
+            }
+        }
+    }
+
     let ca_bundle_var = "BUILDSYS_CACERTS_BUNDLE_OVERRIDE";
     let ca_bundle_value =
         env::var(ca_bundle_var).context(error::EnvironmentSnafu { var: ca_bundle_var })?;
