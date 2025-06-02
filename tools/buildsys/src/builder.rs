@@ -824,9 +824,9 @@ fn secrets_args() -> Result<Vec<String>> {
     // Add environment variables for secure boot signing keys, mapping them to the
     // corresponding file names that the local profile expects
     let env_to_file_map = [
-        ("BUILDSYS_SBKEY_SHIM_SIGN_KEY_CONTENT", "shim-sign.key"),
-        ("BUILDSYS_SBKEY_CODE_SIGN_KEY_CONTENT", "code-sign.key"),
-        ("BUILDSYS_SBKEY_CONFIG_SIGN_KEY_CONTENT", "config-sign.key"),
+        ("BUILDSYS_SBKEYS_SHIM_SIGN_KEY_CONTENT", "shim-sign.key"),
+        ("BUILDSYS_SBKEYS_CODE_SIGN_KEY_CONTENT", "code-sign.key"),
+        ("BUILDSYS_SBKEYS_CONFIG_SIGN_KEY_CONTENT", "config-sign.key"),
     ];
 
     for (env_var, file_name) in env_to_file_map {
