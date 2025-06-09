@@ -303,11 +303,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-lc-fips-sys"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e99d74bb793a19f542ae870a6edafbc5ecf0bc0ba01d4636b7f7e0aba9ee9bd3"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+ "regex",
+]
+
+[[package]]
 name = "aws-lc-rs"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b756939cb2f8dc900aa6dcd505e6e2428e9cae7ff7b028c49e3946efa70878"
 dependencies = [
+ "aws-lc-fips-sys",
  "aws-lc-sys",
  "untrusted 0.7.1",
  "zeroize",
@@ -530,17 +545,12 @@ dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "h2 0.4.10",
- "http 0.2.12",
+ "h2",
  "http 1.3.1",
- "http-body 0.4.6",
- "hyper 0.14.32",
  "hyper 1.6.0",
- "hyper-rustls 0.24.2",
  "hyper-rustls 0.27.5",
  "hyper-util",
  "pin-project-lite",
- "rustls 0.21.12",
  "rustls 0.23.27",
  "rustls-native-certs 0.8.1",
  "rustls-pki-types",
@@ -782,9 +792,10 @@ dependencies = [
 
 [[package]]
 name = "bottlerocket-types"
-version = "0.0.16"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.16#56aecbaf0d2c6229d035fc02af7ce5701abdc940"
+version = "0.0.17"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.17#b5ef413d07f54281590faf0a136a417269126b47"
 dependencies = [
+ "aws-lc-rs",
  "aws-sdk-ec2",
  "builder-derive",
  "configuration-derive",
@@ -838,8 +849,8 @@ dependencies = [
 
 [[package]]
 name = "builder-derive"
-version = "0.0.16"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.16#56aecbaf0d2c6229d035fc02af7ce5701abdc940"
+version = "0.0.17"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.17#b5ef413d07f54281590faf0a136a417269126b47"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1104,8 +1115,8 @@ dependencies = [
 
 [[package]]
 name = "configuration-derive"
-version = "0.0.16"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.16#56aecbaf0d2c6229d035fc02af7ce5701abdc940"
+version = "0.0.17"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.17#b5ef413d07f54281590faf0a136a417269126b47"
 dependencies = [
  "quote",
  "syn 2.0.101",
@@ -1694,25 +1705,6 @@ checksum = "92620684d99f750bae383ecb3be3748142d6095760afd5cbcf2261e9a279d780"
 
 [[package]]
 name = "h2"
-version = "0.3.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81fe527a889e1532da5c525686d96d4c2e74cdd345badf8dfef9f6b39dd5f5e8"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http 0.2.12",
- "indexmap",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "h2"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9421a676d1b147b16b82c9225157dc629087ef8ec4d5e2960f9437a90dac0a5"
@@ -1882,7 +1874,6 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
  "httparse",
@@ -1905,7 +1896,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "h2 0.4.10",
+ "h2",
  "http 1.3.1",
  "http-body 1.0.1",
  "httparse",
@@ -4192,8 +4183,8 @@ dependencies = [
 
 [[package]]
 name = "testsys-model"
-version = "0.0.16"
-source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.16#56aecbaf0d2c6229d035fc02af7ce5701abdc940"
+version = "0.0.17"
+source = "git+https://github.com/bottlerocket-os/bottlerocket-test-system?tag=v0.0.17#b5ef413d07f54281590faf0a136a417269126b47"
 dependencies = [
  "async-recursion",
  "async-trait",
