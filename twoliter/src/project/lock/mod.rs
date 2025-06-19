@@ -15,7 +15,7 @@ mod views;
 pub(crate) use self::verification::VerificationTagger;
 
 use crate::common::fs::{create_dir_all, read, write};
-use crate::project::{Project, ValidIdentifier};
+use crate::project::{Project, ProjectImage, ValidIdentifier};
 use crate::schema_version::SchemaVersion;
 use anyhow::{bail, ensure, Context, Result};
 use image::{ImageResolver, LockedImage};
@@ -33,6 +33,15 @@ use tracing::{debug, error, info, instrument};
 use super::{Locked, ProjectLock, Unlocked};
 
 const TWOLITER_LOCK: &str = "Twoliter.lock";
+
+/// Holds the results of kit dependency resolution
+#[derive(Debug)]
+struct ResolvedKits {
+    /// The resolved kit images
+    locked_images: Vec<LockedImage>,
+    /// The set of SDK dependencies found during resolution
+    sdk_set: HashSet<ProjectImage>,
+}
 
 #[derive(Serialize, Debug)]
 struct ExternalKitMetadata {
@@ -66,26 +75,31 @@ impl LockedSDK {
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
         info!("Resolving SDK project reference to check against lock file");
 
+        // Get the current lock state
         let current_lock = Lock::current_lock_state(project).await?;
-        let resolved_lock = Self::resolve_sdk(project)
+
+        // Resolve the current SDK
+        let resolved_sdk = Self::resolve_sdk(project)
             .await?
-            .context("Project does not have explicit SDK image.")?;
+            .context("project does not have explicit SDK image")?;
 
         debug!(
             current_sdk=?current_lock.sdk,
-            resolved_sdk=?resolved_lock,
+            resolved_sdk=?resolved_sdk,
             "Comparing resolved SDK to current lock state"
         );
-        if &current_lock.sdk != resolved_lock.as_ref() {
+
+        // Verify the resolved SDK matches the locked SDK
+        if &current_lock.sdk != resolved_sdk.as_ref() {
             error!(
                 current_sdk=?current_lock.sdk,
-                resolved_sdk=?resolved_lock,
+                resolved_sdk=?resolved_sdk,
                 "Locked SDK does not match resolved SDK",
             );
-            bail!("Changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
+            bail!("changes have occurred to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
         }
 
-        Ok(resolved_lock)
+        Ok(resolved_sdk)
     }
 
     /// Creates a project lock referring to only the resolved SDK image from the project.
@@ -139,13 +153,21 @@ impl Lock {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
 
         info!("Resolving project references to create lock file");
+
+        // Resolve all dependencies
         let lock_state = Self::resolve(project).await?;
+
+        // Serialize the lock file
         let lock_str = toml::to_string(&lock_state).context("failed to serialize lock file")?;
 
         debug!("Writing new lock file to '{}'", lock_file_path.display());
-        write(&lock_file_path, lock_str)
-            .await
-            .context("failed to write lock file")?;
+
+        // Write the lock file
+        write(&lock_file_path, lock_str).await.context(format!(
+            "failed to write lock file: {}",
+            lock_file_path.display()
+        ))?;
+
         Ok(lock_state)
     }
 
@@ -157,39 +179,50 @@ impl Lock {
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
         info!("Resolving project references to check against lock file");
 
+        // Get the current lock state from the file
         let current_lock = Self::current_lock_state(project).await?;
+
+        // Resolve the current dependencies
         let resolved_lock = Self::resolve(project).await?;
 
         debug!(
-            current_lock=?current_lock,
-            resolved_lock=?resolved_lock,
+            ?current_lock,
+            ?resolved_lock,
             "Comparing resolved lock to current lock state"
         );
+
+        // Verify the resolved dependencies match the locked dependencies
         if current_lock != resolved_lock {
             error!(
-                current_lock=?current_lock,
-                resolved_lock=?resolved_lock,
+                ?current_lock,
+                ?resolved_lock,
                 "Locked dependencies do not match resolved dependencies"
             );
-            bail!("changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
+            bail!("changes have occurred to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
         }
 
         Ok(resolved_lock)
     }
 
     /// Returns the state of the lockfile for the given `Project`
+    #[instrument(level = "trace", skip(project))]
     async fn current_lock_state<L: ProjectLock>(project: &Project<L>) -> Result<Self> {
         let lock_file_path = project.project_dir().join(TWOLITER_LOCK);
+
         ensure!(
             lock_file_path.exists(),
             "Twoliter.lock does not exist, please run `twoliter update` first"
         );
+
         debug!("Loading existing lockfile '{}'", lock_file_path.display());
-        let lock_str = read_to_string(&lock_file_path)
-            .await
-            .context("failed to read lockfile")?;
-        let lock: Self =
-            toml::from_str(lock_str.as_str()).context("failed to deserialize lockfile")?;
+
+        let lock_str = read_to_string(&lock_file_path).await.context(format!(
+            "failed to read lockfile: {}",
+            lock_file_path.display()
+        ))?;
+
+        let lock: Self = toml::from_str(&lock_str).context("failed to deserialize lockfile")?;
+
         Ok(lock)
     }
 
@@ -205,81 +238,114 @@ impl Lock {
     pub(crate) async fn fetch(&self, project: &Project<Locked>, arch: &str) -> Result<()> {
         let image_tool = ImageTool::from_builtin_krane();
         let target_dir = project.external_kits_dir();
+
+        // Create the target directory
         create_dir_all(&target_dir).await.context(format!(
             "failed to create external-kits directory at {}",
             target_dir.display()
         ))?;
 
-        info!(
-            dependencies = ?self.kit.iter().map(ToString::to_string).collect::<Vec<_>>(),
-            "Extracting kit dependencies."
-        );
-        for image in self.kit.iter() {
+        // Log the dependencies we're about to extract
+        let kit_names: Vec<_> = self.kit.iter().map(ToString::to_string).collect();
+        info!(dependencies = ?kit_names, "Extracting kit dependencies");
+
+        // Extract each kit dependency
+        for image in &self.kit {
             let image = project.as_project_image(image)?;
             let resolver = ImageResolver::from_image(&image)?;
+
             resolver
                 .extract(&image_tool, &project.external_kits_dir(), arch)
                 .await?;
         }
 
+        // Update metadata file
         self.synchronize_metadata(project).await
     }
 
     pub(crate) async fn synchronize_metadata(&self, project: &Project<Locked>) -> Result<()> {
+        // Serialize the metadata to canonical JSON
         let mut kit_list = Vec::new();
         let mut ser =
             serde_json::Serializer::with_formatter(&mut kit_list, CanonicalJsonFormatter::new());
+
         self.external_kit_metadata()
             .serialize(&mut ser)
             .context("failed to serialize external kit metadata")?;
-        // Compare the output of the serialize if the file exists
+
+        // Get the path to the metadata file
         let external_metadata_file = project.external_kits_metadata();
+
+        // Check if the file exists and compare contents
         if external_metadata_file.exists() {
             let existing = read(&external_metadata_file).await.context(format!(
                 "failed to read external kit metadata: {}",
                 external_metadata_file.display()
             ))?;
-            // If this is the same as what we generated skip the write
+
+            // Skip writing if the content is the same
             if existing == kit_list {
                 return Ok(());
             }
         }
-        write(project.external_kits_metadata(), kit_list.as_slice())
+
+        // Write the updated metadata
+        write(project.external_kits_metadata(), &kit_list)
             .await
             .context(format!(
                 "failed to write external kit metadata: {}",
                 project.external_kits_metadata().display()
             ))?;
+
         Ok(())
     }
 
     #[instrument(level = "trace", skip(project))]
     async fn resolve(project: &Project<Unlocked>) -> Result<Self> {
-        let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
-        let mut locked: Vec<LockedImage> = Vec::new();
+        // Create a resolver for kit dependencies
         let image_tool = ImageTool::from_builtin_krane();
+        let resolved_kits = Self::resolve_kit_dependencies(project, &image_tool).await?;
+        let sdk = Self::resolve_sdk_dependency(project, &resolved_kits, &image_tool).await?;
+
+        Ok(Self {
+            schema_version: project.schema_version(),
+            kit: resolved_kits.locked_images,
+            sdk,
+        })
+    }
+
+    /// Resolves all kit dependencies, including transitive dependencies
+    #[instrument(level = "trace", skip(project, image_tool))]
+    async fn resolve_kit_dependencies(
+        project: &Project<Unlocked>,
+        image_tool: &ImageTool,
+    ) -> Result<ResolvedKits> {
+        let mut known: HashMap<(ValidIdentifier, ValidIdentifier), Version> = HashMap::new();
+        let mut locked_images: Vec<LockedImage> = Vec::new();
+        let mut sdk_set: HashSet<ProjectImage> = HashSet::new();
         let mut remaining = project.direct_kit_deps()?;
 
-        let mut sdk_set = HashSet::new();
+        // Add direct SDK dependency if it exists
         if let Some(sdk) = project.direct_sdk_image_dep() {
-            // We don't scan over the sdk images as they are not kit images and there is no kit metadata to fetch
             sdk_set.insert(sdk?.clone());
         }
+
+        // Process dependencies until no more remain
         while !remaining.is_empty() {
-            let working_set: Vec<_> = take(&mut remaining);
-            for image in working_set.iter() {
-                debug!(%image, "Resolving kit '{}'", image.name());
-                if let Some(version) =
-                    known.get(&(image.name().clone(), image.vendor_name().clone()))
-                {
-                    let name = image.name().clone();
-                    let left_version = image.version().clone();
-                    let vendor = image.vendor_name().clone();
+            let working_set = take(&mut remaining);
+
+            for image in working_set {
+                let image_key = (image.name().clone(), image.vendor_name().clone());
+
+                // Skip if we've already processed this kit
+                if let Some(existing_version) = known.get(&image_key) {
                     ensure!(
-                        image.version() == version,
-                        "cannot have multiple versions of the same kit ({name}-{left_version}@{vendor} \
-                        != {name}-{version}@{vendor}",
+                        image.version() == existing_version,
+                        "version conflict for kit {}-{}@{}: found version {} but already resolved version {}",
+                        image.name(), image.version(), image.vendor_name(),
+                        image.version(), existing_version
                     );
+
                     debug!(
                         ?image,
                         "Skipping kit '{}' as it has already been resolved",
@@ -287,48 +353,76 @@ impl Lock {
                     );
                     continue;
                 }
-                known.insert(
-                    (image.name().clone(), image.vendor_name().clone()),
-                    image.version().clone(),
-                );
-                let image_resolver = ImageResolver::from_image(image)?;
-                let (locked_image, metadata) = image_resolver.resolve(&image_tool).await?;
+
+                // Mark this kit as known
+                known.insert(image_key, image.version().clone());
+
+                // Resolve the image and its metadata
+                debug!(%image, "Resolving kit '{}'", image.name());
+                let image_resolver = ImageResolver::from_image(&image)?;
+                let (locked_image, metadata) = image_resolver.resolve(image_tool).await?;
+
+                // Process the resolved image
                 let metadata = metadata.context(format!(
-                    "failed to validate kit image with name {} from vendor {}",
-                    locked_image.name, locked_image.vendor
+                    "failed to validate kit image: {}-{}@{}",
+                    locked_image.name, locked_image.version, locked_image.vendor
                 ))?;
-                locked.push(locked_image);
+
+                // Add the resolved image to our results
+                locked_images.push(locked_image);
+
+                // Add the SDK dependency from this kit
                 sdk_set.insert(project.as_project_image(&metadata.sdk)?);
+
+                // Add transitive kit dependencies to be processed
                 for dep in metadata.kits {
                     remaining.push(project.as_project_image(&dep)?);
                 }
             }
         }
-        debug!(?sdk_set, "Resolving workspace SDK");
+
+        Ok(ResolvedKits {
+            locked_images,
+            sdk_set,
+        })
+    }
+
+    /// Resolves the SDK dependency from the set of possible SDKs
+    #[instrument(level = "trace", skip(_project, resolved_kits, image_tool))]
+    async fn resolve_sdk_dependency(
+        _project: &Project<Unlocked>,
+        resolved_kits: &ResolvedKits,
+        image_tool: &ImageTool,
+    ) -> Result<LockedImage> {
+        debug!(?resolved_kits.sdk_set, "Resolving workspace SDK");
+
+        // Ensure we have exactly one SDK
         ensure!(
-            sdk_set.len() <= 1,
-            "cannot use multiple sdks (found sdk: {})",
-            sdk_set
+            resolved_kits.sdk_set.len() <= 1,
+            "cannot use multiple SDKs. Found: {}",
+            resolved_kits
+                .sdk_set
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        let sdk = sdk_set
+
+        // Get the single SDK
+        let sdk = resolved_kits
+            .sdk_set
             .iter()
             .next()
-            .context("no sdk was found for use, please specify a sdk in Twoliter.toml")?;
+            .context("no SDK was found. Please specify an SDK in Twoliter.toml")?;
 
         debug!(?sdk, "Resolving workspace SDK");
-        let (sdk, _metadata) = ImageResolver::from_image(sdk)?
+
+        // Resolve the SDK image (without metadata)
+        let (sdk, _) = ImageResolver::from_image(sdk)?
             .skip_metadata_retrieval() // SDKs don't have metadata
-            .resolve(&image_tool)
+            .resolve(image_tool)
             .await?;
 
-        Ok(Self {
-            schema_version: project.schema_version(),
-            kit: locked,
-            sdk,
-        })
+        Ok(sdk)
     }
 }

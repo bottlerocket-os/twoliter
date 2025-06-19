@@ -59,8 +59,10 @@ impl VerificationManifest {
         let mut manifest = Vec::new();
         let mut ser =
             serde_json::Serializer::with_formatter(&mut manifest, CanonicalJsonFormatter::new());
+
         self.serialize(&mut ser)
-            .context("failed to serialize external kit metadata")?;
+            .context("failed to serialize verification manifest to canonical JSON")?;
+
         Ok(manifest)
     }
 }
@@ -128,29 +130,39 @@ impl VerificationTagger {
     #[instrument(level = "trace", skip(external_kits_dir))]
     pub(crate) async fn write_tags<P: AsRef<Path>>(&self, external_kits_dir: P) -> Result<()> {
         let external_kits_dir = external_kits_dir.as_ref();
-        Self::cleanup_existing_tags(&external_kits_dir).await?;
+
+        // Clean up any existing verification tags
+        Self::cleanup_existing_tags(external_kits_dir).await?;
 
         debug!("Writing tag files for verified artifacts");
-        tokio::fs::create_dir_all(&external_kits_dir)
+
+        // Ensure the directory exists
+        tokio::fs::create_dir_all(external_kits_dir)
             .await
             .context(format!(
                 "failed to create external-kits directory at '{}'",
                 external_kits_dir.display()
             ))?;
 
-        for tag in self.tags.iter() {
+        // Write each verification tag
+        for tag in &self.tags {
             let flag_file = external_kits_dir.join(tag.marker_file_name());
+
             debug!(
                 "Writing tag file for verified artifacts: '{}'",
                 flag_file.display()
             );
-            tokio::fs::write(&flag_file, tag.manifest().as_canonical_json()?)
+
+            // Serialize the manifest to canonical JSON and write it
+            let manifest_json = tag.manifest().as_canonical_json()?;
+            tokio::fs::write(&flag_file, manifest_json)
                 .await
                 .context(format!(
                     "failed to write verification tag file: '{}'",
                     flag_file.display()
                 ))?;
         }
+
         Ok(())
     }
 
@@ -159,14 +171,19 @@ impl VerificationTagger {
     pub(crate) async fn cleanup_existing_tags<P: AsRef<Path>>(external_kits_dir: P) -> Result<()> {
         let external_kits_dir = external_kits_dir.as_ref();
 
-        debug!("Cleaning up any existing tag files for resolved artifacts",);
-        for resolve_tag in VerifyTag::iter() {
-            let flag_file = external_kits_dir.join(resolve_tag.marker_file_name());
+        debug!("Cleaning up any existing tag files for resolved artifacts");
+
+        // Iterate through all possible tag types
+        for tag_type in VerifyTag::iter() {
+            let flag_file = external_kits_dir.join(tag_type.marker_file_name());
+
+            // Remove the file if it exists
             if flag_file.exists() {
                 debug!(
                     "Removing existing verification tag file '{}'",
                     flag_file.display()
                 );
+
                 tokio::fs::remove_file(&flag_file).await.context(format!(
                     "failed to remove existing verification tag file: {}",
                     flag_file.display()

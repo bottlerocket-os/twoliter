@@ -103,7 +103,11 @@ impl EncodedKitMetadata {
     #[instrument(level = "trace")]
     async fn try_from_image(image_uri: &str, image_tool: &ImageTool) -> Result<Self> {
         tracing::trace!(image_uri, "Extracting kit metadata from OCI image config");
+
+        // Get the image configuration
         let config = image_tool.get_config(image_uri).await?;
+
+        // Extract the kit metadata from the config
         let kit_metadata = EncodedKitMetadata(Self::extract_encoded_kit_metadata(&config)?);
 
         tracing::trace!(
@@ -117,18 +121,20 @@ impl EncodedKitMetadata {
     }
 
     fn extract_encoded_kit_metadata(oci_config: &ConfigView) -> Result<String> {
-        let encoded_metadata = oci_config
-            .labels
-            .get(supported_kit_metadata_label().as_str());
+        // Try to get the metadata from the supported label
+        let supported_label = supported_kit_metadata_label();
+        let encoded_metadata = oci_config.labels.get(&supported_label);
 
         match encoded_metadata {
             Some(encoded_metadata) => Ok(encoded_metadata.to_owned()),
             None => {
+                // Check if there's any kit metadata label with a different version
                 if let Some(kit_label) = oci_config
                     .labels
                     .keys()
                     .find(|label| label.starts_with(KIT_METADATA_LABEL_PREFIX))
                 {
+                    // Extract the version from the label
                     let kit_version = kit_label.trim_start_matches(KIT_METADATA_LABEL_PREFIX);
                     let meta_relation =
                         Self::compare_version_strs(kit_version, SUPPORTED_KIT_METADATA_VERSION);
@@ -137,7 +143,7 @@ impl EncodedKitMetadata {
                         "kit appears to be built with metadata version '{kit_version}', possibly by \
                         {meta_relation} version of twoliter with unsupported incompatibilities. \
                         This version of twoliter supports metadata version \
-                        '{SUPPORTED_KIT_METADATA_VERSION}'.",
+                        '{SUPPORTED_KIT_METADATA_VERSION}'."
                     )
                 } else {
                     bail!("no metadata stored on image, this image appears not to be a kit")
@@ -248,29 +254,33 @@ impl ImageResolver {
         &self,
         image_tool: &ImageTool,
     ) -> Result<(LockedImage, Option<ImageMetadata>)> {
-        // First get the manifest list
         let uri = self.image.project_image_uri();
-        info!("Resolving dependency image dependency '{}'.", self.image);
+        info!("Resolving dependency image '{}'", self.image);
 
+        // Get the manifest list for the image
         let manifest_list = self.get_manifest(image_tool).await?;
+
+        // Get the registry from the URI
         let registry = uri
             .registry
             .as_ref()
             .context("no registry found for image")?;
 
+        // Create the locked image representation
         let locked_image = LockedImage {
             name: self.image.name().to_owned(),
             version: self.image.version().to_owned(),
             vendor: self.image.vendor_name().to_owned(),
-            // The source is the image uri without the tag, which is the digest
             source: self.image.original_source_uri().to_string(),
             digest: self.calculate_digest(image_tool).await?,
         };
 
+        // Skip metadata retrieval if requested (for SDKs)
         if self.skip_metadata_retrieval {
             return Ok((locked_image, None));
         }
 
+        // Extract metadata from each manifest in the manifest list
         debug!("Extracting kit metadata from OCI image");
         let embedded_kit_metadata = stream::iter(manifest_list.manifests).then(|manifest| {
             let registry = registry.clone();
@@ -282,12 +292,14 @@ impl ImageResolver {
         });
         pin_mut!(embedded_kit_metadata);
 
+        // Get the first metadata entry
         let canonical_metadata = embedded_kit_metadata
             .try_next()
             .await?
             .context(format!("could not find metadata for kit {}", uri))?;
 
-        trace!("Checking that all manifests refer to the same kit.");
+        // Verify all manifests have the same metadata
+        trace!("Checking that all manifests refer to the same kit");
         while let Some(kit_metadata) = embedded_kit_metadata.try_next().await? {
             if kit_metadata != canonical_metadata {
                 error!(
@@ -295,12 +307,14 @@ impl ImageResolver {
                     ?kit_metadata,
                     "Mismatched kit metadata in manifest list"
                 );
-                bail!("Metadata does not match between images in manifest list");
+                bail!("metadata does not match between images in manifest list");
             }
         }
+
+        // Decode the metadata
         let metadata = canonical_metadata
             .try_into()
-            .context("Failed to decode and parse kit metadata")?;
+            .context("failed to decode and parse kit metadata")?;
 
         Ok((locked_image, Some(metadata)))
     }
@@ -313,47 +327,56 @@ impl ImageResolver {
     where
         P: AsRef<Path>,
     {
+        let image_name = self.image.name();
+        let vendor_name = self.image.vendor_name();
+        let uri = self.image.project_image_uri();
+
         info!(
-            "Extracting kit '{}' to '{}'",
-            self.image.name(),
+            "Extracting kit '{}-{}@{}' to '{}'",
+            image_name,
+            self.image.version(),
+            vendor_name,
             path.as_ref().display()
         );
-        let target_path = path.as_ref().join(format!(
-            "{}/{}/{arch}",
-            self.image.vendor_name(),
-            self.image.name()
-        ));
+
+        // Create target paths
+        let target_path = path
+            .as_ref()
+            .join(format!("{}/{}/{arch}", vendor_name, image_name));
         let cache_path = path.as_ref().join("cache");
+
         create_dir_all(&target_path).await?;
         create_dir_all(&cache_path).await?;
 
-        // First get the manifest for the specific requested architecture
-        let uri = self.image.project_image_uri();
+        // Get the manifest list for the image
         let manifest_list = self.get_manifest(image_tool).await?;
+
+        // Find the manifest for the requested architecture
         let docker_arch = DockerArchitecture::try_from(arch)?;
         let manifest = manifest_list
             .manifests
             .iter()
-            .find(|x| x.platform.as_ref().unwrap().architecture == docker_arch)
+            .find(|x| {
+                x.platform
+                    .as_ref()
+                    .is_some_and(|p| p.architecture == docker_arch)
+            })
             .cloned()
             .context(format!(
                 "could not find image for architecture '{}' at {}",
                 docker_arch, uri
             ))?;
 
+        // Get the registry from the URI
         let registry = uri.registry.context("failed to resolve image registry")?;
-        let oci_archive = OCIArchive::new(
-            registry.as_str(),
-            uri.repo.as_str(),
-            manifest.digest.as_str(),
-            &cache_path,
-        )?;
 
-        // Checks for the saved image locally, or else pulls and saves it
+        // Create an OCI archive for the image
+        let oci_archive = OCIArchive::new(&registry, &uri.repo, &manifest.digest, &cache_path)?;
+
+        // Pull the image if needed
         oci_archive.pull_image(image_tool).await?;
 
-        // Checks if this archive has already been extracted by checking a digest file
-        // otherwise cleans up the path and unpacks the archive
+        // Unpack the image layers
         oci_archive.unpack_layers(&target_path).await?;
 
         Ok(())

@@ -39,19 +39,24 @@ impl OCIArchive {
     #[instrument(level = "trace", skip_all, fields(registry = %self.registry, repository = %self.repository, digest = %self.digest))]
     pub async fn pull_image(&self, image_tool: &ImageTool) -> Result<()> {
         let digest_uri = self.uri();
-        debug!("Pulling image '{}'", digest_uri);
         let oci_archive_path = self.archive_path();
+
+        // Check if we already have the image locally
         if !oci_archive_path.exists() {
+            debug!("Pulling image '{}'", digest_uri);
+
+            // Create the directory and pull the image
             create_dir_all(&oci_archive_path).await?;
             image_tool
-                .pull_oci_image(oci_archive_path.as_path(), digest_uri.as_str())
+                .pull_oci_image(&oci_archive_path, &digest_uri)
                 .await?;
         } else {
             debug!(
-                "Image from '{}' already present -- no need to pull.",
+                "Image from '{}' already present -- no need to pull",
                 digest_uri
             );
         }
+
         Ok(())
     }
 
@@ -67,12 +72,15 @@ impl OCIArchive {
         let path = out_dir.as_ref();
         let digest_file = path.join("digest");
         let digest_uri = self.uri();
+
+        // Check if we've already unpacked this exact digest
         if digest_file.exists() {
-            let digest = read_to_string(&digest_file).await.context(format!(
+            let existing_digest = read_to_string(&digest_file).await.context(format!(
                 "failed to read digest file at {}",
                 digest_file.display()
             ))?;
-            if digest == self.digest {
+
+            if existing_digest == self.digest {
                 trace!(
                     "Found existing digest file for image from '{}' at '{}'",
                     digest_uri,
@@ -83,43 +91,55 @@ impl OCIArchive {
         }
 
         debug!("Unpacking layers for image from '{}'", digest_uri);
+
+        // Clean up and recreate the output directory
         remove_dir_all(path).await?;
         create_dir_all(path).await?;
-        let index_bytes = read(self.archive_path().join("index.json")).await?;
-        let index: IndexView = serde_json::from_slice(index_bytes.as_slice())
-            .context("failed to deserialize oci image index")?;
 
-        // Read the manifest so we can get the layer digests
+        // Read the OCI index to find the manifest
+        let index_bytes = read(self.archive_path().join("index.json")).await?;
+        let index: IndexView = serde_json::from_slice(&index_bytes)
+            .context("failed to deserialize OCI image index")?;
+
+        // Get the first manifest digest
         trace!(from = %digest_uri, "Extracting layer digests from image manifest");
-        let digest = index
+        let manifest_digest = index
             .manifests
             .first()
-            .context("empty oci image")?
+            .context("empty OCI image")?
             .digest
             .replace(':', "/");
-        let manifest_bytes = read(self.archive_path().join(format!("blobs/{digest}")))
-            .await
-            .context("failed to read manifest blob")?;
-        let manifest_layout: ManifestLayoutView = serde_json::from_slice(manifest_bytes.as_slice())
-            .context("failed to deserialize oci manifest")?;
+
+        // Read the manifest to get layer information
+        let manifest_path = self.archive_path().join(format!("blobs/{manifest_digest}"));
+        let manifest_bytes = read(&manifest_path).await.context(format!(
+            "failed to read manifest blob at {}",
+            manifest_path.display()
+        ))?;
+
+        let manifest_layout: ManifestLayoutView = serde_json::from_slice(&manifest_bytes)
+            .context("failed to deserialize OCI manifest")?;
 
         // Extract each layer into the target directory
         trace!(from = %digest_uri, "Extracting image layers");
         for layer in manifest_layout.layers {
-            let digest = layer.digest.to_string().replace(':', "/");
-            let layer_blob = File::open(self.archive_path().join(format!("blobs/{digest}")))
-                .context("failed to read layer of oci image")?;
+            let layer_digest = layer.digest.to_string().replace(':', "/");
+            let layer_path = self.archive_path().join(format!("blobs/{layer_digest}"));
+
+            let layer_blob = File::open(&layer_path)
+                .context(format!("failed to read layer at {}", layer_path.display()))?;
+
             let mut layer_archive = TarArchive::new(layer_blob);
             layer_archive
                 .unpack(path)
                 .context("failed to unpack layer to disk")?;
         }
-        write(&digest_file, self.digest.as_str())
-            .await
-            .context(format!(
-                "failed to record digest to {}",
-                digest_file.display()
-            ))?;
+
+        // Write the digest file to mark this directory as successfully unpacked
+        write(&digest_file, &self.digest).await.context(format!(
+            "failed to record digest to {}",
+            digest_file.display()
+        ))?;
 
         Ok(())
     }
