@@ -1875,6 +1875,16 @@ script = [
     '''
 ]
 
+# This task will clear a specific test by name and its resources from the testsys cluster.
+[tasks.reset-single-test]
+script = [
+    '''
+    set -eu
+    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test-name ${@}
+    '''
+]
+
 # This task will clear all testsys components from the testsys cluster.
 [tasks.uninstall-test]
 script = [
