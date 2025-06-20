@@ -28,6 +28,11 @@ pub(crate) fn sonobuoy_crd(test_input: TestInput) -> Result<Test> {
         "testsys/type".to_string() => test_input.test_type.to_string(),
         "testsys/flavor".to_string() => test_input.crd_input.test_flavor.clone(),
         "testsys/cluster".to_string() => cluster_resource_name.to_string(),
+        "testsys/test-name".to_string() => format!(
+            "{}-{}",
+            cluster_resource_name,
+            test_input.name_suffix.unwrap_or(test_input.crd_input.test_flavor.as_str())
+        ),
     });
 
     SonobuoyConfig::builder()
@@ -100,6 +105,11 @@ pub(crate) fn workload_crd(test_input: TestInput) -> Result<Test> {
     let labels = test_input.crd_input.labels(btreemap! {
         "testsys/type".to_string() => test_input.test_type.to_string(),
         "testsys/cluster".to_string() => cluster_resource_name.to_string(),
+        "testsys/test-name".to_string() => format!(
+            "{}-{}",
+            cluster_resource_name,
+            test_input.name_suffix.unwrap_or("test")
+        ),
     });
     let gpu = test_input.crd_input.variant.variant_flavor() == Some("nvidia");
     let plugins: Vec<_> = test_input
