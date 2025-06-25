@@ -397,8 +397,9 @@ else
   ROOT_LABELS=$(setfiles -n -d -F -m -r "${ROOT_MOUNT}" \
     "${SELINUX_FILE_CONTEXTS}" "${ROOT_MOUNT}" |
     awk -v root="${ROOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
-  mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH}" \
-    -O ^has_journal -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
+  mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH},num_backup_sb=0" -m 0 \
+    -O ^has_journal -O ^resize_inode -O sparse_super2 \
+    -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
   echo "${ROOT_LABELS}" | debugfs -w -f - "${ROOT_IMAGE}"
   resize2fs -M "${ROOT_IMAGE}"
 fi
