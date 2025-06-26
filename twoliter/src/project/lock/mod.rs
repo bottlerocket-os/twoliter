@@ -39,6 +39,7 @@ struct ExternalKitMetadata {
     sdk: LockedImage,
     #[serde(rename = "kit")]
     kits: Vec<LockedImage>,
+    project_vendor: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -65,7 +66,6 @@ impl LockedSDK {
     #[instrument(level = "trace", skip(project))]
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
         info!("Resolving SDK project reference to check against lock file");
-
         let current_lock = Lock::current_lock_state(project).await?;
         let resolved_lock = Self::resolve_sdk(project)
             .await?
@@ -122,6 +122,8 @@ pub(crate) struct Lock {
     pub sdk: LockedImage,
     /// Resolved kit dependencies
     pub kit: Vec<LockedImage>,
+    /// The project vendor
+    pub project_vendor: String,
 }
 
 impl PartialEq for Lock {
@@ -129,6 +131,7 @@ impl PartialEq for Lock {
         self.schema_version == other.schema_version
             && self.sdk == other.sdk
             && self.kit == other.kit
+            && self.project_vendor == other.project_vendor
     }
 }
 
@@ -197,6 +200,7 @@ impl Lock {
         ExternalKitMetadata {
             sdk: self.sdk.clone(),
             kits: self.kit.clone(),
+            project_vendor: self.project_vendor.clone(),
         }
     }
 
@@ -329,6 +333,7 @@ impl Lock {
             schema_version: project.schema_version(),
             kit: locked,
             sdk,
+            project_vendor: project.project_vendor.clone(),
         })
     }
 }

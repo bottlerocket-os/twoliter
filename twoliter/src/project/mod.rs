@@ -58,6 +58,9 @@ pub(crate) struct Project<L: ProjectLock> {
     /// The version that will be given to released artifacts such as kits and variants.
     release_version: String,
 
+    /// The build-vendor for who is going to build the kit or variant
+    project_vendor: String,
+
     /// The Bottlerocket SDK container image.
     sdk: Option<Image>,
 
@@ -151,6 +154,7 @@ impl<L: ProjectLock> Project<L> {
             project_dir: self.project_dir.clone(),
             schema_version: self.schema_version,
             release_version: self.release_version.clone(),
+            project_vendor: self.project_vendor.clone(),
             sdk: self.sdk.clone(),
             vendor: self.vendor.clone(),
             kit: self.kit.clone(),
@@ -500,8 +504,11 @@ impl VendedArtifact for Image {
 #[serde(rename_all = "kebab-case")]
 struct UnvalidatedProject {
     schema_version: SchemaVersion<1>,
+    project_vendor: String,
     release_version: String,
     sdk: Option<Image>,
+    // this ValidIdentifier is actually the vendor name
+    // Vendor is the registry
     vendor: Option<BTreeMap<ValidIdentifier, Vendor>>,
     kit: Option<Vec<Image>>,
 }
@@ -527,6 +534,7 @@ impl UnvalidatedProject {
             project_dir: project_dir.clone(),
             schema_version: self.schema_version,
             release_version: self.release_version,
+            project_vendor: self.project_vendor,
             sdk: self.sdk,
             vendor: self.vendor.unwrap_or_default(),
             kit: self.kit.unwrap_or_default(),
@@ -834,6 +842,7 @@ mod test {
         let project = UnvalidatedProject {
             schema_version: SchemaVersion,
             release_version: "1.0.0".into(),
+            project_vendor: "Bottlerocket".to_owned(),
             sdk: Some(Image {
                 name: ValidIdentifier("bottlerocket-sdk".into()),
                 version: Version::new(1, 41, 1),
