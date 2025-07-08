@@ -11,6 +11,10 @@ pub(crate) struct Delete {
     #[clap(long)]
     test: bool,
 
+    /// Delete a particular test
+    #[clap(long)]
+    test_name: Option<String>,
+
     /// Focus status on a particular arch
     #[clap(long)]
     arch: Option<String>,
@@ -49,12 +53,16 @@ impl Delete {
         };
         let crd_type = self.test.then_some(CrdType::Test);
         let mut labels = Vec::new();
+        if let Some(test_name) = self.test_name {
+            labels.push(format!("testsys/test-name={}", test_name))
+        };
         if let Some(arch) = self.arch {
             labels.push(format!("testsys/arch={}", arch))
         };
         if let Some(variant) = self.variant {
             labels.push(format!("testsys/variant={}", variant))
         };
+
         let mut stream = client
             .delete(
                 &SelectionParams {
@@ -63,7 +71,7 @@ impl Delete {
                     crd_type,
                     ..Default::default()
                 },
-                false,
+                !self.test,
             )
             .await?;
 

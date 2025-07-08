@@ -21,6 +21,11 @@ pub(crate) fn migration_crd(
     let labels = migration_input.crd_input.labels(btreemap! {
         "testsys/type".to_string() => "migration".to_string(),
         "testsys/cluster".to_string() => cluster_resource_name.to_string(),
+        "testsys/test-name".to_string() => format!(
+            "{}-{}",
+            cluster_resource_name,
+            migration_input.name_suffix.unwrap_or(migration_input.crd_input.test_flavor.as_str())
+        ),
     });
 
     // Determine which version should be migrated to from `migration_input`.
