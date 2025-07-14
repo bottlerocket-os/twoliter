@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...HEAD
 
+## [0.11.0-rc1] - 2024-07-14
+
+### Added
+* Add support to delete individual tests in testsys ([#549])
+* Add `--dry-run` mode to `pubsys promote-ssm` ([#529])
+* Allow keys from environment variables ([#533])
+
+### Changed
+* Use "fat" LTO for dist and "thin" for release ([#535])
+* Compress included tool archives ([#537])
+
+### Improved
+* Reclaim reserved space on ext4 filesystems ([#550])
+
+[#529]: https://github.com/bottlerocket-os/twoliter/pull/529
+[#533]: https://github.com/bottlerocket-os/twoliter/pull/533
+[#535]: https://github.com/bottlerocket-os/twoliter/pull/535
+[#537]: https://github.com/bottlerocket-os/twoliter/pull/537
+[#549]: https://github.com/bottlerocket-os/twoliter/pull/549
+[#550]: https://github.com/bottlerocket-os/twoliter/pull/550
+
+[0.11.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...v0.11.0-rc1
+
 ## [0.10.1] - 2025-05-14
 
 ### Fixed
