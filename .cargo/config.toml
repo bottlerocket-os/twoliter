@@ -1,5 +1,6 @@
 [unstable]
 bindeps = true
+profile-hint-mostly-unused = true
 
 [build]
 # This is the recommended configuration that yields the
