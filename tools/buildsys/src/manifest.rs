@@ -356,6 +356,7 @@ impl Manifest {
 pub struct ExternalKitMetadataView {
     #[serde(rename = "kit")]
     kits: Vec<ImageView>,
+    project_vendor: String,
 }
 
 impl ExternalKitMetadataView {
@@ -381,6 +382,10 @@ impl ExternalKitMetadataView {
             .iter()
             .map(|x| format!("{}/{}", x.vendor, x.name))
             .collect()
+    }
+
+    pub fn get_project_vendor(&self) -> &str {
+        self.project_vendor.as_ref()
     }
 }
 
