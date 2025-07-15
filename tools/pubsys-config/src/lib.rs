@@ -193,20 +193,20 @@ impl TryFrom<SigningKeyConfig> for Url {
                 key_id = if key_id.starts_with('/') {
                     key_id.to_string()
                 } else {
-                    format!("/{}", key_id)
+                    format!("/{key_id}")
                 };
-                Url::parse(&format!("aws-kms://{}", key_id)).map_err(|_| ())
+                Url::parse(&format!("aws-kms://{key_id}")).map_err(|_| ())
             }
             SigningKeyConfig::ssm { parameter } => {
                 let parameter = if parameter.starts_with('/') {
                     parameter
                 } else {
-                    format!("/{}", parameter)
+                    format!("/{parameter}")
                 };
-                Url::parse(&format!("aws-ssm://{}", parameter)).map_err(|_| ())
+                Url::parse(&format!("aws-ssm://{parameter}")).map_err(|_| ())
             }
             SigningKeyConfig::env { var_name } => {
-                Url::parse(&format!("env://{}", var_name)).map_err(|_| ())
+                Url::parse(&format!("env://{var_name}")).map_err(|_| ())
             }
         }
     }

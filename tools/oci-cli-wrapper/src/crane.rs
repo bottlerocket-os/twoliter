@@ -33,7 +33,7 @@ impl ImageToolImpl for CraneCLI {
         self.cli
             .spawn(
                 &Self::crane_cmd(&["pull", "--format", "oci", uri, archive_path.as_ref()]),
-                format!("failed to pull image archive from {}", uri),
+                format!("failed to pull image archive from {uri}"),
             )
             .await?;
         Ok(())
@@ -43,7 +43,7 @@ impl ImageToolImpl for CraneCLI {
         self.cli
             .output(
                 &Self::crane_cmd(&["manifest", uri]),
-                format!("failed to fetch manifest for resource at {}", uri),
+                format!("failed to fetch manifest for resource at {uri}"),
             )
             .await
     }
@@ -53,7 +53,7 @@ impl ImageToolImpl for CraneCLI {
             .cli
             .output(
                 &Self::crane_cmd(&["config", uri]),
-                format!("failed to fetch image config from {}", uri),
+                format!("failed to fetch image config from {uri}"),
             )
             .await?;
         let image_view: ImageView =
@@ -73,7 +73,7 @@ impl ImageToolImpl for CraneCLI {
         self.cli
             .spawn(
                 &Self::crane_cmd(&["push", &temp_dir.path().to_string_lossy(), uri]),
-                format!("failed to push image {}", uri),
+                format!("failed to push image {uri}"),
             )
             .await
     }
@@ -96,7 +96,7 @@ impl ImageToolImpl for CraneCLI {
         self.cli
             .output(
                 &Self::crane_cmd(&manifest_create_args),
-                format!("could not push multi-platform manifest to {}", uri),
+                format!("could not push multi-platform manifest to {uri}"),
             )
             .await?;
 

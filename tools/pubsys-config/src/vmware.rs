@@ -190,7 +190,7 @@ fn get_env(var: &str) -> Option<String> {
     match env::var(var) {
         Ok(v) => Some(v),
         Err(e) => {
-            debug!("Unable to read environment variable '{}': {}", var, e);
+            debug!("Unable to read environment variable '{var}': {e}");
             None
         }
     }

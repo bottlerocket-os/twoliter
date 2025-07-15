@@ -160,7 +160,7 @@ fn update_manifest(repo_args: &RepoArgs, manifest: &mut Manifest) -> Result<()> 
         release
             .migrations
             .keys()
-            .map(|(from, to)| format!("({}, {})", from, to))
+            .map(|(from, to)| format!("({from}, {to})"))
             .collect::<Vec<String>>()
     );
     // Replace the manifest 'migrations' section with the new data
@@ -173,10 +173,7 @@ fn update_manifest(repo_args: &RepoArgs, manifest: &mut Manifest) -> Result<()> 
         "Using wave policy from path: {}",
         repo_args.wave_policy_path.display()
     );
-    info!(
-        "Offsets from that file will be added to the release start time of: {}",
-        wave_start_time
-    );
+    info!("Offsets from that file will be added to the release start time of: {wave_start_time}");
     let waves = UpdateWaves::from_path(&repo_args.wave_policy_path).context(
         error::UpdateMetadataReadSnafu {
             path: &repo_args.wave_policy_path,
@@ -208,8 +205,7 @@ fn set_expirations(
     let targets_expiration = expiration_start_time + expiration_policy.targets_expiration;
     let timestamp_expiration = expiration_start_time + expiration_policy.timestamp_expiration;
     info!(
-        "Setting non-root metadata expiration times:\n\tsnapshot:  {}\n\ttargets:   {}\n\ttimestamp: {}",
-        snapshot_expiration, targets_expiration, timestamp_expiration
+        "Setting non-root metadata expiration times:\n\tsnapshot:  {snapshot_expiration}\n\ttargets:   {targets_expiration}\n\ttimestamp: {timestamp_expiration}"
     );
     editor
         .snapshot_expires(snapshot_expiration)
@@ -227,7 +223,7 @@ fn set_versions(editor: &mut RepositoryEditor) -> Result<()> {
     let seconds = Utc::now().timestamp();
     let unsigned_seconds = seconds.try_into().expect("System clock before 1970??");
     let version = NonZeroU64::new(unsigned_seconds).expect("System clock exactly 1970??");
-    debug!("Repo version: {}", version);
+    debug!("Repo version: {version}");
     editor
         .snapshot_version(version)
         .targets_version(version)
@@ -284,8 +280,7 @@ where
     let targets_expiration = expiration_start_time + expiration.targets_expiration;
     let timestamp_expiration = expiration_start_time + expiration.timestamp_expiration;
     info!(
-        "Repo expiration times:\n\tsnapshot:  {}\n\ttargets:   {}\n\ttimestamp: {}",
-        snapshot_expiration, targets_expiration, timestamp_expiration
+        "Repo expiration times:\n\tsnapshot:  {snapshot_expiration}\n\ttargets:   {targets_expiration}\n\ttimestamp: {timestamp_expiration}"
     );
     editor
         .snapshot_expires(snapshot_expiration)
@@ -300,7 +295,7 @@ where
     let seconds = Utc::now().timestamp();
     let unsigned_seconds = seconds.try_into().expect("System clock before 1970??");
     let version = NonZeroU64::new(unsigned_seconds).expect("System clock exactly 1970??");
-    debug!("Repo version: {}", version);
+    debug!("Repo version: {version}");
     editor
         .snapshot_version(version)
         .targets_version(version)
@@ -325,13 +320,12 @@ fn repo_urls<'a>(
             } else {
                 "/"
             };
-            let metadata_url_str =
-                format!("{}{}{}/{}", metadata_base_url, base_slash, variant, arch);
+            let metadata_url_str = format!("{metadata_base_url}{base_slash}{variant}/{arch}");
             let metadata_url = Url::parse(&metadata_url_str).context(error::ParseUrlSnafu {
                 input: &metadata_url_str,
             })?;
 
-            debug!("Using metadata url: {}", metadata_url);
+            debug!("Using metadata url: {metadata_url}");
             return Ok(Some((metadata_url, targets_url)));
         }
     }
@@ -479,7 +473,7 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml or default
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, true)
         .context(error::ConfigSnafu)?;
-    trace!("Using infra config: {:?}", infra_config);
+    trace!("Using infra config: {infra_config:?}");
 
     // If the user has the requested (or "default") repo defined in their Infra.toml, use it,
     // otherwise use a default config.
@@ -508,10 +502,7 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
         {
             Some((editor, manifest)) => (editor, manifest),
             None => {
-                warn!(
-                    "Did not find repo at '{}', starting a new one",
-                    metadata_url
-                );
+                warn!("Did not find repo at '{metadata_url}', starting a new one");
                 (
                     RepositoryEditor::new(&repo_args.root_role_path)
                         .await

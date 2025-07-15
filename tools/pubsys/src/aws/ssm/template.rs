@@ -50,7 +50,7 @@ pub(crate) async fn get_parameters(
         toml::from_str(&templates_str).context(error::InvalidTomlSnafu {
             path: &template_path,
         })?;
-    trace!("Parsed templates: {:#?}", template_parameters);
+    trace!("Parsed templates: {template_parameters:#?}");
 
     // You shouldn't point to an empty file, but if all the entries are removed by
     // conditionals below, we allow that and just don't set any parameters.
@@ -67,7 +67,7 @@ pub(crate) async fn get_parameters(
         (p.variants.is_empty() || p.variants.contains(&variant))
             && (p.arches.is_empty() || p.arches.contains(&arch))
     });
-    trace!("Templates after conditionals: {:#?}", template_parameters);
+    trace!("Templates after conditionals: {template_parameters:#?}");
 
     Ok(template_parameters)
 }
@@ -173,9 +173,9 @@ fn join_name(ssm_prefix: &str, name_suffix: &str) -> String {
     if ssm_prefix.ends_with('/') && name_suffix.starts_with('/') {
         format!("{}{}", ssm_prefix, &name_suffix[1..])
     } else if ssm_prefix.ends_with('/') || name_suffix.starts_with('/') {
-        format!("{}{}", ssm_prefix, name_suffix)
+        format!("{ssm_prefix}{name_suffix}")
     } else {
-        format!("{}/{}", ssm_prefix, name_suffix)
+        format!("{ssm_prefix}/{name_suffix}")
     }
 }
 

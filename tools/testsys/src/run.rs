@@ -210,7 +210,7 @@ impl Run {
         let variant = Variant::new(&self.variant).context(error::VariantSnafu {
             variant: self.variant,
         })?;
-        debug!("Using variant '{}'", variant);
+        debug!("Using variant '{variant}'");
 
         // Use Test.toml or default
         let test_config = TestConfig::from_path_or_default(&self.test_config_path)?;

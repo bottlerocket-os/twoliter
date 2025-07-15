@@ -169,7 +169,7 @@ async fn fetch_variant(
 pub(crate) async fn run(args: &Args, fetch_variant_args: &FetchVariantArgs) -> Result<(), Error> {
     let infra_config =
         InfraConfig::from_path(&args.infra_config_path).context(repo_error::ConfigSnafu)?;
-    trace!("Parsed infra config: {:?}", infra_config);
+    trace!("Parsed infra config: {infra_config:?}");
     let repo_config = infra_config
         .repo
         .as_ref()

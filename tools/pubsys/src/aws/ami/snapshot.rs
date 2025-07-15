@@ -60,7 +60,10 @@ mod error {
         },
 
         #[snafu(display("Failed to upload snapshot: {}", source))]
-        UploadSnapshot { source: coldsnap::UploadError },
+        UploadSnapshot {
+            #[snafu(source(from(coldsnap::UploadError, Box::new)))]
+            source: Box<coldsnap::UploadError>,
+        },
     }
 }
 pub(crate) use error::Error;

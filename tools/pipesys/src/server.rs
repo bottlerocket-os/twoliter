@@ -67,7 +67,7 @@ impl Server {
 
             let peer_uid = peer_creds.euid();
             if peer_uid != self.client_uid {
-                warn!("ignoring connection from peer with UID {}", peer_uid);
+                warn!("ignoring connection from peer with UID {peer_uid}");
                 continue;
             }
 
@@ -76,7 +76,7 @@ impl Server {
             tokio::spawn(async move {
                 conn.send_fds(b"fds", &fds)
                     .await
-                    .with_context(|| format!("failed to send file descriptors over {}", socket))
+                    .with_context(|| format!("failed to send file descriptors over {socket}"))
             });
         }
     }

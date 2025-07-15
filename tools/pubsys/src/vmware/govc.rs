@@ -79,7 +79,7 @@ impl Govc {
         let govc_cmd = &[
             Self::GOVC,
             "import.ova",
-            &format!("-options={}", import_spec_container_path),
+            &format!("-options={import_spec_container_path}"),
             "-name",
             name,
             ova_container_path,
@@ -102,7 +102,7 @@ fn docker_run(docker_env: &[&str], mount: Option<&[&str]>, command: &[&str]) -> 
     let sdk = env::var("TLPRIVATE_SDK_IMAGE").context(error::EnvironmentSnafu {
         var: "TLPRIVATE_SDK_IMAGE",
     })?;
-    trace!("SDK image: {}", sdk);
+    trace!("SDK image: {sdk}");
 
     let mut args = vec!["run"];
     args.push("--net=host");
@@ -123,7 +123,7 @@ fn docker_run(docker_env: &[&str], mount: Option<&[&str]>, command: &[&str]) -> 
         .context(error::CommandStartSnafu)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    trace!("{}", stdout);
+    trace!("{stdout}");
     if output.status.success() {
         Ok(output)
     } else {

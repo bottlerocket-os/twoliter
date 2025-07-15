@@ -138,7 +138,7 @@ impl Display for AmiValidationResults {
                 .collect::<Vec<(String, &AmiValidationRegionSummary)>>(),
         )
         .to_string();
-        write!(f, "{}", table)
+        write!(f, "{table}")
     }
 }
 

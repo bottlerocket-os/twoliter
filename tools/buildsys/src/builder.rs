@@ -262,7 +262,7 @@ impl VariantBuildArgs {
         args.build_arg("VERSION_ID", &self.version_image);
 
         for image_feature in self.image_features.iter() {
-            args.build_arg(format!("{}", image_feature), "1");
+            args.build_arg(format!("{image_feature}"), "1");
         }
 
         args
@@ -303,7 +303,7 @@ impl RepackVariantBuildArgs {
         args.build_arg("VERSION_ID", &self.version_image);
 
         for image_feature in self.image_features.iter() {
-            args.build_arg(format!("{}", image_feature), "1");
+            args.build_arg(format!("{image_feature}"), "1");
         }
 
         args

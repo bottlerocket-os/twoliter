@@ -142,7 +142,7 @@ fn build_system_env_vars() -> Result<Vec<String>> {
         if is_build_system_env(key.as_str()) {
             trace!("Passing env var {} to cargo make", key);
             args.push("-e".to_string());
-            args.push(format!("{}={}", key, val));
+            args.push(format!("{key}={val}"));
         }
 
         // To avoid confusion, environment variables whose values have been moved to

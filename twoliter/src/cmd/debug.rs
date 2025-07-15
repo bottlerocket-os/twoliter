@@ -39,7 +39,7 @@ pub(crate) struct CheckToolArgs {
 fn unique_name() -> String {
     let uuid = format!("{}", Uuid::new_v4());
     let slug = &uuid[0..8];
-    format!("twoliter-tools-{}", slug)
+    format!("twoliter-tools-{slug}")
 }
 
 impl CheckToolArgs {

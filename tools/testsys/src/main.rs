@@ -87,9 +87,9 @@ enum Command {
 async fn main() {
     let args = TestsysArgs::parse();
     init_logger(args.log_level);
-    debug!("{:?}", args);
+    debug!("{args:?}");
     if let Err(e) = args.run().await {
-        error!("{}", e);
+        error!("{e}");
         std::process::exit(1);
     }
 }

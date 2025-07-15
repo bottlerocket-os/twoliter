@@ -52,10 +52,10 @@ impl Status {
         let crd_type = self.test.then_some(CrdType::Test);
         let mut labels = Vec::new();
         if let Some(arch) = self.arch {
-            labels.push(format!("testsys/arch={}", arch))
+            labels.push(format!("testsys/arch={arch}"))
         };
         if let Some(variant) = self.variant {
-            labels.push(format!("testsys/variant={}", variant))
+            labels.push(format!("testsys/variant={variant}"))
         };
         let mut status = client
             .status(&SelectionParams {
@@ -109,8 +109,8 @@ impl Status {
         let (width, _) = terminal_size::terminal_size()
             .map(|(w, h)| (w.0 as usize, h.0))
             .unwrap_or((80, 0));
-        debug!("Window width '{}'", width);
-        println!("{:width$}", status);
+        debug!("Window width '{width}'");
+        println!("{status:width$}");
 
         Ok(())
     }

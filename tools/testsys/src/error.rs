@@ -28,7 +28,8 @@ pub enum Error {
 
     #[snafu(context(false), display("{}", source))]
     DescribeImages {
-        source: SdkError<DescribeImagesError>,
+        #[snafu(source(from(SdkError<DescribeImagesError>, Box::new)))]
+        source: Box<SdkError<DescribeImagesError>>,
     },
 
     #[snafu(display("Unable to read file '{}': {}", path.display(), source))]
@@ -87,7 +88,8 @@ pub enum Error {
 
     #[snafu(context(false), display("{}", source))]
     TestManager {
-        source: testsys_model::test_manager::Error,
+        #[snafu(source(from(testsys_model::test_manager::Error, Box::new)))]
+        source: Box<testsys_model::test_manager::Error>,
     },
 
     #[snafu(context(false), display("{}", source))]

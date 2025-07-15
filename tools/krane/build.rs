@@ -98,7 +98,7 @@ fn get_goos() -> &'static str {
         "windows" => "windows",
         "macos" => "darwin",
         // Add more mappings as needed
-        other => panic!("Unsupported target OS: {}", other),
+        other => panic!("Unsupported target OS: {other}"),
     }
 }
 
@@ -112,6 +112,6 @@ fn get_goarch() -> &'static str {
         "arm" => "arm",
         "wasm32" => "wasm",
         // Add more mappings as needed
-        other => panic!("Unsupported target architecture: {}", other),
+        other => panic!("Unsupported target architecture: {other}"),
     }
 }

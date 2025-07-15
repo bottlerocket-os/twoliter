@@ -97,7 +97,7 @@ impl TestConfig {
                     (test_type, configs)
                 },
             );
-        debug!("Resolved test-type '{}'", test_type);
+        debug!("Resolved test-type '{test_type}'");
         (
             configs
                 .into_iter()
@@ -225,7 +225,7 @@ impl GenericConfig {
             // If the current test config specifies another test type, that test type needs to be
             // added to the configurations.
             if let Some(test_type) = test_config.test_type.to_owned() {
-                trace!("Test-type '{}' resolves to '{}'", cur_test_type, test_type);
+                trace!("Test-type '{cur_test_type}' resolves to '{test_type}'");
                 cur_test_type = test_type;
             } else {
                 break;
@@ -428,33 +428,29 @@ impl TestsysImages {
         S: Into<String>,
     {
         let registry = registry.into();
-        let tag = tag.unwrap_or_else(|| format!("v{}", TESTSYS_VERSION));
+        let tag = tag.unwrap_or_else(|| format!("v{TESTSYS_VERSION}"));
         Self {
-            eks_resource_agent_image: Some(format!("{}/eks-resource-agent:{tag}", registry)),
-            ecs_resource_agent_image: Some(format!("{}/ecs-resource-agent:{tag}", registry)),
+            eks_resource_agent_image: Some(format!("{registry}/eks-resource-agent:{tag}")),
+            ecs_resource_agent_image: Some(format!("{registry}/ecs-resource-agent:{tag}")),
             vsphere_k8s_cluster_resource_agent_image: Some(format!(
-                "{}/vsphere-k8s-cluster-resource-agent:{tag}",
-                registry
+                "{registry}/vsphere-k8s-cluster-resource-agent:{tag}"
             )),
             metal_k8s_cluster_resource_agent_image: Some(format!(
-                "{}/metal-k8s-cluster-resource-agent:{tag}",
-                registry
+                "{registry}/metal-k8s-cluster-resource-agent:{tag}"
             )),
-            ec2_resource_agent_image: Some(format!("{}/ec2-resource-agent:{tag}", registry)),
+            ec2_resource_agent_image: Some(format!("{registry}/ec2-resource-agent:{tag}")),
             ec2_karpenter_resource_agent_image: Some(format!(
-                "{}/ec2-karpenter-resource-agent:{tag}",
-                registry
+                "{registry}/ec2-karpenter-resource-agent:{tag}"
             )),
             vsphere_vm_resource_agent_image: Some(format!(
-                "{}/vsphere-vm-resource-agent:{tag}",
-                registry
+                "{registry}/vsphere-vm-resource-agent:{tag}"
             )),
-            sonobuoy_test_agent_image: Some(format!("{}/sonobuoy-test-agent:{tag}", registry)),
-            ecs_test_agent_image: Some(format!("{}/ecs-test-agent:{tag}", registry)),
-            migration_test_agent_image: Some(format!("{}/migration-test-agent:{tag}", registry)),
-            k8s_workload_agent_image: Some(format!("{}/k8s-workload-agent:{tag}", registry)),
-            ecs_workload_agent_image: Some(format!("{}/ecs-workload-agent:{tag}", registry)),
-            controller_image: Some(format!("{}/controller:{tag}", registry)),
+            sonobuoy_test_agent_image: Some(format!("{registry}/sonobuoy-test-agent:{tag}")),
+            ecs_test_agent_image: Some(format!("{registry}/ecs-test-agent:{tag}")),
+            migration_test_agent_image: Some(format!("{registry}/migration-test-agent:{tag}")),
+            k8s_workload_agent_image: Some(format!("{registry}/k8s-workload-agent:{tag}")),
+            ecs_workload_agent_image: Some(format!("{registry}/ecs-workload-agent:{tag}")),
+            controller_image: Some(format!("{registry}/controller:{tag}")),
             testsys_agent_pull_secret: None,
         }
     }

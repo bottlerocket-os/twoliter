@@ -206,7 +206,7 @@ fn sensitive_env_vars(build_type: BuildFlags) -> impl Iterator<Item = &'static s
 pub(crate) fn rerun_for_envs(build_type: BuildType) {
     let build_flags: BuildFlags = build_type.into();
     for var in sensitive_env_vars(build_flags) {
-        println!("cargo:rerun-if-env-changed={}", var)
+        println!("cargo:rerun-if-env-changed={var}")
     }
 }
 

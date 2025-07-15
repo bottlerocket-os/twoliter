@@ -71,7 +71,7 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
 
-    trace!("Parsed infra config: {:#?}", infra_config);
+    trace!("Parsed infra config: {infra_config:#?}");
     let aws = infra_config.aws.unwrap_or_default();
     let ssm_prefix = aws.ssm_prefix.as_deref().unwrap_or("");
 
@@ -169,10 +169,7 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     let current_source_parameters = ssm::get_parameters(&source_keys, &ssm_clients)
         .await
         .context(error::FetchSsmSnafu)?;
-    trace!(
-        "Current source SSM parameters: {:#?}",
-        current_source_parameters
-    );
+    trace!("Current source SSM parameters: {current_source_parameters:#?}");
     ensure!(
         !current_source_parameters.is_empty(),
         error::EmptySourceSnafu {
@@ -183,10 +180,7 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     let current_target_parameters = ssm::get_parameters(&target_keys, &ssm_clients)
         .await
         .context(error::FetchSsmSnafu)?;
-    trace!(
-        "Current target SSM parameters: {:#?}",
-        current_target_parameters
-    );
+    trace!("Current target SSM parameters: {current_target_parameters:#?}");
 
     // Build a map of rendered source parameter names to rendered target parameter names.  This
     // will let us find which target parameters to set based on the source parameter names we get

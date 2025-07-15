@@ -53,7 +53,7 @@ pub(crate) async fn validate(
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
 
-    trace!("Parsed infra config: {:#?}", infra_config);
+    trace!("Parsed infra config: {infra_config:#?}");
 
     let aws = infra_config.aws.unwrap_or_default();
 
@@ -89,7 +89,7 @@ pub(crate) async fn validate(
             (
                 region,
                 result.map_err(|e| {
-                    error!("Failed to retrieve images in region {}: {}", region, e);
+                    error!("Failed to retrieve images in region {region}: {e}");
                     error::Error::UnreachableRegion {
                         region: region.to_string(),
                     }
@@ -224,7 +224,7 @@ pub(crate) async fn run(args: &Args, validate_ami_args: &ValidateAmiArgs) -> Res
                 .context(error::SerializeResultsSummarySnafu)?
         )
     } else {
-        println!("{}", results);
+        println!("{results}");
     }
     Ok(())
 }

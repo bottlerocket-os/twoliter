@@ -94,7 +94,7 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
-    trace!("Parsed infra config: {:#?}", infra_config);
+    trace!("Parsed infra config: {infra_config:#?}");
     let aws = infra_config.aws.unwrap_or_default();
     let ssm_prefix = aws.ssm_prefix.as_deref().unwrap_or("");
 
@@ -142,7 +142,7 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
     let new_parameters =
         template::render_parameters(template_parameters, &amis, ssm_prefix, &build_context)
             .context(error::RenderTemplatesSnafu)?;
-    trace!("Generated templated parameters: {:#?}", new_parameters);
+    trace!("Generated templated parameters: {new_parameters:#?}");
 
     // If the path to an output file was given, write the rendered parameters to this file
     if let Some(ssm_parameter_output) = &ssm_args.ssm_parameter_output {
@@ -216,7 +216,7 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
         result.context(error::FetchSsmSnafu)?
     };
 
-    trace!("Current SSM parameters: {:#?}", current_parameters);
+    trace!("Current SSM parameters: {current_parameters:#?}");
 
     // Show the difference between source and target parameters in SSM.
     let parameters_to_set = key_difference(
@@ -271,10 +271,7 @@ pub(crate) fn write_rendered_parameters(
     ssm_parameters_output: &PathBuf,
     parameters: &HashMap<String, HashMap<String, String>>,
 ) -> Result<()> {
-    info!(
-        "Writing rendered SSM parameters to {:#?}",
-        ssm_parameters_output
-    );
+    info!("Writing rendered SSM parameters to {ssm_parameters_output:#?}");
 
     serde_json::to_writer_pretty(
         &File::create(ssm_parameters_output).context(error::WriteRenderedSsmParametersSnafu {
@@ -284,10 +281,7 @@ pub(crate) fn write_rendered_parameters(
     )
     .context(error::ParseRenderedSsmParametersSnafu)?;
 
-    info!(
-        "Wrote rendered SSM parameters to {:#?}",
-        ssm_parameters_output
-    );
+    info!("Wrote rendered SSM parameters to {ssm_parameters_output:#?}");
     Ok(())
 }
 
@@ -388,7 +382,7 @@ fn parse_ami_input(regions: &[String], ssm_args: &SsmArgs) -> Result<HashMap<Reg
         serde_json::from_reader(file).context(error::DeserializeSnafu {
             path: &ssm_args.ami_input,
         })?;
-    trace!("Parsed AMI input: {:#?}", ami_input);
+    trace!("Parsed AMI input: {ami_input:#?}");
 
     // pubsys will not create a file if it did not create AMIs, so we should only have an empty
     // file if a user created one manually, and they shouldn't be creating an empty file.
@@ -504,7 +498,10 @@ mod error {
         },
 
         #[snafu(display("Failed to fetch parameters from SSM: {}", source))]
-        FetchSsm { source: ssm::Error },
+        FetchSsm {
+            #[snafu(source(from(ssm::Error, Box::new)))]
+            source: Box<ssm::Error>,
+        },
 
         #[snafu(display("Failed to {} '{}': {}", op, path.display(), source))]
         File {
@@ -532,7 +529,10 @@ mod error {
         RenderTemplates { source: template::Error },
 
         #[snafu(display("Failed to set SSM parameters: {}", source))]
-        SetSsm { source: ssm::Error },
+        SetSsm {
+            #[snafu(source(from(ssm::Error, Box::new)))]
+            source: Box<ssm::Error>,
+        },
 
         #[snafu(display(
             "Given region(s) in Infra.toml / regions argument that are not in --ami-input file: {}",
@@ -541,7 +541,10 @@ mod error {
         UnknownRegions { regions: Vec<String> },
 
         #[snafu(display("Failed to validate SSM parameters: {}", source))]
-        ValidateSsm { source: ssm::Error },
+        ValidateSsm {
+            #[snafu(source(from(ssm::Error, Box::new)))]
+            source: Box<ssm::Error>,
+        },
 
         #[snafu(display("Failed to parse rendered SSM parameters to JSON: {}", source))]
         ParseRenderedSsmParameters { source: serde_json::Error },

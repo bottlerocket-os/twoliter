@@ -181,7 +181,7 @@ fn find_root_role_and_key(args: &Args) -> Result<(Option<&PathBuf>, Option<Url>)
     {
         let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
             .context(error::ConfigSnafu)?;
-        trace!("Parsed infra config: {:?}", infra_config);
+        trace!("Parsed infra config: {infra_config:?}");
 
         // Check whether the user has the relevant repo defined in their Infra.toml.
         if let Some(repo_config) = infra_config
@@ -301,7 +301,7 @@ fn find_root_role_and_key(args: &Args) -> Result<(Option<&PathBuf>, Option<Url>)
 // https://github.com/shepmaster/snafu/issues/110
 fn main() {
     if let Err(e) = run() {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         process::exit(1);
     }
 }

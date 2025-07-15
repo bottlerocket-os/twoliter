@@ -212,9 +212,9 @@ impl CrdCreator for VmwareK8sCreator {
             .vcenter_resource_pool(&self.datacenter.resource_pool)
             .vcenter_workload_folder(&self.datacenter.folder)
             .cluster(VSphereK8sClusterInfo {
-                name: format!("${{{}.clusterName}}", cluster_name),
-                control_plane_endpoint_ip: format!("${{{}.endpoint}}", cluster_name),
-                kubeconfig_base64: format!("${{{}.encodedKubeconfig}}", cluster_name),
+                name: format!("${{{cluster_name}.clusterName}}"),
+                control_plane_endpoint_ip: format!("${{{cluster_name}.endpoint}}"),
+                kubeconfig_base64: format!("${{{cluster_name}.encodedKubeconfig}}"),
             })
             .custom_user_data(
                 bottlerocket_input
@@ -260,7 +260,7 @@ impl CrdCreator for VmwareK8sCreator {
                     .collect(),
             ))
             .depends_on(cluster_name)
-            .build(format!("{}-vms-{}", cluster_name, suffix))
+            .build(format!("{cluster_name}-vms-{suffix}"))
             .context(error::BuildSnafu {
                 what: "vSphere VM CRD",
             })?;
