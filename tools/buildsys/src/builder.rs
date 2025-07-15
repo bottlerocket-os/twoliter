@@ -624,6 +624,7 @@ impl DockerBuild {
             "run \
             --name {tag}-bypass \
             --rm \
+            --detach \
             --init \
             --net host \
             --pid host \
@@ -648,6 +649,10 @@ impl DockerBuild {
         // Clean up the stopped bypass container if it exists.
         let _ = docker(&rm_bypass, Retry::No);
 
+        // Start the bypass container that will serve the project root file
+        // descriptor.
+        docker(&run_bypass, Retry::No)?;
+
         let runtime = tokio::runtime::Runtime::new().context(error::AsyncRuntimeSnafu)?;
 
         // Spawn a background task to share the file descriptors for the output directory.
@@ -657,12 +662,6 @@ impl DockerBuild {
             PipesysServer::for_path(output_socket, ROOT_UID, &output_dir)
                 .serve()
                 .await
-        });
-
-        // Spawn a background task for the bypass container that will serve the project root file
-        // descriptor.
-        runtime.spawn(async move {
-            let _ = docker(&run_bypass, Retry::No);
         });
 
         // Build the image, which builds the artifacts we want.
