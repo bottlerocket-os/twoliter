@@ -117,7 +117,7 @@ impl GoMod {
             module_path: package_dir,
             sdk_image: sdk.to_string(),
             go_mod_cache: &root_dir.join(".gomodcache"),
-            command: format!("./{}", GO_MOD_DOCKER_SCRIPT_NAME),
+            command: format!("./{GO_MOD_DOCKER_SCRIPT_NAME}"),
         };
 
         // Create and/or write the temporary script file to the package directory

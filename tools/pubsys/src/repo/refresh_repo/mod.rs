@@ -97,7 +97,7 @@ async fn refresh_repo(
     let mut repo_editor = RepositoryEditor::from_repo(root_role_path, repo)
         .await
         .context(repo_error::EditorFromRepoSnafu)?;
-    info!("Loaded TUF repo: {}", metadata_url);
+    info!("Loaded TUF repo: {metadata_url}");
 
     // Refresh the expiration dates of all non-root metadata files
     set_expirations(&mut repo_editor, expiration, *EXPIRATION_START_TIME)?;
@@ -133,7 +133,7 @@ pub(crate) async fn run(args: &Args, refresh_repo_args: &RefreshRepoArgs) -> Res
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(repo_error::ConfigSnafu)?;
-    trace!("Parsed infra config: {:?}", infra_config);
+    trace!("Parsed infra config: {infra_config:?}");
 
     let repo_config = infra_config
         .repo

@@ -101,7 +101,7 @@ type Result<T> = std::result::Result<T, error::Error>;
 fn main() {
     let args = Buildsys::parse();
     if let Err(e) = run(args) {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         process::exit(1);
     }
 }
@@ -119,7 +119,7 @@ fn run(args: Buildsys) -> Result<()> {
 fn build_package(args: BuildPackageArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
     let manifest_path = args.common.cargo_manifest_dir.join(manifest_file);
-    println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={manifest_file}");
     println!(
         "cargo:rerun-if-changed={}",
         args.common.root_dir.join(EXTERNAL_KIT_METADATA).display()
@@ -184,8 +184,8 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
     // Package developer can override name of package if desired, e.g. to name package with
     // characters invalid in Cargo crate names
     let package = manifest.info().package_name();
-    let spec = format!("{}.spec", package);
-    println!("cargo:rerun-if-changed={}", spec);
+    let spec = format!("{package}.spec");
+    println!("cargo:rerun-if-changed={spec}");
 
     let info = SpecInfo::new(PathBuf::from(&spec)).context(error::SpecParseSnafu)?;
 
@@ -209,7 +209,7 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
 
 fn build_kit(args: BuildKitArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
-    println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={manifest_file}");
     println!(
         "cargo:rerun-if-changed={}",
         args.common.root_dir.join(EXTERNAL_KIT_METADATA).display()
@@ -233,7 +233,7 @@ fn build_kit(args: BuildKitArgs) -> Result<()> {
 
 fn build_variant(args: BuildVariantArgs) -> Result<()> {
     let manifest_file = "Cargo.toml";
-    println!("cargo:rerun-if-changed={}", manifest_file);
+    println!("cargo:rerun-if-changed={manifest_file}");
     println!(
         "cargo:rerun-if-changed={}",
         args.common.root_dir.join(EXTERNAL_KIT_METADATA).display()

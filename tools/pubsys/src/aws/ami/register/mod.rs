@@ -44,8 +44,8 @@ async fn _register_image(
     let amispec = mk_amispec::create_amispec(ami_args, Some(&bottlerocket_snapshots))
         .context(error::AmispecSnafu)?;
 
-    debug!("Registering AMI with amispec '{:?}'", amispec);
-    info!("Making register image call in {}", region);
+    debug!("Registering AMI with amispec '{amispec:?}'");
+    info!("Making register image call in {region}");
     let register_response = amispec
         .as_register_image_call()
         .send_with(ec2_client)
@@ -119,7 +119,7 @@ impl BottlerocketSnapshots {
         ec2_client: &Ec2Client,
         cleanup_snapshot_ids: Arc<Mutex<Vec<String>>>,
     ) -> Result<BottlerocketSnapshots> {
-        debug!("Uploading images into EBS snapshots in {}", region);
+        debug!("Uploading images into EBS snapshots in {region}");
 
         let multi_progress = MultiProgress::new();
 
@@ -185,7 +185,8 @@ pub(crate) enum CreateSnapshotError {
     #[snafu(display("Failed to create snapshot for {}: {}", path.display(), source))]
     UploadSnapshot {
         path: PathBuf,
-        source: crate::aws::ami::snapshot::Error,
+        #[snafu(source(from(crate::aws::ami::snapshot::Error, Box::new)))]
+        source: Box<crate::aws::ami::snapshot::Error>,
     },
     #[snafu(display("Failed to wait for snapshot to become available: {}", source))]
     WaitSnapshot { source: coldsnap::WaitError },
@@ -217,10 +218,7 @@ pub(crate) async fn register_image(
                 .send()
                 .await
             {
-                warn!(
-                    "While cleaning up, failed to delete snapshot {}: {}",
-                    snapshot_id, e
-                );
+                warn!("While cleaning up, failed to delete snapshot {snapshot_id}: {e}");
             }
         }
     }

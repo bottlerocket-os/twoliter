@@ -57,7 +57,7 @@ pub async fn validate(
 
     let aws = infra_config.aws.clone().unwrap_or_default();
 
-    trace!("Parsed infra config: {:#?}", infra_config);
+    trace!("Parsed infra config: {infra_config:#?}");
 
     let ssm_prefix = aws.ssm_prefix.as_deref().unwrap_or("");
 
@@ -86,7 +86,7 @@ pub async fn validate(
             (
                 region,
                 result.map_err(|e| {
-                    error!("Failed to retrieve images in region {}: {}", region, e);
+                    error!("Failed to retrieve images in region {region}: {e}");
                     error::Error::UnreachableRegion {
                         region: region.to_string(),
                     }
@@ -246,7 +246,7 @@ pub(crate) async fn run(args: &Args, validate_ssm_args: &ValidateSsmArgs) -> Res
                 .context(error::SerializeResultsSummarySnafu)?
         )
     } else {
-        println!("{}", results)
+        println!("{results}")
     }
     Ok(())
 }

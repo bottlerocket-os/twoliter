@@ -21,19 +21,19 @@ pub(crate) fn ami(ami_input: &str, region: &str) -> Result<String> {
     // Convert the `ami_input` file to a `HashMap` that maps regions to AMI id.
     let amis: HashMap<String, AmiImage> =
         serde_json::from_reader(file).context(error::SerdeJsonSnafu {
-            what: format!("Unable to deserialize '{}'", ami_input),
+            what: format!("Unable to deserialize '{ami_input}'"),
         })?;
     // Make sure there are some AMIs present in the `ami_input` file.
     ensure!(
         !amis.is_empty(),
         error::InvalidSnafu {
-            what: format!("{} is empty", ami_input)
+            what: format!("{ami_input} is empty")
         }
     );
     Ok(amis
         .get(region)
         .context(error::InvalidSnafu {
-            what: format!("AMI not found for region '{}'", region),
+            what: format!("AMI not found for region '{region}'"),
         })?
         .id
         .clone())
@@ -102,10 +102,7 @@ where
 
 /// Get the standard Bottlerocket AMI name.
 pub(crate) fn ami_name(arch: &str, variant: &str, version: &str, commit_id: &str) -> String {
-    format!(
-        "bottlerocket-{}-{}-{}-{}",
-        variant, arch, version, commit_id
-    )
+    format!("bottlerocket-{variant}-{arch}-{version}-{commit_id}")
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -225,7 +222,7 @@ pub(crate) async fn ec2_crd(
 
     let suffix: String = repeat_with(fastrand::lowercase).take(4).collect();
     ec2_builder
-        .build(format!("{}-instances-{}", cluster_name, suffix))
+        .build(format!("{cluster_name}-instances-{suffix}"))
         .context(error::BuildSnafu {
             what: "EC2 instance provider CRD",
         })
@@ -342,7 +339,7 @@ pub(crate) async fn ec2_karpenter_crd(
 
     let suffix: String = repeat_with(fastrand::lowercase).take(4).collect();
     ec2_builder
-        .build(format!("{}-karpenter-{}", cluster_name, suffix))
+        .build(format!("{cluster_name}-karpenter-{suffix}"))
         .context(error::BuildSnafu {
             what: "EC2 instance provider CRD",
         })

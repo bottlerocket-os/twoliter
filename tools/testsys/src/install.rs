@@ -41,10 +41,7 @@ impl Install {
             .controller_image
             .expect("The default controller image is missing.");
 
-        trace!(
-            "Installing testsys using controller image '{}'",
-            controller_uri
-        );
+        trace!("Installing testsys using controller image '{controller_uri}'");
 
         let controller_image = match images.testsys_agent_pull_secret {
             Some(secret) => ImageConfig::WithCreds {

@@ -47,7 +47,7 @@ pub(crate) async fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml or default
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, true)
         .context(error::InfraConfigSnafu)?;
-    trace!("Using infra config: {:?}", infra_config);
+    trace!("Using infra config: {infra_config:?}");
 
     let vmware = infra_config
         .vmware

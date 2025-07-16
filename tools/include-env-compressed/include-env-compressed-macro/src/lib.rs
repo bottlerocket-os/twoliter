@@ -94,16 +94,16 @@ trait IncludedArchive {
 impl IncludedArchive for MacroArgs<Zstd> {
     fn emit_archive(&self) -> Result<TokenStream, IncludeError> {
         let env_var = &self.env_var;
-        let path = std::env::var(&env_var).context(EnvVarSnafu { env_var })?;
+        let path = std::env::var(env_var).context(EnvVarSnafu { env_var })?;
 
         let data = std::fs::read(&path).context(ReadArchiveSnafu { path })?;
 
         let compressed = zstd::encode_all(data.as_slice(), self.level).unwrap();
         let literal = Literal::byte_string(&compressed);
 
-        Ok(TokenStream::from(quote! {
+        Ok(quote! {
             ::include_env_compressed::Archive::zstd(#literal)
-        }))
+        })
     }
 }
 
@@ -131,9 +131,9 @@ impl<Compression> Parse for MacroArgs<Compression> {
 impl IncludedArchive for MacroArgs<Uncompressed> {
     fn emit_archive(&self) -> Result<TokenStream, IncludeError> {
         let env_var = &self.env_var;
-        Ok(TokenStream::from(quote! {
+        Ok(quote! {
             ::include_env_compressed::Archive::uncompressed(include_bytes!(env!(#env_var)))
-        }))
+        })
     }
 }
 

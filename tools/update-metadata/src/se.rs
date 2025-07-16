@@ -15,13 +15,10 @@ where
         let key = format!(
             "({}, {})",
             serde_plain::to_string(&from).map_err(|e| S::Error::custom(format!(
-                "Could not serialize 'from' version: {}",
-                e
+                "Could not serialize 'from' version: {e}"
             )))?,
-            serde_plain::to_string(&to).map_err(|e| S::Error::custom(format!(
-                "Could not serialize 'to' version: {}",
-                e
-            )))?,
+            serde_plain::to_string(&to)
+                .map_err(|e| S::Error::custom(format!("Could not serialize 'to' version: {e}")))?,
         );
         map.insert(key, val);
     }

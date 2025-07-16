@@ -45,8 +45,7 @@ impl<'de> Deserialize<'de> for ContainerDigest {
         let digest = String::deserialize(deserializer)?;
         if !digest.starts_with("sha256:") {
             return Err(D::Error::custom(format!(
-                "invalid digest detected in layer: {}",
-                digest
+                "invalid digest detected in layer: {digest}"
             )));
         };
         Ok(Self(digest))

@@ -63,14 +63,14 @@ impl LookasideCache {
                 match Self::verify_file(path, hash) {
                     Ok(_) => continue,
                     Err(e) => {
-                        println!("{}", e);
+                        println!("{e}");
                         fs::remove_file(path).context(error::ExternalFileDeleteSnafu { path })?;
                     }
                 }
             }
 
             let name = &path.display().to_string();
-            let tmp = PathBuf::from(format!(".{}", name));
+            let tmp = PathBuf::from(format!(".{name}"));
 
             // first check the lookaside cache
             let mut url = self.lookaside_cache.clone();
@@ -93,7 +93,7 @@ impl LookasideCache {
                 Err(e) => {
                     // next check with upstream, if permitted
                     if f.force_upstream.unwrap_or(false) || self.upstream_fallback {
-                        println!("Source not found in lookaside-cache. Fetching {:?} from upstream source", url_file_name);
+                        println!("Source not found in lookaside-cache. Fetching {url_file_name:?} from upstream source");
                         self.fetch_file(&f.url, &tmp, hash)?;
                         fs::rename(&tmp, path)
                             .context(error::ExternalFileRenameSnafu { path: &tmp })?;

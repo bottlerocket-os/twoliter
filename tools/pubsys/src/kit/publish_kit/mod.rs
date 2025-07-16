@@ -36,7 +36,7 @@ pub(crate) async fn run(args: &Args, publish_kit_args: &PublishKitArgs) -> Resul
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(error::ConfigSnafu)?;
-    trace!("Parsed infra config: {:?}", infra_config);
+    trace!("Parsed infra config: {infra_config:?}");
 
     publish_kit(infra_config, publish_kit_args, &image_tool).await
 }
@@ -56,10 +56,7 @@ async fn publish_kit(
             name: publish_kit_args.vendor.clone(),
         })?;
     let vendor_registry_uri = vendor.registry.clone();
-    debug!(
-        "Found vendor container registry at uri: {}",
-        vendor_registry_uri
-    );
+    debug!("Found vendor container registry at uri: {vendor_registry_uri}");
 
     // Auto resolve the expected paths for the kit contents archive
     let kit_path = publish_kit_args.kit_path.as_path();
@@ -84,7 +81,7 @@ async fn publish_kit(
         let path = kit_path.join(&kit_filename);
 
         if !path.exists() {
-            debug!("Kit image does not exist for arch {}", arch);
+            debug!("Kit image does not exist for arch {arch}");
             continue;
         }
 
@@ -110,10 +107,7 @@ async fn publish_kit(
         error::NoArchiveSnafu { path: kit_path }
     );
 
-    let target_uri = format!(
-        "{}/{}:{}",
-        vendor_registry_uri, repository_target, kit_version
-    );
+    let target_uri = format!("{vendor_registry_uri}/{repository_target}:{kit_version}");
 
     info!("Pushing kit to {}", &target_uri);
 
@@ -122,7 +116,7 @@ async fn publish_kit(
         .await
         .context(error::PublishKitSnafu)?;
 
-    info!("Successfully published kit to {}", target_uri);
+    info!("Successfully published kit to {target_uri}");
 
     Ok(())
 }

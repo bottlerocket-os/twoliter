@@ -152,22 +152,22 @@ pub struct Args {
 
 #[derive(Debug, Parser)]
 enum SubCommands {
-    Repo(repo::RepoArgs),
-    ValidateRepo(repo::validate_repo::ValidateRepoArgs),
-    CheckRepoExpirations(repo::check_expirations::CheckExpirationsArgs),
-    RefreshRepo(repo::refresh_repo::RefreshRepoArgs),
-    FetchVariant(repo::fetch_variant::FetchVariantArgs),
-    Ami(aws::ami::AmiArgs),
-    PublishAmi(aws::publish_ami::Who),
-    ValidateAmi(aws::validate_ami::ValidateAmiArgs),
+    Repo(Box<repo::RepoArgs>),
+    ValidateRepo(Box<repo::validate_repo::ValidateRepoArgs>),
+    CheckRepoExpirations(Box<repo::check_expirations::CheckExpirationsArgs>),
+    RefreshRepo(Box<repo::refresh_repo::RefreshRepoArgs>),
+    FetchVariant(Box<repo::fetch_variant::FetchVariantArgs>),
+    Ami(Box<aws::ami::AmiArgs>),
+    PublishAmi(Box<aws::publish_ami::Who>),
+    ValidateAmi(Box<aws::validate_ami::ValidateAmiArgs>),
 
-    Ssm(aws::ssm::SsmArgs),
-    PromoteSsm(aws::promote_ssm::PromoteArgs),
-    ValidateSsm(aws::validate_ssm::ValidateSsmArgs),
+    Ssm(Box<aws::ssm::SsmArgs>),
+    PromoteSsm(Box<aws::promote_ssm::PromoteArgs>),
+    ValidateSsm(Box<aws::validate_ssm::ValidateSsmArgs>),
 
-    UploadOva(vmware::upload_ova::UploadArgs),
+    UploadOva(Box<vmware::upload_ova::UploadArgs>),
 
-    PublishKit(kit::publish_kit::PublishKitArgs),
+    PublishKit(Box<kit::publish_kit::PublishKitArgs>),
 }
 
 /// Parses a SemVer, stripping a leading 'v' if present
@@ -271,7 +271,7 @@ mod error {
         match error.amis_affected() {
             0 => String::from("No AMI permissions were updated"),
             1 => String::from("Permissions for 1 AMI were updated, the rest failed"),
-            n => format!("Permissions for {} AMIs were updated, the rest failed", n),
+            n => format!("Permissions for {n} AMIs were updated, the rest failed"),
         }
     }
 }

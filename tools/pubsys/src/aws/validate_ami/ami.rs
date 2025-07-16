@@ -86,7 +86,7 @@ pub(crate) async fn describe_images<'a>(
     // region
     let mut requests = Vec::with_capacity(clients.len());
     clients.iter().for_each(|(region, ec2_client)| {
-        trace!("Requesting images in {}", region);
+        trace!("Requesting images in {region}");
         let get_future = describe_images_in_region(
             region,
             ec2_client,
@@ -116,7 +116,7 @@ pub(crate) async fn describe_images_in_region(
     client: &Ec2Client,
     expected_images: HashMap<String, ImageDef>,
 ) -> Result<HashMap<String, ImageDef>> {
-    info!("Retrieving images in {}", region);
+    info!("Retrieving images in {region}");
     let mut images = HashMap::new();
 
     // Send the request
@@ -175,7 +175,7 @@ pub(crate) async fn describe_images_in_region(
         }
     }
 
-    info!("Images in {} have been retrieved", region);
+    info!("Images in {region} have been retrieved");
     Ok(images)
 }
 

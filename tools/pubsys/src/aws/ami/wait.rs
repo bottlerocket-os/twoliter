@@ -58,7 +58,7 @@ pub(crate) async fn wait_for_ami(
                             saw_it = true;
                             successes += 1;
                             if successes >= successes_required {
-                                info!("Found {} {} in {}", id, state, region);
+                                info!("Found {id} {state} in {region}");
                                 return Ok(());
                             }
                             break;
@@ -92,8 +92,7 @@ pub(crate) async fn wait_for_ami(
 
         if attempts % 5 == 1 {
             info!(
-                "Waiting for {} in {} to be {}... (attempt {} of {})",
-                id, region, state, attempts, max_attempts
+                "Waiting for {id} in {region} to be {state}... (attempt {attempts} of {max_attempts})"
             );
         }
         sleep(Duration::from_secs(seconds_between_attempts));

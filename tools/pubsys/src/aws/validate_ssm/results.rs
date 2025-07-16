@@ -142,7 +142,7 @@ impl Display for SsmValidationResults {
                 .collect::<Vec<(String, &SsmValidationRegionSummary)>>(),
         )
         .to_string();
-        write!(f, "{}", table)
+        write!(f, "{table}")
     }
 }
 

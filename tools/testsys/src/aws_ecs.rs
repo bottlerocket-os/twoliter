@@ -67,7 +67,7 @@ impl CrdCreator for AwsEcsCreator {
             .pop()
         {
             // Return the name of the existing CRD for the cluster.
-            debug!("ECS cluster CRD already exists with name '{}'", cluster_crd);
+            debug!("ECS cluster CRD already exists with name '{cluster_crd}'");
             return Ok(CreateCrdOutput::ExistingCrd(cluster_crd));
         }
 

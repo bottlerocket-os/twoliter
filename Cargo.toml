@@ -176,6 +176,26 @@ walkdir = "2"
 which = "6"
 zstd = "0.13"
 
+[profile.dev.package]
+aws-config = { hint-mostly-unused = true }
+aws-sdk-ebs = { hint-mostly-unused = true }
+aws-sdk-ec2 = { hint-mostly-unused = true }
+aws-sdk-kms = { hint-mostly-unused = true }
+aws-sdk-ssm = { hint-mostly-unused = true }
+aws-sdk-sts = { hint-mostly-unused = true }
+aws-smithy-types = { hint-mostly-unused = true }
+aws-types = { hint-mostly-unused = true }
+
+[profile.release.package]
+aws-config = { hint-mostly-unused = true }
+aws-sdk-ebs = { hint-mostly-unused = true }
+aws-sdk-ec2 = { hint-mostly-unused = true }
+aws-sdk-kms = { hint-mostly-unused = true }
+aws-sdk-ssm = { hint-mostly-unused = true }
+aws-sdk-sts = { hint-mostly-unused = true }
+aws-smithy-types = { hint-mostly-unused = true }
+aws-types = { hint-mostly-unused = true }
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"

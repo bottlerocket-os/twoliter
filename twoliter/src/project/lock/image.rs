@@ -178,7 +178,7 @@ impl EncodedKitMetadata {
             .decode(&self.0)
             .ok()
             .and_then(|bytes| serde_json::from_slice(bytes.as_slice()).ok())
-            .map(|metadata: ImageMetadata| format!("<ImageMetadata(decoded) [{:?}]>", metadata))
+            .map(|metadata: ImageMetadata| format!("<ImageMetadata(decoded) [{metadata:?}]>"))
     }
 }
 
@@ -285,7 +285,7 @@ impl ImageResolver {
         let canonical_metadata = embedded_kit_metadata
             .try_next()
             .await?
-            .context(format!("could not find metadata for kit {}", uri))?;
+            .context(format!("could not find metadata for kit {uri}"))?;
 
         trace!("Checking that all manifests refer to the same kit.");
         while let Some(kit_metadata) = embedded_kit_metadata.try_next().await? {
@@ -337,8 +337,7 @@ impl ImageResolver {
             .find(|x| x.platform.as_ref().unwrap().architecture == docker_arch)
             .cloned()
             .context(format!(
-                "could not find image for architecture '{}' at {}",
-                docker_arch, uri
+                "could not find image for architecture '{docker_arch}' at {uri}"
             ))?;
 
         let registry = uri.registry.context("failed to resolve image registry")?;

@@ -108,7 +108,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     // If a lock file exists, use that, otherwise use Infra.toml or default
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, true)
         .context(error::ConfigSnafu)?;
-    trace!("Using infra config: {:?}", infra_config);
+    trace!("Using infra config: {infra_config:?}");
 
     let aws = infra_config.aws.unwrap_or_default();
 
@@ -394,8 +394,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
         // Store the region so we can output it to the user
         let region_future = ready(region.clone());
         // Let the user know the copy is starting, when this future goes to run
-        let message_future =
-            lazy(move |_| info!("Starting copy from {} to {}", base_region, region));
+        let message_future = lazy(move |_| info!("Starting copy from {base_region} to {region}"));
         copy_requests.push(message_future.then(|_| join(region_future, copy_future)));
     }
 
@@ -531,7 +530,7 @@ async fn get_account_ids(
         })?;
         grant_accounts.insert(account_id);
     }
-    trace!("Found account IDs {:?}", grant_accounts);
+    trace!("Found account IDs {grant_accounts:?}");
 
     Ok(grant_accounts)
 }
@@ -595,7 +594,8 @@ mod error {
         DescribeImageAttribute {
             image_id: String,
             region: String,
-            source: super::launch_permissions::Error,
+            #[snafu(source(from(super::launch_permissions::Error, Box::new)))]
+            source: Box<super::launch_permissions::Error>,
         },
 
         #[snafu(display("Error getting AMI ID for {} {} in {}: {}", arch, name, region, source))]
@@ -603,13 +603,15 @@ mod error {
             name: String,
             arch: String,
             region: String,
-            source: ami::register::Error,
+            #[snafu(source(from(ami::register::Error, Box::new)))]
+            source: Box<ami::register::Error>,
         },
 
         #[snafu(display("Error getting account ID in {}: {}", region, source))]
         GetCallerIdentity {
             region: String,
-            source: SdkError<GetCallerIdentityError>,
+            #[snafu(source(from(SdkError<GetCallerIdentityError>, Box::new)))]
+            source: Box<SdkError<GetCallerIdentityError>>,
         },
 
         #[snafu(display(
@@ -621,21 +623,24 @@ mod error {
         GetSnapshots {
             image_id: String,
             region: String,
-            source: publish_ami::Error,
+            #[snafu(source(from(publish_ami::Error, Box::new)))]
+            source: Box<publish_ami::Error>,
         },
 
         #[snafu(display("Failed to grant access to {} in {}: {}", thing, region, source))]
         GrantAccess {
             thing: String,
             region: String,
-            source: publish_ami::Error,
+            #[snafu(source(from(publish_ami::Error, Box::new)))]
+            source: Box<publish_ami::Error>,
         },
 
         #[snafu(display("Failed to grant access to {} in {}: {}", thing, region, source))]
         GrantImageAccess {
             thing: String,
             region: String,
-            source: SdkError<ModifyImageAttributeError>,
+            #[snafu(source(from(SdkError<ModifyImageAttributeError>, Box::new)))]
+            source: Box<SdkError<ModifyImageAttributeError>>,
         },
 
         #[snafu(display(
@@ -688,20 +693,23 @@ mod error {
             name: String,
             arch: String,
             region: String,
-            source: ami::register::Error,
+            #[snafu(source(from(ami::register::Error, Box::new)))]
+            source: Box<ami::register::Error>,
         },
 
         #[snafu(display("AMI '{}' in {} did not become available: {}", id, region, source))]
         WaitAmi {
             id: String,
             region: String,
-            source: ami::wait::Error,
+            #[snafu(source(from(ami::wait::Error, Box::new)))]
+            source: Box<ami::wait::Error>,
         },
 
         #[snafu(display("Failed to write AMIs to '{}': {}", path.display(), source))]
         WriteAmis {
             path: PathBuf,
-            source: publish_ami::Error,
+            #[snafu(source(from(publish_ami::Error, Box::new)))]
+            source: Box<publish_ami::Error>,
         },
     }
 }

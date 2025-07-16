@@ -54,13 +54,13 @@ impl Delete {
         let crd_type = self.test.then_some(CrdType::Test);
         let mut labels = Vec::new();
         if let Some(test_name) = self.test_name {
-            labels.push(format!("testsys/test-name={}", test_name))
+            labels.push(format!("testsys/test-name={test_name}"))
         };
         if let Some(arch) = self.arch {
-            labels.push(format!("testsys/arch={}", arch))
+            labels.push(format!("testsys/arch={arch}"))
         };
         if let Some(variant) = self.variant {
-            labels.push(format!("testsys/variant={}", variant))
+            labels.push(format!("testsys/variant={variant}"))
         };
 
         let mut stream = client

@@ -98,7 +98,7 @@ async fn validate_repo(
     .context(repo_error::RepoLoadSnafu {
         metadata_base_url: metadata_url.clone(),
     })?;
-    info!("Loaded TUF repo: {}", metadata_url);
+    info!("Loaded TUF repo: {metadata_url}");
     if validate_targets {
         // Try retrieving listed targets
         retrieve_targets(&repo).await?;
@@ -112,7 +112,7 @@ pub(crate) async fn run(args: &Args, validate_repo_args: &ValidateRepoArgs) -> R
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(repo_error::ConfigSnafu)?;
-    trace!("Parsed infra config: {:?}", infra_config);
+    trace!("Parsed infra config: {infra_config:?}");
     let repo_config = infra_config
         .repo
         .as_ref()

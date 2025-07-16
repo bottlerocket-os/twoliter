@@ -44,8 +44,7 @@ impl CrdInput<'_> {
             &self.repo_config.targets_url,
         ) {
             debug!(
-                "Using TUF metadata from Infra.toml, metadata: '{}', targets: '{}'",
-                metadata_base_url, targets_url
+                "Using TUF metadata from Infra.toml, metadata: '{metadata_base_url}', targets: '{targets_url}'"
             );
             Some(TufRepoConfig {
                 metadata_url: format!("{}{}/{}/", metadata_base_url, &self.variant, &self.arch),
@@ -82,9 +81,9 @@ impl CrdInput<'_> {
             .map(|label| {
                 labels
                     .get(&label.to_string())
-                    .map(|value| format!("{}={}", label, value))
+                    .map(|value| format!("{label}={value}"))
                     .context(error::InvalidSnafu {
-                        what: format!("The label '{}' was missing", label),
+                        what: format!("The label '{label}' was missing"),
                     })
             })
             .collect::<Result<Vec<String>>>()?
@@ -162,10 +161,7 @@ impl CrdInput<'_> {
             .into_iter()
             .find(|path| path.exists())
             .context(error::InvalidSnafu {
-                what: format!(
-                    "Could not find userdata '{}' for test type '{}'",
-                    userdata, test_type
-                ),
+                what: format!("Could not find userdata '{userdata}' for test type '{test_type}'"),
             })
     }
 
@@ -460,15 +456,13 @@ pub(crate) trait CrdCreator: Sync {
             KnownTestType::Migration => {
                 if let Some(image_id) = &crd_input.starting_image_id {
                     debug!(
-                        "Using the provided starting image id for migration testing '{}'",
-                        image_id
+                        "Using the provided starting image id for migration testing '{image_id}'"
                     );
                     image_id.to_string()
                 } else {
                     let image_id = self.starting_image_id(crd_input).await?;
                     debug!(
-                        "A starting image id was not provided, '{}' will be used instead.",
-                        image_id
+                        "A starting image id was not provided, '{image_id}' will be used instead."
                     );
                     image_id
                 }
@@ -505,7 +499,7 @@ pub(crate) trait CrdCreator: Sync {
                 .await?;
             let cluster_crd_name = cluster_output.crd_name();
             if let Some(crd) = cluster_output.crd() {
-                debug!("Cluster crd was created for '{}'", cluster_name);
+                debug!("Cluster crd was created for '{cluster_name}'");
                 crds.push(crd)
             }
             let bottlerocket_output = self
@@ -520,7 +514,7 @@ pub(crate) trait CrdCreator: Sync {
             match &test_type {
                 KnownTestType::Conformance | KnownTestType::Quick => {
                     if let Some(crd) = bottlerocket_output.crd() {
-                        debug!("Bottlerocket crd was created for '{}'", cluster_name);
+                        debug!("Bottlerocket crd was created for '{cluster_name}'");
                         crds.push(crd)
                     }
                     let test_output = self
@@ -539,7 +533,7 @@ pub(crate) trait CrdCreator: Sync {
                 }
                 KnownTestType::Workload => {
                     if let Some(crd) = bottlerocket_output.crd() {
-                        debug!("Bottlerocket crd was created for '{}'", cluster_name);
+                        debug!("Bottlerocket crd was created for '{cluster_name}'");
                         crds.push(crd)
                     }
                     let test_output = self
@@ -558,7 +552,7 @@ pub(crate) trait CrdCreator: Sync {
                 }
                 KnownTestType::Migration => {
                     if let Some(crd) = bottlerocket_output.crd() {
-                        debug!("Bottlerocket crd was created for '{}'", cluster_name);
+                        debug!("Bottlerocket crd was created for '{cluster_name}'");
                         crds.push(crd)
                     }
                     let mut tests = Vec::new();
@@ -658,10 +652,7 @@ pub(crate) trait CrdCreator: Sync {
         let crd_template_file_path = &override_crd_template
             .or_else(|| crd_input.custom_crd_template_file_path())
             .context(error::InvalidSnafu {
-                what: format!(
-                    "A custom yaml file could not be found for test type '{}'",
-                    test_type
-                ),
+                what: format!("A custom yaml file could not be found for test type '{test_type}'"),
             })?;
         info!(
             "Creating custom crd from '{}'",

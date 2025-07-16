@@ -27,12 +27,12 @@ pub(crate) fn visit_container_leaves_of_type(
         syn::Type::Path(type_path) => {
             if is_container_type(&type_path.path) {
                 // Get the generic args for the type and visit them
-                if let Some(seg) = type_path.path.segments.last_mut() {
-                    if let syn::PathArguments::AngleBracketed(generic_args) = &mut seg.arguments {
-                        for generic_arg in &mut generic_args.args {
-                            if let syn::GenericArgument::Type(inner_ty) = generic_arg {
-                                visit_container_leaves_of_type(inner_ty, visitor);
-                            }
+                if let Some(seg) = type_path.path.segments.last_mut()
+                    && let syn::PathArguments::AngleBracketed(generic_args) = &mut seg.arguments
+                {
+                    for generic_arg in &mut generic_args.args {
+                        if let syn::GenericArgument::Type(inner_ty) = generic_arg {
+                            visit_container_leaves_of_type(inner_ty, visitor);
                         }
                     }
                 }

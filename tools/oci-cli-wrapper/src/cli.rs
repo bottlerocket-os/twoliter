@@ -14,7 +14,7 @@ impl CommandLine {
         let debug_cmd = [
             vec![format!("{}", self.path.display())],
             args.iter()
-                .map(|arg| format!("'{}'", arg))
+                .map(|arg| format!("'{arg}'"))
                 .collect::<Vec<_>>(),
         ]
         .concat()
@@ -58,7 +58,7 @@ impl CommandLine {
             "Executing '{}' with args [{}]",
             self.path.display(),
             args.iter()
-                .map(|arg| format!("'{}'", arg))
+                .map(|arg| format!("'{arg}'"))
                 .collect::<Vec<_>>()
                 .join(", ")
         );

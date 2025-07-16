@@ -43,10 +43,7 @@ fn find_upcoming_metadata_expiration(
     end_date: DateTime<Utc>,
 ) -> HashMap<tough::schema::RoleType, DateTime<Utc>> {
     let mut expirations = HashMap::new();
-    info!(
-        "Looking for metadata expirations happening from now to {}",
-        end_date
-    );
+    info!("Looking for metadata expirations happening from now to {end_date}");
     if repo.root().signed.expires <= end_date {
         expirations.insert(tough::schema::RoleType::Root, repo.root().signed.expires);
     }
@@ -91,7 +88,7 @@ async fn check_expirations(
     .context(repo_error::RepoLoadSnafu {
         metadata_base_url: metadata_url.clone(),
     })?;
-    info!("Loaded TUF repo:\t{}", metadata_url);
+    info!("Loaded TUF repo:\t{metadata_url}");
 
     info!("Root expiration:\t{}", repo.root().signed.expires);
     info!("Snapshot expiration:\t{}", repo.snapshot().signed.expires);
@@ -103,10 +100,7 @@ async fn check_expirations(
         let now = Utc::now();
         for (role, expiration_date) in upcoming_expirations {
             if expiration_date < now {
-                error!(
-                    "Repo '{}': '{}' expired on {}",
-                    metadata_url, role, expiration_date
-                )
+                error!("Repo '{metadata_url}': '{role}' expired on {expiration_date}")
             } else {
                 warn!(
                     "Repo '{}': '{}' expiring in {} at {}",
@@ -130,7 +124,7 @@ pub(crate) async fn run(args: &Args, check_expirations_args: &CheckExpirationsAr
     // If a lock file exists, use that, otherwise use Infra.toml
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, false)
         .context(repo_error::ConfigSnafu)?;
-    trace!("Parsed infra config: {:?}", infra_config);
+    trace!("Parsed infra config: {infra_config:?}");
     let repo_config = infra_config
         .repo
         .as_ref()

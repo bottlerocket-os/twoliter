@@ -76,14 +76,14 @@ const MIN_FD: i32 = 3;
 #[cfg(target_os = "linux")]
 fn fetch_fd(socket: &str) -> Result<i32> {
     let addr = uds::UnixSocketAddr::from_abstract(socket.as_bytes())
-        .with_context(|| format!("failed to create socket {}", socket))?;
+        .with_context(|| format!("failed to create socket {socket}"))?;
     let client = uds::UnixSeqpacketConn::connect_unix_addr(&addr)
-        .with_context(|| format!("failed to connect to socket {}", socket))?;
+        .with_context(|| format!("failed to connect to socket {socket}"))?;
 
     let mut fd_buf = [-1; 1];
     let (_, _, fds) = client
         .recv_fds(&mut [0u8; 1], &mut fd_buf)
-        .with_context(|| format!("failed to receive file descriptor from socket {}", socket))?;
+        .with_context(|| format!("failed to receive file descriptor from socket {socket}"))?;
 
     ensure!(
         fds == 1,
@@ -93,12 +93,7 @@ fn fetch_fd(socket: &str) -> Result<i32> {
     let fd = fd_buf
         .first()
         .filter(|fd| **fd >= MIN_FD)
-        .with_context(|| {
-            format!(
-                "did not receive valid file descriptor from socket {}",
-                socket
-            )
-        })?;
+        .with_context(|| format!("did not receive valid file descriptor from socket {socket}"))?;
 
     let dupfd =
         duplicate_fd(*fd).with_context(|| format!("failed to duplicate file descriptor {fd}"))?;

@@ -94,7 +94,7 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
         serde_json::from_slice(&ami_input_bytes).context(error::DeserializeSnafu {
             path: &publish_args.ami_input,
         })?;
-    trace!("Parsed AMI input: {:?}", ami_input);
+    trace!("Parsed AMI input: {ami_input:?}");
 
     // pubsys will not create a file if it did not create AMIs, so we should only have an empty
     // file if a user created one manually, and they shouldn't be creating an empty file.
@@ -108,7 +108,7 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
     // If a lock file exists, use that, otherwise use Infra.toml or default
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, true)
         .context(error::ConfigSnafu)?;
-    trace!("Using infra config: {:?}", infra_config);
+    trace!("Using infra config: {infra_config:?}");
 
     let aws = infra_config.aws.unwrap_or_default();
 
@@ -193,12 +193,9 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
     }
 
     let snapshots = get_regional_snapshots(&amis, &ec2_clients).await?;
-    trace!("Found snapshots: {:?}", snapshots);
+    trace!("Found snapshots: {snapshots:?}");
 
-    info!(
-        "Updating all snapshot permissions before changing any AMI permissions - {}",
-        description
-    );
+    info!("Updating all snapshot permissions before changing any AMI permissions - {description}");
     modify_regional_snapshots(
         &publish_args.modify_opts,
         &operation,
@@ -207,7 +204,7 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
     )
     .await?;
 
-    info!("Updating AMI permissions - {}", description);
+    info!("Updating AMI permissions - {description}");
     modify_regional_images(
         &publish_args.modify_opts,
         &operation,
@@ -515,7 +512,7 @@ pub(crate) async fn modify_regional_images(
         match modify_image_response {
             Ok(_) => {
                 success_count += 1;
-                info!("Modified permissions of image {} in {}", image_id, region);
+                info!("Modified permissions of image {image_id} in {region}");
 
                 // Set the `public` and `launch_permissions` fields for the Image object
                 let image = images.get_mut(&Region::new(region.clone())).ok_or(

@@ -157,7 +157,7 @@ impl Variant {
     /// This can be used in a `build.rs` file to tell cargo that the crate needs to be rebuilt if
     /// the variant changes.
     pub fn rerun_if_changed() {
-        println!("cargo:rerun-if-env-changed={}", VARIANT_ENV);
+        println!("cargo:rerun-if-env-changed={VARIANT_ENV}");
     }
 
     /// This can be used in a `build.rs` file to emit `cfg` values that can be used for conditional
@@ -177,7 +177,7 @@ impl Variant {
     /// `#[cfg(variant_flavor = "none")]`
     pub fn emit_cfgs(&self) {
         Self::rerun_if_changed();
-        println!("cargo:rustc-cfg=variant=\"{}\"", self);
+        println!("cargo:rustc-cfg=variant=\"{self}\"");
         println!("cargo:rustc-cfg=variant_platform=\"{}\"", self.platform());
         println!("cargo:rustc-cfg=variant_runtime=\"{}\"", self.runtime());
         println!("cargo:rustc-cfg=variant_family=\"{}\"", self.family());
@@ -222,7 +222,7 @@ impl Variant {
                 variant: variant.clone()
             }
         );
-        let variant_family = format!("{}-{}", platform, runtime);
+        let variant_family = format!("{platform}-{runtime}");
         let variant_version = parts.next().map(|s| s.to_string());
         if let Some(value) = variant_version.as_ref() {
             ensure!(
@@ -293,7 +293,7 @@ impl<'de> Deserialize<'de> for Variant {
         D: Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        Variant::new(value).map_err(|e| D::Error::custom(format!("Error parsing variant: {}", e)))
+        Variant::new(value).map_err(|e| D::Error::custom(format!("Error parsing variant: {e}")))
     }
 }
 

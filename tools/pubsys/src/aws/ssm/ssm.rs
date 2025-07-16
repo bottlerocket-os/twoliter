@@ -98,7 +98,7 @@ where
                 let region = region.clone();
                 async move {
                     rate_limit_ssm_get_parameters(&region).await;
-                    trace!("Requesting {:?} in {}", names_chunk, region);
+                    trace!("Requesting {names_chunk:?} in {region}");
                     ssm_client
                         .get_parameters()
                         .set_names((!names_chunk.is_empty()).then_some(names_chunk))
@@ -159,10 +159,7 @@ where
             error::MissingInResponseSnafu {
                 region: region.as_ref(),
                 request_type: "GetParameters",
-                missing: format!(
-                    "parameters - got {}, expected {}",
-                    total_count, expected_len
-                ),
+                missing: format!("parameters - got {total_count}, expected {expected_len}"),
             }
         );
 
@@ -178,7 +175,7 @@ where
                     let value = parameter.value.context(error::MissingInResponseSnafu {
                         region: region.as_ref(),
                         request_type: "GetParameters",
-                        missing: format!("value for parameter {}", name),
+                        missing: format!("value for parameter {name}"),
                     })?;
                     parameters.insert(SsmKey::new(region.clone(), name), value);
                 }
@@ -187,10 +184,7 @@ where
     }
 
     for region in new_regions {
-        warn!(
-            "Invalid namespace in {}, this is OK for the first publish in a region",
-            region
-        );
+        warn!("Invalid namespace in {region}, this is OK for the first publish in a region");
     }
 
     Ok(parameters)
@@ -205,7 +199,7 @@ pub(crate) async fn get_parameters_by_prefix<'a>(
     // region
     let mut requests = Vec::with_capacity(clients.len());
     for region in clients.keys() {
-        trace!("Requesting parameters in {}", region);
+        trace!("Requesting parameters in {region}");
         let ssm_client: &SsmClient = &clients[region];
         let get_future = get_parameters_by_prefix_in_region(region, ssm_client, ssm_prefix);
 
@@ -226,7 +220,7 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
     client: &SsmClient,
     ssm_prefix: &str,
 ) -> Result<SsmParameters> {
-    info!("Retrieving SSM parameters in {}", region);
+    info!("Retrieving SSM parameters in {region}");
     let mut parameters = HashMap::new();
 
     let paginated_response_stream = stream! {
@@ -278,7 +272,7 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
             );
         }
     }
-    info!("SSM parameters in {} have been retrieved", region);
+    info!("SSM parameters in {region} have been retrieved");
     Ok(parameters)
 }
 
@@ -325,10 +319,7 @@ pub(crate) async fn set_parameters(
 
         if should_increase_interval {
             request_interval *= interval_factor;
-            warn!(
-                "Requests were throttled, increasing interval to {:?}",
-                request_interval
-            );
+            warn!("Requests were throttled, increasing interval to {request_interval:?}");
         }
         should_increase_interval = false;
 
@@ -422,7 +413,7 @@ pub(crate) async fn set_parameters(
     if !failed_parameters.is_empty() {
         for (region, failures) in &failed_parameters {
             for (parameter, error) in failures {
-                error!("Failed to set {} in {}: {}", parameter, region, error);
+                error!("Failed to set {parameter} in {region}: {error}");
             }
         }
         return error::SetParametersSnafu {
@@ -457,7 +448,7 @@ pub(crate) async fn validate_parameters(
         retry_strategy,
         || async { validate_parameters_inner(expected_parameters, ssm_clients).await },
         |e: &'_ Error| {
-            error!("Failed to validate SSM parameters: {}", e);
+            error!("Failed to validate SSM parameters: {e}");
             true
         },
     )
@@ -484,14 +475,11 @@ async fn validate_parameters_inner(
         // parameter wasn't updated / created.
         if let Some(updated_value) = updated_parameters.get(expected_key) {
             if updated_value != expected_value {
-                error!("Failed to set {} in {}", expected_name, expected_region);
+                error!("Failed to set {expected_name} in {expected_region}");
                 success = false;
             }
         } else {
-            error!(
-                "{} in {} still doesn't exist",
-                expected_name, expected_region
-            );
+            error!("{expected_name} in {expected_region} still doesn't exist");
             success = false;
         }
     }
