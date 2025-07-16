@@ -34,7 +34,7 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
         .context("Unable to get Dockerfile metadata")?;
     let mtime = FileTime::from_last_modification_time(&metadata);
 
-    let mut write_tasks = vec![
+    let write_tasks = vec![
         write_bin(
             "buildsys",
             twoliter_tool_buildsys::BUILDSYS.reader(),
@@ -55,31 +55,20 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
         ),
         write_bin("unplug", twoliter_tool_unplug::UNPLUG.reader(), &dir, mtime),
         write_bin("krane", krane_bundle::KRANE_BIN.reader(), &dir, mtime),
-    ];
-
-    #[cfg(feature = "pubsys")]
-    {
-        write_tasks.push(write_bin(
+        write_bin(
             "pubsys-setup",
             twoliter_tool_pubsys_setup::PUBSYS_SETUP.reader(),
             &dir,
             mtime,
-        ));
-        write_tasks.push(write_bin(
-            "pubsys",
-            twoliter_tool_pubsys::PUBSYS.reader(),
+        ),
+        write_bin("pubsys", twoliter_tool_pubsys::PUBSYS.reader(), &dir, mtime),
+        write_bin(
+            "testsys",
+            twoliter_tool_testsys::TESTSYS.reader(),
             &dir,
             mtime,
-        ));
-    }
-
-    #[cfg(feature = "testsys")]
-    write_tasks.push(write_bin(
-        "testsys",
-        twoliter_tool_testsys::TESTSYS.reader(),
-        &dir,
-        mtime,
-    ));
+        ),
+    ];
 
     try_join_all(write_tasks.into_iter()).await?;
 
