@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...HEAD
 
-## [0.11.0-rc2] - 2024-07-17
+## [0.11.0] - 2024-07-17
 
 ### Fixed
 * Fix race condition in bypass container launching ([#553])
@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#553]: https://github.com/bottlerocket-os/twoliter/pull/553
 [#555]: https://github.com/bottlerocket-os/twoliter/pull/555
 
-[0.11.0-rc2]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...v0.11.0-rc2
+[0.11.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...v0.11.0
 
 ## [0.10.1] - 2025-05-14
 
