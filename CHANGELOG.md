@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...HEAD
 
-## [0.11.0-rc1] - 2024-07-14
+## [0.11.0-rc2] - 2024-07-17
+
+### Fixed
+* Fix race condition in bypass container launching ([#553])
 
 ### Added
 * Add support to delete individual tests in testsys ([#549])
@@ -19,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 * Use "fat" LTO for dist and "thin" for release ([#535])
 * Compress included tool archives ([#537])
+* Use "profile-hint-mostly-unused" for AWS SDKs ([#555])
 
 ### Improved
 * Reclaim reserved space on ext4 filesystems ([#550])
@@ -29,8 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#537]: https://github.com/bottlerocket-os/twoliter/pull/537
 [#549]: https://github.com/bottlerocket-os/twoliter/pull/549
 [#550]: https://github.com/bottlerocket-os/twoliter/pull/550
+[#553]: https://github.com/bottlerocket-os/twoliter/pull/553
+[#555]: https://github.com/bottlerocket-os/twoliter/pull/555
 
-[0.11.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...v0.11.0-rc1
+[0.11.0-rc2]: https://github.com/bottlerocket-os/twoliter/compare/v0.10.1...v0.11.0-rc2
 
 ## [0.10.1] - 2025-05-14
 
