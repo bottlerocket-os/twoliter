@@ -15,6 +15,7 @@ mod views;
 pub(crate) use self::verification::VerificationTagger;
 
 use crate::common::fs::{create_dir_all, read, write};
+use crate::compatibility::SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION;
 use crate::project::{Project, ValidIdentifier};
 use crate::schema_version::SchemaVersion;
 use anyhow::{bail, ensure, Context, Result};
@@ -39,6 +40,7 @@ struct ExternalKitMetadata {
     sdk: LockedImage,
     #[serde(rename = "kit")]
     kits: Vec<LockedImage>,
+    #[serde(default = "Bottlerocket")]
     project_vendor: String,
 }
 
@@ -113,26 +115,19 @@ impl LockedSDK {
 }
 
 /// Represents the structure of a `Twoliter.lock` lock file.
-#[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Lock {
-    /// The version of the Twoliter.toml this was generated from
-    pub schema_version: SchemaVersion<1>,
+    /// The supported version of the Twoliter.lock format.
+    ///
+    /// This version is independent of the Twoliter.toml schema version.
+    pub schema_version: SchemaVersion<SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION>,
     /// The resolved bottlerocket sdk
     pub sdk: LockedImage,
     /// Resolved kit dependencies
     pub kit: Vec<LockedImage>,
     /// The project vendor
     pub project_vendor: String,
-}
-
-impl PartialEq for Lock {
-    fn eq(&self, other: &Self) -> bool {
-        self.schema_version == other.schema_version
-            && self.sdk == other.sdk
-            && self.kit == other.kit
-            && self.project_vendor == other.project_vendor
-    }
 }
 
 #[allow(dead_code)]
@@ -330,7 +325,7 @@ impl Lock {
             .await?;
 
         Ok(Self {
-            schema_version: project.schema_version(),
+            schema_version: SchemaVersion::<SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION>,
             kit: locked,
             sdk,
             project_vendor: project.project_vendor.clone(),

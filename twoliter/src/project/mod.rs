@@ -1,4 +1,5 @@
 mod lock;
+mod migrate;
 pub(crate) mod vendor;
 
 pub(crate) use self::vendor::ArtifactVendor;
@@ -6,8 +7,9 @@ pub(crate) use lock::VerificationTagger;
 use path_absolutize::Absolutize;
 
 use self::lock::{Lock, LockedSDK, Override};
+use self::migrate::parser::UnvalidatedProject;
 use crate::common::fs::{self, read_to_string};
-use crate::compatibility::SUPPORTED_TWOLITER_PROJECT_SCHEMA_VERSION;
+use crate::compatibility::LATEST_TWOLITER_PROJECT_SCHEMA_VERSION;
 use crate::docker::ImageUri;
 use crate::schema_version::SchemaVersion;
 use anyhow::{ensure, Context, Result};
@@ -53,12 +55,12 @@ pub(crate) struct Project<L: ProjectLock> {
     project_dir: PathBuf,
 
     /// The version of this schema struct.
-    schema_version: SchemaVersion<SUPPORTED_TWOLITER_PROJECT_SCHEMA_VERSION>,
+    schema_version: SchemaVersion<LATEST_TWOLITER_PROJECT_SCHEMA_VERSION>,
 
     /// The version that will be given to released artifacts such as kits and variants.
     release_version: String,
 
-    /// The build-vendor for who is going to build the kit or variant
+    /// The project-vendor for who is going to build the kit or variant
     project_vendor: String,
 
     /// The Bottlerocket SDK container image.
@@ -83,11 +85,12 @@ impl Project<Unlocked> {
         let data = fs::read_to_string(&path)
             .await
             .context(format!("Unable to read project file '{}'", path.display()))?;
-        let unvalidated: UnvalidatedProject = toml::from_str(&data).context(format!(
-            "Unable to deserialize project file '{}'",
-            path.display()
-        ))?;
-        let project = unvalidated.validate(path).await?;
+
+        // Detect current version and migrate to target version if needed
+        let migrated_content =
+            migrate::migrate_project_content(&data).context("Failed to migrate project content")?;
+
+        let project = migrated_content.validate(path).await?;
 
         // When projects are resolved, tags are written indicating which artifacts have been checked
         // against the lockfile.
@@ -177,10 +180,6 @@ impl<L: ProjectLock> Project<L> {
 
     pub(crate) fn external_kits_metadata(&self) -> PathBuf {
         self.project_dir.join(EXTERNAL_KIT_METADATA)
-    }
-
-    pub(crate) fn schema_version(&self) -> SchemaVersion<1> {
-        self.schema_version
     }
 
     pub(crate) fn release_version(&self) -> &str {
@@ -496,23 +495,6 @@ impl VendedArtifact for Image {
     }
 }
 
-/// This is used to `Deserialize` a project, then run validation code before returning a valid
-/// [`Project`]. This is necessary both because there is no post-deserialization serde hook for
-/// validation and, even if there was, we need to know the project directory path in order to check
-/// some things.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct UnvalidatedProject {
-    schema_version: SchemaVersion<1>,
-    project_vendor: String,
-    release_version: String,
-    sdk: Option<Image>,
-    // this ValidIdentifier is actually the vendor name
-    // Vendor is the registry
-    vendor: Option<BTreeMap<ValidIdentifier, Vendor>>,
-    kit: Option<Vec<Image>>,
-}
-
 impl UnvalidatedProject {
     /// Constructs a [`Project`] from an [`UnvalidatedProject`] after validating fields.
     async fn validate(self, path: impl AsRef<Path>) -> Result<Project<Unlocked>> {
@@ -707,6 +689,7 @@ mod private {
 mod test {
     use super::*;
     use crate::common::fs;
+    use crate::schema_version::SchemaVersion;
     use crate::test::{data_dir, projects_dir};
     use tempfile::TempDir;
 
@@ -717,7 +700,10 @@ mod test {
         let deserialized = Project::load(path).await.unwrap();
 
         // Add checks here as desired to validate deserialization.
-        assert_eq!(SchemaVersion::<1>, deserialized.schema_version);
+        assert_eq!(
+            SchemaVersion::<LATEST_TWOLITER_PROJECT_SCHEMA_VERSION>,
+            deserialized.schema_version
+        );
         assert_eq!(1, deserialized.vendor.len());
         assert!(deserialized
             .vendor
@@ -750,8 +736,8 @@ mod test {
         let err = result.err().unwrap();
         let caused_by = err.source().unwrap().to_string();
         assert!(
-            caused_by.contains("got '4294967295'"),
-            "Expected the error message to contain \"got '4294967295'\", but the error message was this: {}",
+            caused_by.contains("Failed to detect schema version"),
+            "Expected the error message to contain \"4294967295\", but the error message was this: {}",
             caused_by
         );
     }
@@ -840,7 +826,7 @@ mod test {
     #[tokio::test]
     async fn test_vendor_specifications() {
         let project = UnvalidatedProject {
-            schema_version: SchemaVersion,
+            schema_version: SchemaVersion::<2>,
             release_version: "1.0.0".into(),
             project_vendor: "Bottlerocket".to_owned(),
             sdk: Some(Image {
