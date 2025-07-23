@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...HEAD
 
-## [0.11.0] - 2024-07-17
+## [0.11.0] - 2025-07-17
 
 ### Fixed
 * Fix race condition in bypass container launching ([#553])
