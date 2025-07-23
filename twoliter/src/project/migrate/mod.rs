@@ -83,9 +83,6 @@ fn migrate_project_content_with_registry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
-    
 
     #[test]
     fn test_migrate_project_content_v1_to_v2() {
@@ -171,6 +168,9 @@ mod tests {
 
         // Then An error is returned
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Registry is not provided"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Registry is not provided"));
     }
 }

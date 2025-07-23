@@ -177,10 +177,7 @@ mod tests {
         mock2.expect_current_version().return_const(2u32);
         mock2.expect_to_version().return_const(3u32);
 
-        let migrators: Vec<Box<dyn ProjectMigrator>> = vec![
-            Box::new(mock1),
-            Box::new(mock2),
-        ];
+        let migrators: Vec<Box<dyn ProjectMigrator>> = vec![Box::new(mock1), Box::new(mock2)];
 
         // When A registry is created
         let registry = MigrationRegistry::new(migrators);
@@ -357,7 +354,8 @@ mod tests {
         let mut mock1 = MockProjectMigrator::new();
         mock1.expect_current_version().return_const(1u32);
         mock1.expect_to_version().return_const(2u32);
-        mock1.expect_migrate()
+        mock1
+            .expect_migrate()
             .with(predicate::always())
             .times(1)
             .returning(|_| Ok(Box::new(43u32)));
@@ -365,7 +363,8 @@ mod tests {
         let mut mock2 = MockProjectMigrator::new();
         mock2.expect_current_version().return_const(2u32);
         mock2.expect_to_version().return_const(3u32);
-        mock2.expect_migrate()
+        mock2
+            .expect_migrate()
             .with(predicate::always())
             .times(1)
             .returning(|_| Ok(Box::new(44u32)));
@@ -394,7 +393,10 @@ mod tests {
 
         // Then An error is returned
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to find migration path"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to find migration path"));
     }
 
     #[test]
