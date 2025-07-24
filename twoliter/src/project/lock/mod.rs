@@ -190,6 +190,10 @@ impl Lock {
             .context("failed to read lockfile")?;
         let lock: Self =
             toml::from_str(lock_str.as_str()).context("failed to deserialize lockfile")?;
+
+        lock.validate_version_source_consistency()
+            .context("lockfile validation failed")?;
+
         Ok(lock)
     }
 
@@ -198,6 +202,43 @@ impl Lock {
             sdk: self.sdk.clone(),
             kits: self.kit.clone(),
         }
+    }
+
+    fn validate_version_source_consistency(&self) -> Result<()> {
+        Self::validate_locked_image_consistency(&self.sdk, "SDK")?;
+
+        for (index, kit) in self.kit.iter().enumerate() {
+            Self::validate_locked_image_consistency(
+                kit,
+                &format!("kit[{}] ({})", index, kit.name),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_locked_image_consistency(image: &LockedImage, context: &str) -> Result<()> {
+        let expected_tag = format!("v{}", image.version);
+
+        let actual_tag = image
+            .source
+            .rsplit(':')
+            .next()
+            .context("source URI does not contain a tag (missing ':' separator)")?;
+
+        if actual_tag != expected_tag {
+            bail!(
+                "Version-source mismatch in lockfile for {}: \
+                version field is '{}' but source URI '{}' has tag '{}'. \
+                Expected source to end with ':{expected_tag}'. \
+                This usually happens when the lockfile was manually edited.",
+                context,
+                image.version,
+                image.source,
+                actual_tag
+            );
+        }
+        Ok(())
     }
 
     /// Fetches all external kits defined in a Twoliter.lock to the build directory
