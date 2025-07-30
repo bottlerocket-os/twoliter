@@ -1,0 +1,45 @@
+[package]
+name = "casi"
+version = "0.1.0"
+authors = ["Jarrett Tierney <jmt@amazon.com>"]
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+publish = false
+
+[dependencies]
+astral-tokio-tar.workspace = true
+async-compression = { workspace = true, features = ["tokio", "zstd"] }
+async-trait.workspace = true
+aws-config.workspace = true
+aws-sdk-s3.workspace = true
+aws-smithy-types.workspace = true
+aws-types.workspace = true
+bon.workspace = true
+chrono = { workspace = true, features = ["serde", "now"] }
+clap = { workspace = true, features = ["derive"] }
+futures.workspace = true
+hex.workspace = true
+indicatif.workspace = true
+oci-spec.workspace = true
+olpc-cjson.workspace = true
+owo-colors = { workspace = true, features = ["supports-colors"] }
+parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
+rand.workspace = true
+semver = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+snafu.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-indicatif.workspace = true
+tracing-subscriber = { workspace = true, features = [
+    "env-filter",
+    "fmt",
+    "registry",
+] }
+url = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4"] }
+walkdir.workspace = true
+zstd.workspace = true

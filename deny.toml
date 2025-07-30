@@ -62,6 +62,8 @@ wildcards = "deny"
 skip = [
     # several dependencies are using multiple versions of base64
     { name = "base64" },
+    # owo-colors uses two versions of supports-color by itself
+    { name = "supports-color" }
 ]
 
 skip-tree = [
