@@ -15,6 +15,7 @@ mod views;
 pub(crate) use self::verification::VerificationTagger;
 
 use crate::common::fs::{create_dir_all, read, write};
+use crate::compatibility::SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION;
 use crate::project::{Project, ValidIdentifier};
 use crate::schema_version::SchemaVersion;
 use anyhow::{bail, ensure, Context, Result};
@@ -42,6 +43,8 @@ struct ExternalKitMetadata {
     sdk: LockedImage,
     #[serde(rename = "kit")]
     kits: Vec<LockedImage>,
+    #[serde(default = "Bottlerocket")]
+    project_vendor: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -68,7 +71,6 @@ impl LockedSDK {
     #[instrument(level = "trace", skip(project))]
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
         info!("Resolving SDK project reference to check against lock file");
-
         let current_lock = Lock::current_lock_state(project).await?;
         let resolved_lock = Self::resolve_sdk(project)
             .await?
@@ -116,23 +118,19 @@ impl LockedSDK {
 }
 
 /// Represents the structure of a `Twoliter.lock` lock file.
-#[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, Ord, PartialOrd, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Lock {
-    /// The version of the Twoliter.toml this was generated from
-    pub schema_version: SchemaVersion<1>,
+    /// The supported version of the Twoliter.lock format.
+    ///
+    /// This version is independent of the Twoliter.toml schema version.
+    pub schema_version: SchemaVersion<SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION>,
     /// The resolved bottlerocket sdk
     pub sdk: LockedImage,
     /// Resolved kit dependencies
     pub kit: Vec<LockedImage>,
-}
-
-impl PartialEq for Lock {
-    fn eq(&self, other: &Self) -> bool {
-        self.schema_version == other.schema_version
-            && self.sdk == other.sdk
-            && self.kit == other.kit
-    }
+    /// The project vendor
+    pub project_vendor: String,
 }
 
 #[allow(dead_code)]
@@ -200,6 +198,7 @@ impl Lock {
         ExternalKitMetadata {
             sdk: self.sdk.clone(),
             kits: self.kit.clone(),
+            project_vendor: self.project_vendor.clone(),
         }
     }
 
@@ -342,9 +341,10 @@ impl Lock {
             .await?;
 
         Ok(Self {
-            schema_version: project.schema_version(),
+            schema_version: SchemaVersion::<SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION>,
             kit: locked,
             sdk,
+            project_vendor: project.project_vendor.clone(),
         })
     }
 }

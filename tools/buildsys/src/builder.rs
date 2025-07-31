@@ -211,6 +211,7 @@ struct VariantBuildArgs {
     package_dependencies: Vec<String>,
     kit_dependencies: Vec<String>,
     external_kit_dependencies: Vec<String>,
+    project_vendor: String,
     data_image_publish_size_gib: i32,
     data_image_size_gib: String,
     image_features: HashSet<ImageFeature>,
@@ -248,6 +249,7 @@ impl VariantBuildArgs {
             "EXTERNAL_KIT_DEPENDENCIES",
             self.external_kit_dependencies.join(" "),
         );
+        args.build_arg("PROJECT_VENDOR", &self.project_vendor);
         args.build_arg("OS_IMAGE_PUBLISH_SIZE_GIB", &self.os_image_publish_size_gib);
         args.build_arg("OS_IMAGE_SIZE_GIB", &self.os_image_size_gib);
         args.build_arg("PACKAGES", &self.packages);
@@ -445,6 +447,8 @@ impl DockerBuild {
         let variant_runtime = v.runtime().into();
         let variant_family = v.family().into();
         let variant_flavor = v.variant_flavor().unwrap_or("").into();
+        let external_kit_metadata_view =
+            ExternalKitMetadataView::load(&args.common.root_dir).context(error::GraphSnafu)?;
 
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
@@ -469,9 +473,8 @@ impl DockerBuild {
             target_build_args: TargetBuildArgs::Variant(VariantBuildArgs {
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 kit_dependencies: manifest.kit_dependencies().context(error::GraphSnafu)?,
-                external_kit_dependencies: ExternalKitMetadataView::load(args.common.root_dir)
-                    .context(error::GraphSnafu)?
-                    .list(),
+                external_kit_dependencies: external_kit_metadata_view.list(),
+                project_vendor: external_kit_metadata_view.get_project_vendor().to_owned(),
                 data_image_publish_size_gib,
                 data_image_size_gib: data_image_size_gib.to_string(),
                 image_features: manifest.info().image_features().unwrap_or_default(),

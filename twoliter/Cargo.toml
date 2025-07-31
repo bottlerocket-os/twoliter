@@ -40,6 +40,7 @@ tracing = { workspace = true, features = ["log"] }
 uuid = { workspace = true, features = ["v4"] }
 which.workspace = true
 zstd.workspace = true
+maplit.workspace = true
 
 # Binary dependencies. These are binaries that we want to embed in the Twoliter binary
 twoliter-tool-buildsys.workspace = true
@@ -58,6 +59,7 @@ tar.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true
+mockall.workspace = true
 
 [features]
 default = ["integ-tests"]

@@ -1,8 +1,10 @@
 //! This module contains version numbers which allow Twoliter to detect compatibility with its
 //! own artifacts.
 
-/// Defines the exact supported schema version of Twoliter.toml supported by twoliter
-pub const SUPPORTED_TWOLITER_PROJECT_SCHEMA_VERSION: u32 = 1;
+/// Defines the latest schema version of Twoliter.toml supported by twoliter
+pub const LATEST_TWOLITER_PROJECT_SCHEMA_VERSION: u32 = 2;
+
+pub const SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION: u32 = 2;
 
 /// Defines the kit metadata version supported by twoliter.
 ///
