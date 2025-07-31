@@ -18,6 +18,7 @@ use crate::common::fs::{create_dir_all, read, write};
 use crate::project::{Project, ValidIdentifier};
 use crate::schema_version::SchemaVersion;
 use anyhow::{bail, ensure, Context, Result};
+use futures::{stream, StreamExt, TryStreamExt};
 use image::{ImageResolver, LockedImage};
 use oci_cli_wrapper::ImageTool;
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
@@ -33,6 +34,8 @@ use tracing::{debug, error, info, instrument};
 use super::{Locked, ProjectLock, Unlocked};
 
 const TWOLITER_LOCK: &str = "Twoliter.lock";
+
+const CONCURRENT_KIT_EXTRACTIONS: usize = 8;
 
 #[derive(Serialize, Debug)]
 struct ExternalKitMetadata {
@@ -214,15 +217,28 @@ impl Lock {
             dependencies = ?self.kit.iter().map(ToString::to_string).collect::<Vec<_>>(),
             "Extracting kit dependencies."
         );
-        for image in self.kit.iter() {
-            let image = project.as_project_image(image)?;
-            let resolver = ImageResolver::from_image(&image)?;
-            resolver
-                .extract(&image_tool, &project.external_kits_dir(), arch)
-                .await?;
-        }
 
-        self.synchronize_metadata(project).await
+        let kit_stream = stream::iter(self.kit.iter());
+        kit_stream
+            .map(|kit| {
+                Result::<_, anyhow::Error>::Ok(async {
+                    let image = project.as_project_image(kit)?;
+                    let resolver = ImageResolver::from_image(&image)?;
+                    resolver
+                        .extract(&image_tool, &project.external_kits_dir(), arch)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .try_buffer_unordered(CONCURRENT_KIT_EXTRACTIONS)
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        self.synchronize_metadata(project).await?;
+
+        info!("Finished fetching kit dependencies.");
+
+        Ok(())
     }
 
     pub(crate) async fn synchronize_metadata(&self, project: &Project<Locked>) -> Result<()> {
