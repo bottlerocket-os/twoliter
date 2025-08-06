@@ -21,10 +21,16 @@ fn main() {
 
     // Download and checksum-verify crane
     env::set_current_dir(&out_dir).expect("Failed to set current directory");
-    Command::new(script_dir.join("../build-cache-fetch"))
+    let fetch_status = Command::new(script_dir.join("../build-cache-fetch"))
         .arg(script_dir.join("hashes/crane"))
         .status()
         .expect("Failed to execute build-cache-fetch");
+
+    if !fetch_status.success() {
+        panic!(
+            "Failed to fetch crane sources: build-cache-fetch exited with status {fetch_status}"
+        );
+    }
 
     // extract crane sources
     let crane_archive = out_dir.join(format!("go-containerregistry-v{CRANE_VERSION}.tar.gz"));
@@ -42,7 +48,7 @@ fn main() {
 
     // build krane
     let build_output_loc = out_dir.join("krane");
-    Command::new("go")
+    let build_status = Command::new("go")
         .arg("build")
         .env("GOOS", get_goos())
         .env("GOARCH", get_goarch())
@@ -50,7 +56,11 @@ fn main() {
         .arg(&build_output_loc)
         .current_dir(crane_source_dir.join("cmd/krane"))
         .status()
-        .expect("Failed to build crane");
+        .expect("Failed to execute go build command");
+
+    if !build_status.success() {
+        panic!("Failed to build krane: go build exited with status {build_status}");
+    }
 
     println!("cargo::rustc-env=KRANE_PATH={}", build_output_loc.display());
 }
