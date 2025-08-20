@@ -20,7 +20,7 @@ allow = [
 ]
 
 exceptions = [
-    { name = "webpki-roots", allow = ["MPL-2.0"], version = "*" },
+    { name = "webpki-roots", allow = ["CDLA-Permissive-2.0"], version = "*" },
 ]
 
 # https://github.com/hsivonen/encoding_rs The non-test code that isn't generated from the WHATWG data in this crate is
