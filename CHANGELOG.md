@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...HEAD
 
+## [0.12.0-rc1] - 2025-08-21
+
+### Fixed
+* Fix a check that prevent inconsistent manual change in twoliter.lock ([#563])
+
+### Added
+* Add schema-version 2 of Twoliter.toml. Introduces new field project-vendor ([#551])
+
+### Changed
+* Always fetch kit deps before build tasks ([#565])
+
+### Improved
+* Extract kits concurrently ([#566])
+
+### Build
+* Update cargo dependencies ([#570])
+
+[#551]: https://github.com/bottlerocket-os/twoliter/pull/551
+[#563]: https://github.com/bottlerocket-os/twoliter/pull/563
+[#565]: https://github.com/bottlerocket-os/twoliter/pull/565
+[#566]: https://github.com/bottlerocket-os/twoliter/pull/566
+[#570]: https://github.com/bottlerocket-os/twoliter/pull/570
+
+[0.12.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...v0.12.0-rc1
+
 ## [0.11.0] - 2025-07-17
 
 ### Fixed
