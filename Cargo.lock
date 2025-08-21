@@ -4914,7 +4914,7 @@ dependencies = [
 
 [[package]]
 name = "twoliter"
-version = "0.12.0-rc1"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "async-recursion",
