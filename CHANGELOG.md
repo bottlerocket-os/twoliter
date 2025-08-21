@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.12.0...HEAD
 
-## [0.12.0-rc1] - 2025-08-21
+## [0.12.0] - 2025-08-21
+
+### Breaking Changes
+* Update schema-version of Twoliter.toml to version 2. This introduces a new field project-vendor. ([#551])
+  * Users will need to run `twoliter update` after updating twoliter on any kits or variant repositories to migrate their lockfile to schema-version 2.
+  * Users will need to bump the schema-version to 2 in Twoliter.toml if they want to use the new project-vendor field
 
 ### Fixed
 * Fix a check that prevent inconsistent manual change in twoliter.lock ([#563])
-
-### Added
-* Add schema-version 2 of Twoliter.toml. Introduces new field project-vendor ([#551])
 
 ### Changed
 * Always fetch kit deps before build tasks ([#565])
@@ -32,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#566]: https://github.com/bottlerocket-os/twoliter/pull/566
 [#570]: https://github.com/bottlerocket-os/twoliter/pull/570
 
-[0.12.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...v0.12.0-rc1
+[0.12.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.11.0...v0.12.0
 
 ## [0.11.0] - 2025-07-17
 
