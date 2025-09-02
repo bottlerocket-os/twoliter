@@ -130,6 +130,12 @@ dd if="${OS_IMAGE}" of="${ROOT_IMAGE}" \
 
 # For erofs, extract the root filesystem since we can't modify in-place.
 if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  # Validate that the root image is actually erofs
+  filesystem_type="$(blkid -c /dev/null -o value -s TYPE "${ROOT_IMAGE}")"
+  if [[ "${filesystem_type}" != "erofs" ]]; then
+    echo "root partition is not erofs as expected, found: '${filesystem_type}'" >&2
+    exit 1
+  fi
   fsck.erofs --extract="${ROOT_MOUNT}" "${ROOT_IMAGE}"
   touch -r "${ROOT_IMAGE}" "${ROOT_MOUNT}"
   rm "${ROOT_IMAGE}"
