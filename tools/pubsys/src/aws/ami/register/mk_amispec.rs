@@ -128,6 +128,7 @@ pub(crate) struct MinimalAmiSpec {
     pub name: String,
     pub description: Option<String>,
     pub architecture: Option<amispec::Architecture>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 impl From<AmiSpec> for MinimalAmiSpec {
@@ -136,6 +137,7 @@ impl From<AmiSpec> for MinimalAmiSpec {
             name,
             description,
             architecture,
+            tags,
             ..
         } = amispec;
 
@@ -143,6 +145,7 @@ impl From<AmiSpec> for MinimalAmiSpec {
             name,
             description,
             architecture,
+            tags,
         }
     }
 }

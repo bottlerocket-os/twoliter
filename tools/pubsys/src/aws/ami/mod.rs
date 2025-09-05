@@ -17,7 +17,7 @@ use crate::Args;
 use aws_sdk_ebs::Client as EbsClient;
 use aws_sdk_ec2::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_ec2::operation::copy_image::{CopyImageError, CopyImageOutput};
-use aws_sdk_ec2::types::OperationType;
+use aws_sdk_ec2::types::{OperationType, ResourceType, Tag, TagSpecification};
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
 use aws_sdk_sts::operation::get_caller_identity::{
     GetCallerIdentityError, GetCallerIdentityOutput,
@@ -208,13 +208,19 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
             "Registering '{}' in {}",
             tentative_amispec.name, base_region
         );
-        let new_ids = register_image(ami_args, &base_region, base_ebs_client, &base_ec2_client)
-            .await
-            .context(error::RegisterImageSnafu {
-                name: &tentative_amispec.name,
-                arch: &arch,
-                region: base_region.as_ref(),
-            })?;
+        let new_ids = register_image(
+            ami_args,
+            &base_region,
+            base_ebs_client,
+            &base_ec2_client,
+            tentative_amispec.tags.clone(),
+        )
+        .await
+        .context(error::RegisterImageSnafu {
+            name: &tentative_amispec.name,
+            arch: &arch,
+            region: base_region.as_ref(),
+        })?;
         info!(
             "Registered AMI '{}' in {}: {}",
             tentative_amispec.name, base_region, new_ids.image_id
@@ -382,6 +388,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
         }
 
         let ec2_client = &ec2_clients[&region];
+
         let base_region = base_region.to_owned();
         let copy_future = ec2_client
             .copy_image()
@@ -389,6 +396,16 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
             .set_name(Some(tentative_amispec.name.clone()))
             .set_source_image_id(Some(ids_of_image.image_id.clone()))
             .set_source_region(Some(base_region.as_ref().to_string()))
+            .set_tag_specifications(tentative_amispec.tags.as_ref().map(|x| {
+                vec![TagSpecification::builder()
+                    .resource_type(ResourceType::Image)
+                    .set_tags(Some(
+                        x.iter()
+                            .map(|(key, value)| Tag::builder().key(key).value(value).build())
+                            .collect(),
+                    ))
+                    .build()]
+            }))
             .send();
 
         // Store the region so we can output it to the user
