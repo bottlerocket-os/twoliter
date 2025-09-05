@@ -1,7 +1,7 @@
 use super::{snapshot::snapshot_from_image, AmiArgs};
 use crate::aws::ami::snapshot::build_progress_bar;
 use aws_sdk_ebs::Client as EbsClient;
-use aws_sdk_ec2::types::Filter;
+use aws_sdk_ec2::types::{Filter, ResourceType, Tag, TagSpecification};
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
 use coldsnap::{SnapshotUploader, SnapshotWaiter};
 use futures::future::OptionFuture;
@@ -9,6 +9,7 @@ use futures::TryFutureExt as _;
 use indicatif::{MultiProgress, ProgressBar};
 use log::{debug, info, warn};
 use snafu::{ensure, futures::TryFutureExt as _, OptionExt, ResultExt, Snafu};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -29,6 +30,7 @@ async fn _register_image(
     region: &Region,
     ebs_client: EbsClient,
     ec2_client: &Ec2Client,
+    tags: Option<HashMap<String, String>>,
     cleanup_snapshot_ids: Arc<Mutex<Vec<String>>>,
 ) -> Result<RegisteredIds> {
     let bottlerocket_snapshots = BottlerocketSnapshots::create_snapshots(
@@ -48,6 +50,16 @@ async fn _register_image(
     info!("Making register image call in {region}");
     let register_response = amispec
         .as_register_image_call()
+        .set_tag_specifications(tags.map(|x| {
+            vec![TagSpecification::builder()
+                .resource_type(ResourceType::Image)
+                .set_tags(Some(
+                    x.iter()
+                        .map(|(key, value)| Tag::builder().key(key).value(value).build())
+                        .collect(),
+                ))
+                .build()]
+        }))
         .send_with(ec2_client)
         .await
         .context(error::RegisterImageSnafu {
@@ -199,6 +211,7 @@ pub(crate) async fn register_image(
     region: &Region,
     ebs_client: EbsClient,
     ec2_client: &Ec2Client,
+    tags: Option<HashMap<String, String>>,
 ) -> Result<RegisteredIds> {
     let cleanup_snapshot_ids = Arc::new(Mutex::new(Vec::new()));
     let register_result = _register_image(
@@ -206,6 +219,7 @@ pub(crate) async fn register_image(
         region,
         ebs_client,
         ec2_client,
+        tags,
         Arc::clone(&cleanup_snapshot_ids),
     )
     .await;

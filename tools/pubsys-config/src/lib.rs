@@ -136,6 +136,25 @@ pub struct AwsConfig {
     pub region: HashMap<String, AwsRegionConfig>,
     pub ssm_prefix: Option<String>,
     pub s3: Option<HashMap<String, S3Config>>,
+    pub tags: Option<AmiTags>,
+}
+
+/// AWS ami tags
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct AmiTags {
+    global: Option<HashMap<String, String>>,
+    region: Option<HashMap<String, HashMap<String, String>>>,
+}
+
+impl AmiTags {
+    pub fn resolve_for_region(&self, region: impl AsRef<str>) -> HashMap<String, String> {
+        let mut tags = self.global.clone().unwrap_or_default();
+        if let Some(regional_tags) = self.region.as_ref().and_then(|x| x.get(region.as_ref())) {
+            tags.extend(regional_tags.clone());
+        }
+        tags
+    }
 }
 
 /// AWS region-specific configuration
