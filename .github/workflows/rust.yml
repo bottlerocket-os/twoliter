@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - run: cargo install cargo-deny --locked
       - run: cargo install cargo-make --locked
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
         with:
           go-version: "^1.18"
       # Install `patch`, needed to build `krane-bundle`, and tools for linking against musl
