@@ -355,6 +355,54 @@ check_image_size() {
   fi
 }
 
+get_ext4_usage() {
+  local image_file partition_name
+  local fs_info block_count free_blocks block_size
+  local used_blocks used_bytes total_bytes bytes_remaining percentage_bytes
+  image_file="${1:?}"
+  partition_name="${2:?}"
+
+  fs_info="$(dumpe2fs -h "${image_file}" 2>/dev/null)"
+  block_count="$(echo "${fs_info}" | grep "^Block count:" | awk '{print $3}')"
+  free_blocks="$(echo "${fs_info}" | grep "^Free blocks:" | awk '{print $3}')"
+  block_size="$(echo "${fs_info}" | grep "^Block size:" | awk '{print $3}')"
+
+  used_blocks="$((block_count - free_blocks))"
+  used_bytes="$((used_blocks * block_size))"
+  total_bytes="$((block_count * block_size))"
+  bytes_remaining="$((free_blocks * block_size))"
+  percentage_bytes="$((used_bytes * 100 / total_bytes))"
+
+  jq -n \
+    --arg partition "${partition_name}" \
+    --argjson bytes_total "${total_bytes}" \
+    --argjson bytes_used "${used_bytes}" \
+    --argjson bytes_remaining "${bytes_remaining}" \
+    --argjson percentage_bytes "${percentage_bytes}" \
+    '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}'
+}
+
+get_erofs_usage() {
+  local image_file partition_name partition_size_mib
+  local used_bytes total_bytes bytes_remaining percentage_bytes
+  image_file="${1:?}"
+  partition_name="${2:?}"
+  partition_size_mib="${3:?}"
+
+  used_bytes="$(stat -c %s "${image_file}")"
+  total_bytes="$((partition_size_mib * 1024 * 1024))"
+  bytes_remaining="$((total_bytes - used_bytes))"
+  percentage_bytes="$((used_bytes * 100 / total_bytes))"
+
+  jq -n \
+    --arg partition "${partition_name}" \
+    --argjson bytes_total "${total_bytes}" \
+    --argjson bytes_used "${used_bytes}" \
+    --argjson bytes_remaining "${bytes_remaining}" \
+    --argjson percentage_bytes "${percentage_bytes}" \
+    '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}'
+}
+
 generate_verity_root() {
   local root_image verity_image veritypart_mib
   local -n dm_verity_root

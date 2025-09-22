@@ -198,6 +198,13 @@ check_image_size "${ROOT_IMAGE}" "${partsize["ROOT-A"]}"
 dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" \
   iflag=fullblock conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
 
+# Report ROOT partition usage
+if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  root_usage=$(get_erofs_usage "${ROOT_IMAGE}" "ROOT-A" "${partsize["ROOT-A"]}")
+else
+  root_usage=$(get_ext4_usage "${ROOT_IMAGE}" "ROOT-A")
+fi
+
 # Generate a new root verity.
 declare -a DM_VERITY_ROOT
 generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
@@ -295,6 +302,12 @@ check_debugfs_errors "${GRUB_DEBUGFS_STDERR}"
 check_image_size "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
 dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" \
   iflag=fullblock conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+
+# Report BOOT partition usage
+boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
+
+# Combine usage data into final JSON
+echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
 ###############################################################################
 # Section 7: generate final artifacts and copy to output dir
