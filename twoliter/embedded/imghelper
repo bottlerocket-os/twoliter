@@ -28,11 +28,18 @@ SBKEYS="${HOME}/sbkeys"
 declare -a SHIM_SIGN_KEY CODE_SIGN_KEY
 
 sanity_checks() {
-  local output_fmt partition_plan ovf_template uefi_secure_boot
+  local output_fmt partition_plan ovf_template uefi_secure_boot sbom_package_dir
   output_fmt="${1:?}"
   partition_plan="${2:?}"
   ovf_template="${3:?}"
   uefi_secure_boot="${4:?}"
+  sbom_package_dir="${5:?}"
+
+  if [[ ! -d "${sbom_package_dir}" ]]; then
+    echo "SBOM package directory does not exist: ${sbom_package_dir}" >&2
+    exit 1
+  fi
+
   case "${output_fmt}" in
   raw | qcow2 | vmdk) ;;
   *)

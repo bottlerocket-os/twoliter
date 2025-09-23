@@ -30,6 +30,7 @@ for opt in "$@"; do
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
+  --sbom-package-dir=*) SBOM_PACKAGE_DIR="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -46,7 +47,7 @@ done
 . "${0%/*}/imghelper"
 
 sanity_checks \
-  "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
+  "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}" "${SBOM_PACKAGE_DIR}"
 
 # Store output artifacts in a versioned directory.
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
@@ -255,6 +256,41 @@ printf "%s\n" "${INVENTORY_DATA}" >"${ROOT_MOUNT}/usr/share/bottlerocket/applica
 # Write the the inventory to a file in the local build output directory so that builders
 # can access the inventory without needed to dig into the generated image.
 printf "%s\n" "${INVENTORY_DATA}" >"${OUTPUT_DIR}/application-inventory.json"
+
+# Install SBOM packages
+SBOM_MOUNT=$(mktemp -d)
+
+# TODO: Eventually this needs to trigger an error also, but it might be too soon to break backwards compatibility.
+mapfile -t sbom_rpms < <(find "${SBOM_PACKAGE_DIR}" -maxdepth 1 -name "*.rpm" -type f)
+
+# There will always be a metadata SBOM package
+if [[ ${#sbom_rpms[@]} -gt 1 ]]; then
+  mkdir -p "${SBOM_MOUNT}/var/lib/rpm"
+  rpm -iv --ignorearch --root "${SBOM_MOUNT}" "${SBOM_PACKAGE_DIR}"/*.rpm
+  usr_dirs=(${SBOM_MOUNT}/*-linux-gnu/sys-root/usr)
+  usr_dir="${usr_dirs[0]}"
+  ln -rs "${usr_dir}" "${SBOM_MOUNT}/usr"
+fi
+
+# Merge SBOMs into a single json file
+KIT_SBOMS_DIR="${SBOM_MOUNT}/usr/share/sboms"
+if [ -d "${KIT_SBOMS_DIR}" ]; then
+  IMAGE_SBOM_DIR="${ROOT_MOUNT}/usr/share/bottlerocket"
+  mkdir -p "${IMAGE_SBOM_DIR}"
+  for format in "spdx" "cyclonedx"; do
+    image_sbom="${format}-sbom.json"
+    image_sbom_path="${IMAGE_SBOM_DIR}/${image_sbom}"
+    find "${KIT_SBOMS_DIR}" -name "*-${format}.json" -type f -exec sbomtool merge --output "${image_sbom_path}" {} \+
+    if [[ ! -f "${image_sbom_path}" ]]; then
+      echo "Could not find image SBOM path: ${image_sbom_path}" >&2
+      exit 1
+    fi
+    cp "${image_sbom_path}" "${OUTPUT_DIR}/${image_sbom}"
+    if [[ "${EROFS_ROOT_PARTITION}" == "no" ]]; then
+      lz4 -z -f "${image_sbom_path}" "${image_sbom_path}.lz4"
+    fi
+  done
+fi
 
 # Regenerate module dependencies, if possible.
 KMOD_DIR="${ROOT_MOUNT}/lib/modules"

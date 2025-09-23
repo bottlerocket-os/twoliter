@@ -69,12 +69,22 @@ Provides: %{_cross_os}image-feature(no-encrypted-storage)
 %description
 %{summary}.
 
+%package sbom
+Summary: SBOM metadata for Bottlerocket image
+Provides: %{_cross_os}image-metadata(sbom)
+
+%description sbom
+SBOM metadata subpackage for Bottlerocket image.
+
 %prep
 
 %build
 
 %install
+mkdir -p %{buildroot}%{_cross_datadir}/bottlerocket
 
 %files
+
+%files sbom
 
 %changelog
