@@ -819,7 +819,7 @@ pub enum ImageFeature {
     ExternalKmodDevelopment,
 }
 
-const EXPERIMENTAL_IMAGE_FEATURES: [&ImageFeature; 1] = [&ImageFeature::ErofsRootPartition];
+const EXPERIMENTAL_IMAGE_FEATURES: [&ImageFeature; 0] = [];
 
 impl TryFrom<String> for ImageFeature {
     type Error = Error;
