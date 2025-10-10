@@ -519,6 +519,11 @@ impl ManifestInfo {
                 println!("cargo:warning=Image feature {experiment} is experimental; use at your own risk!");
             }
         }
+        for deprecated in DEPRECATED_IMAGE_FEATURES {
+            if features.contains(deprecated) {
+                println!("cargo:warning=Image feature {deprecated} is deprecated and will be removed in a future release!");
+            }
+        }
         Some(features)
     }
 
@@ -819,7 +824,9 @@ pub enum ImageFeature {
     ExternalKmodDevelopment,
 }
 
-const EXPERIMENTAL_IMAGE_FEATURES: [&ImageFeature; 0] = [];
+const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[];
+
+const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[];
 
 impl TryFrom<String> for ImageFeature {
     type Error = Error;
