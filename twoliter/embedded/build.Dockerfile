@@ -205,7 +205,6 @@ ARG VARIANT_RUNTIME
 ARG VARIANT_FAMILY
 ARG VARIANT_FLAVOR
 ARG UEFI_SECURE_BOOT
-ARG SYSTEMD_NETWORKD
 ARG XFS_DATA_PARTITION
 ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
@@ -230,7 +229,6 @@ RUN \
    && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
    && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${EROFS_ROOT_PARTITION:+%bcond_without erofs_root_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${IN_PLACE_UPDATES:+%bcond_without in_place_updates\n}" >> "${RPM_BCONDS}" \
