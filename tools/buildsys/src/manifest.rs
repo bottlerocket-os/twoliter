@@ -246,6 +246,13 @@ fips = true
 external-kmod-development = true
 ```
 
+`encrypted-storage` enables encryption for writable filesystems and block devices. This should
+only be enabled for variants that can guarantee that a TPM 2.0 device will be present at runtime.
+
+```ignore
+[package.metadata.build-variant.image-features]
+encrypted-storage = true
+```
 
 */
 
@@ -822,9 +829,10 @@ pub enum ImageFeature {
     InPlaceUpdates,
     HostContainers,
     ExternalKmodDevelopment,
+    EncryptedStorage,
 }
 
-const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[];
+const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[&ImageFeature::EncryptedStorage];
 
 const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::GrubSetPrivateVar,
@@ -844,6 +852,7 @@ impl TryFrom<String> for ImageFeature {
             "in-place-updates" => Ok(ImageFeature::InPlaceUpdates),
             "host-containers" => Ok(ImageFeature::HostContainers),
             "external-kmod-development" => Ok(ImageFeature::ExternalKmodDevelopment),
+            "encrypted-storage" => Ok(ImageFeature::EncryptedStorage),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
@@ -861,6 +870,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::InPlaceUpdates => write!(f, "IN_PLACE_UPDATES"),
             ImageFeature::HostContainers => write!(f, "HOST_CONTAINERS"),
             ImageFeature::ExternalKmodDevelopment => write!(f, "EXTERNAL_KMOD_DEVELOPMENT"),
+            ImageFeature::EncryptedStorage => write!(f, "ENCRYPTED_STORAGE"),
         }
     }
 }

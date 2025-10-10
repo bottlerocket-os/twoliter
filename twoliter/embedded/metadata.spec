@@ -59,6 +59,13 @@ Provides: %{_cross_os}image-feature(external-kmod-development)
 %else
 Provides: %{_cross_os}image-feature(no-external-kmod-development)
 %endif
+
+%if %{with encrypted_storage}
+Provides: %{_cross_os}image-feature(encrypted-storage)
+%else
+Provides: %{_cross_os}image-feature(no-encrypted-storage)
+%endif
+
 %description
 %{summary}.
 

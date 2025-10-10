@@ -10,6 +10,7 @@ XFS_DATA_PARTITION="no"
 EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
+ENCRYPTED_STORAGE="no"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -28,6 +29,7 @@ for opt in "$@"; do
   --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
+  --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -385,6 +387,13 @@ if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
   printf "%s\n" "DATA_PARTITION_FILESYSTEM=xfs" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 else
   printf "%s\n" "DATA_PARTITION_FILESYSTEM=ext4" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+fi
+
+# Set encrypted storage flag
+if [[ "${ENCRYPTED_STORAGE}" == "yes" ]]; then
+  printf "%s\n" "ENCRYPTED_STORAGE=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+else
+  printf "%s\n" "ENCRYPTED_STORAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
 # BOTTLEROCKET-ROOT-A

@@ -211,6 +211,7 @@ ARG IN_PLACE_UPDATES
 ARG HOST_CONTAINERS
 ARG FIPS
 ARG EXTERNAL_KMOD_DEVELOPMENT
+ARG ENCRYPTED_STORAGE
 
 USER builder
 WORKDIR /home/builder
@@ -233,7 +234,8 @@ RUN \
    && echo -e -n "${EROFS_ROOT_PARTITION:+%bcond_without erofs_root_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${IN_PLACE_UPDATES:+%bcond_without in_place_updates\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${EXTERNAL_KMOD_DEVELOPMENT:+%bcond_without external_kmod_development\n}" >> "${RPM_BCONDS}"
+   && echo -e -n "${EXTERNAL_KMOD_DEVELOPMENT:+%bcond_without external_kmod_development\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${ENCRYPTED_STORAGE:+%bcond_without encrypted_storage\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Creates an RPM repository from packages created in Section 1 and kits from Section 2.
@@ -341,6 +343,7 @@ ARG XFS_DATA_PARTITION
 ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
+ARG ENCRYPTED_STORAGE
 ARG PROJECT_VENDOR
 ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
@@ -380,7 +383,8 @@ RUN --mount=target=/host \
       ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
-      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
+      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
+      ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} && \
     rm -rf /local/rpms && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
