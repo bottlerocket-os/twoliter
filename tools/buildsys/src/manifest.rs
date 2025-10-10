@@ -826,7 +826,9 @@ pub enum ImageFeature {
 
 const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[];
 
-const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[];
+const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
+    &ImageFeature::GrubSetPrivateVar,
+];
 
 impl TryFrom<String> for ImageFeature {
     type Error = Error;

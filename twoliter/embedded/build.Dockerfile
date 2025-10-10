@@ -204,7 +204,6 @@ ARG VARIANT_PLATFORM
 ARG VARIANT_RUNTIME
 ARG VARIANT_FAMILY
 ARG VARIANT_FLAVOR
-ARG GRUB_SET_PRIVATE_VAR
 ARG UEFI_SECURE_BOOT
 ARG SYSTEMD_NETWORKD
 ARG XFS_DATA_PARTITION
@@ -229,7 +228,6 @@ RUN \
    && echo "%bcond_without $(V=${VARIANT_RUNTIME,,}; echo ${V//-/_})_runtime" >> "${RPM_BCONDS}" \
    && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> "${RPM_BCONDS}" \
    && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
-   && echo -e -n "${GRUB_SET_PRIVATE_VAR:+%bcond_without grub_set_private_var\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${SYSTEMD_NETWORKD:+%bcond_without systemd_networkd\n}" >> "${RPM_BCONDS}" \
@@ -341,7 +339,6 @@ ARG PARTITION_PLAN
 ARG OS_IMAGE_PUBLISH_SIZE_GIB
 ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG KERNEL_PARAMETERS
-ARG GRUB_SET_PRIVATE_VAR
 ARG XFS_DATA_PARTITION
 ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
@@ -384,7 +381,6 @@ RUN --mount=target=/host \
       --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
       ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
-      ${GRUB_SET_PRIVATE_VAR:+--with-grub-set-private-var=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
       ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
     rm -rf /local/rpms && \

@@ -26,11 +26,7 @@ Provides: %{_cross_os}image-feature(host-containers)
 Provides: %{_cross_os}image-feature(no-host-containers)
 %endif
 
-%if %{with grub_set_private_var}
 Provides: %{_cross_os}image-feature(grub-set-private-var)
-%else
-Provides: %{_cross_os}image-feature(no-grub-set-private-var)
-%endif
 
 %if %{with uefi_secure_boot}
 Provides: %{_cross_os}image-feature(uefi-secure-boot)
