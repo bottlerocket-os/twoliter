@@ -405,6 +405,13 @@ else
 fi
 dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
 
+# Report ROOT partition usage
+if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
+  root_usage=$(get_erofs_usage "${ROOT_IMAGE}" "ROOT-A" "${partsize["ROOT-A"]}")
+else
+  root_usage=$(get_ext4_usage "${ROOT_IMAGE}" "ROOT-A")
+fi
+
 # BOTTLEROCKET-VERITY-A
 declare -a DM_VERITY_ROOT
 generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize["HASH-A"]}" \
@@ -502,6 +509,12 @@ mkfs.ext4 -O ^has_journal -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A
 echo "${BOOT_LABELS}" | debugfs -w -f - "${BOOT_IMAGE}"
 resize2fs -M "${BOOT_IMAGE}"
 dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+
+# Report BOOT partition usage
+boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
+
+# Combine usage data into final JSON
+echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
 # BOTTLEROCKET-PRIVATE
 
