@@ -389,6 +389,13 @@ else
   printf "%s\n" "DATA_PARTITION_FILESYSTEM=ext4" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
+# Set in-place updates flag
+if [[ "${IN_PLACE_UPDATES}" == "yes" ]]; then
+  printf "%s\n" "IN_PLACE_UPDATES=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+else
+  printf "%s\n" "IN_PLACE_UPDATES=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+fi
+
 # Set encrypted storage flag
 if [[ "${ENCRYPTED_STORAGE}" == "yes" ]]; then
   printf "%s\n" "ENCRYPTED_STORAGE=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
