@@ -1,18 +1,11 @@
 # Twoliter
 
 A build tool for creating custom [Bottlerocket] variants.
-
-[Bottlerocket]: https://github.com/bottlerocket-os/bottlerocket
-
-## Status 🚧👷
-
-This project is a work in progress and is not ready for outside contributors yet.
-Issues marked as "good first issue" are intended for team members at this time.
-There is a design doc describing how Twoliter is intended to be built, [here]
-
+See the [design doc] describing how Twoliter works.
 We welcome ideas and requirements in the form of issues and comments!
 
-[here]: docs/design/README.md
+[Bottlerocket]: https://github.com/bottlerocket-os/bottlerocket
+[design doc]: docs/design/README.md
 
 ## For Maintainers
 
