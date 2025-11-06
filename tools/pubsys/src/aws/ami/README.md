@@ -95,6 +95,25 @@ volume-size = 30
 iops = 1000
 ```
 
+#### Adding Tags to Registered AMIs
+
+```toml
+[tags]
+Environment = "production"
+Team = "platform"
+Version = "1.0"
+CostCenter = "engineering"
+```
+
+Tags can also use template variables:
+
+```toml
+[tags]
+Name = "{{ ami.unique_name }}"
+Architecture = "{{ ami.arch }}"
+BuildDate = "2024-01-15"
+```
+
 #### Adding a Prefix to the Default AMI Name
 
 ```toml

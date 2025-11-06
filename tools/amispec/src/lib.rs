@@ -465,6 +465,26 @@ mod test {
         .build();
         "parse multiple bdms"
     )]
+    #[test_case(r#"
+        name = "ami-with-tags"
+        architecture = "x86_64"
+
+        [tags]
+        Environment = "production"
+        Team = "platform"
+        Version = "1.0"
+    "#,
+    AmiSpec::builder()
+        .name("ami-with-tags")
+        .architecture(Architecture::X86_64)
+        .tags(hashmap! {
+            "Environment".into() => "production".into(),
+            "Team".into() => "platform".into(),
+            "Version".into() => "1.0".into(),
+        })
+        .build();
+        "parse tags"
+    )]
     fn test_parse_ami_spec_toml(toml_str: &str, expected: AmiSpec) {
         let spec: AmiSpec = toml::from_str(&toml_str).unwrap();
         assert_eq!(spec, expected);
@@ -570,6 +590,33 @@ mod test {
             .build()
             .unwrap();
         "templated snapshot id"
+    )]
+    #[test_case(
+        toml!(
+            name = "ami-with-tags"
+            architecture = "x86_64"
+
+            [tags]
+            Environment = "production"
+            Team = "{{ team_name }}"
+        ),
+        hashmap! {
+            "team_name" => "platform",
+        },
+        RegisterImageInput::builder()
+            .name("ami-with-tags".to_string())
+            .architecture(SdkArchitectureValues::X8664)
+            .virtualization_type("hvm".to_string())
+            .set_tag_specifications(Some(vec![
+                aws_sdk_ec2::types::TagSpecification::builder()
+                    .resource_type(aws_sdk_ec2::types::ResourceType::Image)
+                    .tags(aws_sdk_ec2::types::Tag::builder().key("Environment").value("production").build())
+                    .tags(aws_sdk_ec2::types::Tag::builder().key("Team").value("platform").build())
+                    .build()
+            ]))
+            .build()
+            .unwrap();
+        "tags with templates"
     )]
     fn test_render_templated_amispec_to_sdk(
         templated_amispec: toml::Table,

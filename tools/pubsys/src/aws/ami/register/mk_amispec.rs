@@ -643,6 +643,60 @@ mod test {
             .build();
         "allow boot-mode overrides"
     )]
+    #[test_case(
+        AmiArgs {
+            os_image: PathBuf::new(),
+            data_image: None,
+            variant_manifest: VariantManifest::new(
+                toml::toml! {
+                    [package]
+                    name = "test-variant"
+
+                    [package.metadata.build-variant.image-layout]
+                    partition-plan = "unified"
+                }.try_into().unwrap(),
+            ),
+            uefi_data: Default::default(),
+            arch: "x86_64".into(),
+            name: "test-ami".into(),
+            description: Some("test description".into()),
+            no_progress: true,
+            regions: Vec::new(),
+            amispec_file: Some(toml::toml! {
+                [tags]
+                Environment = "production"
+                Team = "platform"
+                Version = "1.0"
+            }.into()),
+            ami_output: None,
+        },
+        UNIFIED_LAYOUT_SNAPSHOTS.clone(),
+        AmiSpec::builder()
+            .name("test-ami")
+            .architecture(Architecture::X86_64)
+            .ena_support(true)
+            .description("test description")
+            .root_device_name("/dev/xvda")
+            .sriov_net_support(SriovNetSupport::Simple)
+            .virtualization_type(VirtualizationType::Hvm)
+            .tags(hashmap! {
+                "Environment".into() => "production".into(),
+                "Team".into() => "platform".into(),
+                "Version".into() => "1.0".into(),
+            })
+            .block_device_mapping(BlockDeviceMapping::builder()
+                .ebs(
+                    ebs::Gp2::builder()
+                        .snapshot_id(ROOT_SNAP_ID)
+                        .volume_size(22).unwrap()
+                        .delete_on_termination(true)
+                        .build()
+                )
+                .build()
+                .with_device_name("/dev/xvda"))
+            .build();
+        "tags can be specified in amispec"
+    )]
     fn test_create_amispec(ami_args: AmiArgs, snapshots: BottlerocketSnapshots, expected: AmiSpec) {
         let actual = create_amispec(&ami_args, Some(&snapshots)).unwrap();
         assert_eq!(actual, expected);
