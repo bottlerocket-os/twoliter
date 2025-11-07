@@ -26,11 +26,7 @@ Provides: %{_cross_os}image-feature(host-containers)
 Provides: %{_cross_os}image-feature(no-host-containers)
 %endif
 
-%if %{with grub_set_private_var}
 Provides: %{_cross_os}image-feature(grub-set-private-var)
-%else
-Provides: %{_cross_os}image-feature(no-grub-set-private-var)
-%endif
 
 %if %{with uefi_secure_boot}
 Provides: %{_cross_os}image-feature(uefi-secure-boot)
@@ -38,11 +34,7 @@ Provides: %{_cross_os}image-feature(uefi-secure-boot)
 Provides: %{_cross_os}image-feature(no-uefi-secure-boot)
 %endif
 
-%if %{with systemd_networkd}
 Provides: %{_cross_os}image-feature(systemd-networkd)
-%else
-Provides: %{_cross_os}image-feature(no-systemd-networkd)
-%endif
 
 %if %{with xfs_data_partition}
 Provides: %{_cross_os}image-feature(xfs-data-partition)
@@ -67,6 +59,13 @@ Provides: %{_cross_os}image-feature(external-kmod-development)
 %else
 Provides: %{_cross_os}image-feature(no-external-kmod-development)
 %endif
+
+%if %{with encrypted_storage}
+Provides: %{_cross_os}image-feature(encrypted-storage)
+%else
+Provides: %{_cross_os}image-feature(no-encrypted-storage)
+%endif
+
 %description
 %{summary}.
 

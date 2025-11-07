@@ -12,6 +12,8 @@
 //!     * Default EBS block device mappings are created for each snapshot
 //!     * If the variant supports secure boot, then the template has uefi-data updated, and sets
 //!       the default `boot-mode` to `uefi-preferred`
+//!     * If the variant supports encrypted storage, then the template sets the default `boot-mode`
+//!       to `uefi` and enables the TPM 2.0 device
 //! * The default TOML template is merged with the user-provided TOML document, using a recursive
 //!   "upsert" procedure.
 //! * The resulting TOML document is parsed as a `TemplatedAmiSpec`
@@ -223,6 +225,9 @@ fn ensure_amispec_volume_sizes(
 /// * If the variant has secure boot enabled:
 ///     * `boot-mode` is set to `uefi-preferred`
 ///     * `uefi-data` is set to the input string
+/// * If the variant has encrypted storage enabled:
+///     * `boot-mode` is set to `uefi`
+///     * `tpm-support` is set to `v2.0`
 fn default_amispec_template(
     variant_manifest: &VariantManifest,
     bottlerocket_snapshots: Option<&BottlerocketSnapshots>,
@@ -260,6 +265,17 @@ fn default_amispec_template(
             "uefi-data".into(),
             uefi_data.context(MissingUefiDataSnafu)?.into(),
         );
+    }
+
+    // Setup UEFI boot mode and TPM 2.0 support if encrypted storage is enabled
+    if variant_manifest
+        .image_features()
+        .iter()
+        .flatten()
+        .any(|f| *f == ImageFeature::EncryptedStorage)
+    {
+        amispec_template.insert("boot-mode".into(), "uefi".into());
+        amispec_template.insert("tpm-support".into(), "v2.0".into());
     }
 
     Ok(amispec_template)
