@@ -30,6 +30,7 @@ license-files = [
 skip-files = [
     # this license applies to graphical assets which we do not distribute
     "assets/LICENSE.md",
+    "assets/images/LICENSE.md",
 ]
 
 [clarify.regex-syntax]

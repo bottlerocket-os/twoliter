@@ -2,6 +2,8 @@
 #[cfg_attr(not(target_os = "linux"), path = "non_linux_link.rs")]
 mod link;
 
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+
 use self::link::Link;
 use pipesys::server::Server as Serve;
 
@@ -74,7 +76,7 @@ const MIN_FD: i32 = 3;
 
 /// Helper function to retrieve a file descriptor via an abstract socket.
 #[cfg(target_os = "linux")]
-fn fetch_fd(socket: &str) -> Result<i32> {
+fn fetch_fd(socket: &str) -> Result<OwnedFd> {
     let addr = uds::UnixSocketAddr::from_abstract(socket.as_bytes())
         .with_context(|| format!("failed to create socket {socket}"))?;
     let client = uds::UnixSeqpacketConn::connect_unix_addr(&addr)
@@ -95,17 +97,23 @@ fn fetch_fd(socket: &str) -> Result<i32> {
         .filter(|fd| **fd >= MIN_FD)
         .with_context(|| format!("did not receive valid file descriptor from socket {socket}"))?;
 
-    let dupfd =
-        duplicate_fd(*fd).with_context(|| format!("failed to duplicate file descriptor {fd}"))?;
-    debug!("duplicated file descriptor {fd} to {dupfd}");
+    // SAFETY: The file descriptor received over UDS via SCM_RIGHTS is duplicated by the kernel
+    // and thus we own it. See the SCM_RIGHTS section of https://man7.org/linux/man-pages/man7/unix.7.html
+    let owned_fd = unsafe { OwnedFd::from_raw_fd(*fd) };
+
+    let dupfd = duplicate_fd(owned_fd)
+        .with_context(|| format!("failed to duplicate file descriptor {fd}"))?;
+    debug!("duplicated file descriptor {fd} to {}", dupfd.as_raw_fd());
 
     Ok(dupfd)
 }
 
 /// Duplicate file descriptors without the CLOEXEC flag set.
 #[cfg(target_os = "linux")]
-fn duplicate_fd(fd: i32) -> Result<i32> {
-    let newfd = fcntl(fd, F_DUPFD(MIN_FD))
-        .with_context(|| format!("failed to duplicate file descriptor {fd}"))?;
-    Ok(newfd)
+fn duplicate_fd(fd: OwnedFd) -> Result<OwnedFd> {
+    let bfd = fd.as_fd();
+    let newfd = fcntl(bfd, F_DUPFD(MIN_FD))
+        .with_context(|| format!("failed to duplicate file descriptor"))?;
+    // SAFETY: fcntl with F_DUPFD returns a new owned file descriptor
+    Ok(unsafe { OwnedFd::from_raw_fd(newfd) })
 }

@@ -6,6 +6,7 @@ use daemonize::{Daemonize, Outcome};
 use futures::{Future, StreamExt};
 use inotify::{Inotify, WatchMask};
 use log::{error, info, trace};
+use std::os::fd::{AsFd, AsRawFd};
 use std::path::{Path, PathBuf};
 use std::{env, process};
 use tokio::fs;
@@ -98,12 +99,13 @@ impl Link {
 
     /// The child (background) process creates the symlink. Since it will be invalidated when the
     /// process exits, wait until the external caller removes it before returning.
-    async fn manage_symlink(&self, dir_fd: i32) -> Result<()> {
+    async fn manage_symlink(&self, dir_fd: impl AsFd) -> Result<()> {
         let inotify = inotify_init(&self.target, WatchMask::DELETE)?;
 
         // Create the symlink.
         let pid = process::id();
-        let source = format!("/proc/{pid}/fd/{dir_fd}");
+        let raw_dir_fd = dir_fd.as_fd().as_raw_fd();
+        let source = format!("/proc/{pid}/fd/{raw_dir_fd}");
         fs::symlink(&source, &self.target)
             .await
             .with_context(|| format!("failed to symlink {source} to {}", self.target.display()))?;
