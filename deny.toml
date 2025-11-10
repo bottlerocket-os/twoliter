@@ -62,6 +62,8 @@ wildcards = "deny"
 skip = [
     # several dependencies are using multiple versions of base64
     { name = "base64" },
+    # governor and guppy collide bringing two versions of hashbrown
+    { name = "hashbrown" }
 ]
 
 skip-tree = [

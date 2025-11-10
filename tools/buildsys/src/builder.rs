@@ -141,7 +141,7 @@ impl CommonBuildArgs {
         let token = token(&root);
 
         // Avoid using a cached layer from a previous build.
-        let nocache = rand::thread_rng().gen::<u128>().to_string();
+        let nocache = rand::rng().random::<u128>().to_string();
 
         // Generate a unique address for the socket that sends the output directory file
         // descriptor.

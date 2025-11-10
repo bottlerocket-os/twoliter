@@ -30,6 +30,7 @@ use futures::stream::{self, StreamExt};
 use log::{error, info, trace, warn};
 use pubsys_config::{AwsConfig as PubsysAwsConfig, InfraConfig};
 use register::{get_ami_id, register_image, RegisteredIds};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use snafu::{ensure, OptionExt, ResultExt};
 use std::collections::{HashMap, HashSet};
@@ -537,9 +538,10 @@ async fn get_account_ids(
 }
 
 /// Parses a toml file, returning a `FromPath<T>`.
-pub(crate) fn parse_toml_file<'de, T: Deserialize<'de>>(filepath: &str) -> Result<FromPath<T>> {
+pub(crate) fn parse_toml_file<T: DeserializeOwned>(filepath: &str) -> Result<FromPath<T>> {
     let toml_str = std::fs::read_to_string(filepath).context(error::ReadFileSnafu { filepath })?;
-    let toml_deserializer = toml::Deserializer::new(&toml_str);
+    let toml_deserializer =
+        toml::Deserializer::parse(&toml_str).context(error::ParseTomlSnafu { filepath })?;
     FromPath::deserialize_from_path(filepath, toml_deserializer)
         .context(error::ParseTomlSnafu { filepath })
 }

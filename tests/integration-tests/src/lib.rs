@@ -55,7 +55,7 @@ struct KitRegistry {
 impl KitRegistry {
     fn new() -> Self {
         let temp_dir = TempDir::new().expect("failed to create path for oci registry spinup");
-        let port = rand::thread_rng().gen_range(5111..7111);
+        let port = rand::rng().random_range(5111..7111);
         let cert_dir = temp_dir.path().join("certs");
         let cert_file = cert_dir.join("registry.crt");
         std::fs::create_dir_all(&cert_dir).expect("failed to create nginx dir");

@@ -220,7 +220,7 @@ impl ImageResolver {
         let image_uri_str = image_uri.to_string();
         let manifest_bytes = image_tool.get_manifest(image_uri_str.as_str()).await?;
         let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
-        let digest = base64::engine::general_purpose::STANDARD.encode(digest.as_slice());
+        let digest = base64::engine::general_purpose::STANDARD.encode(digest);
         debug!(
             "Calculated digest for locked image '{}': '{}'",
             image_uri, digest,

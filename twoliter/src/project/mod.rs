@@ -408,8 +408,7 @@ impl FromStr for ValidIdentifier {
         for c in input.chars() {
             ensure!(
                 is_valid_id_char(c),
-                "invalid character '{}' found in identifier name",
-                c
+                "invalid character '{c}' found in identifier name",
             );
         }
 

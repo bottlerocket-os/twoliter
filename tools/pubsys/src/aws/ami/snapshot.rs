@@ -1,4 +1,4 @@
-use coldsnap::SnapshotUploader;
+use coldsnap::{SnapshotUploader, UploadZeroBlocks};
 use indicatif::{ProgressBar, ProgressStyle};
 use snafu::{OptionExt, ResultExt};
 use std::path::Path;
@@ -38,6 +38,8 @@ where
             Some(&filename),
             None,
             progress_bar.clone(),
+            Some(UploadZeroBlocks::Omit),
+            None,
         )
         .await
         .context(error::UploadSnapshotSnafu)

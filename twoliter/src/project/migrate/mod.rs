@@ -53,7 +53,7 @@ fn migrate_project_content_with_registry(
         return parse_project_toml(content)?
             .downcast::<UnvalidatedProject>()
             .map(|boxed| *boxed)
-            .map_err(|e| anyhow!("Failed to downcast: {:?}", e));
+            .map_err(|e| anyhow!("Failed to downcast: {e:?}"));
     }
 
     // Parse the content into the appropriate type based on current version
@@ -77,7 +77,7 @@ fn migrate_project_content_with_registry(
         })?
         .downcast::<UnvalidatedProject>()
         .map(|boxed| *boxed)
-        .map_err(|e| anyhow!("Failed to downcast: {:?}", e))
+        .map_err(|e| anyhow!("Failed to downcast: {e:?}"))
 }
 
 #[cfg(test)]

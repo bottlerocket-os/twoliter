@@ -201,7 +201,7 @@ fn is_build_system_env(key: impl AsRef<str>) -> bool {
 
 fn check_for_disallowed_var(key: &str) -> Result<()> {
     if DISALLOWED_ENV_VARS.contains(&key) {
-        bail!("The environment variable '{}' can not be used.", key)
+        bail!("The environment variable '{key}' can not be used.")
     }
     Ok(())
 }
