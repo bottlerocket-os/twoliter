@@ -5,7 +5,7 @@ use std::process::Command;
 use std::{env, fs};
 use tar::Archive;
 
-const CRANE_VERSION: &str = "0.20.1";
+const CRANE_VERSION: &str = "0.20.6";
 
 const REQUIRED_TOOLS: &[&str] = &["patch", "go"];
 
@@ -33,11 +33,11 @@ fn main() {
     }
 
     // extract crane sources
-    let crane_archive = out_dir.join(format!("go-containerregistry-v{CRANE_VERSION}.tar.gz"));
+    let crane_archive = out_dir.join(format!("go-containerregistry-{CRANE_VERSION}.tar.gz"));
     let crane_tgz = File::open(&crane_archive).expect("Failed to open crane archive");
     let mut tar_archive = Archive::new(GzDecoder::new(crane_tgz));
 
-    let crane_output_dir = out_dir.join(format!("go-containerregistry-v{CRANE_VERSION}"));
+    let crane_output_dir = out_dir.join(format!("go-containerregistry-{CRANE_VERSION}"));
     tar_archive
         .unpack(&crane_output_dir)
         .expect("Failed to extract crane sources");
