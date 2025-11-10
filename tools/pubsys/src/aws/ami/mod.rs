@@ -389,6 +389,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
             .set_name(Some(tentative_amispec.name.clone()))
             .set_source_image_id(Some(ids_of_image.image_id.clone()))
             .set_source_region(Some(base_region.as_ref().to_string()))
+            .set_copy_image_tags(Some(true))
             .send();
 
         // Store the region so we can output it to the user
