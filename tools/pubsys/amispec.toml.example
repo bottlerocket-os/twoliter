@@ -1,0 +1,50 @@
+# Example amispec.toml
+#
+# This file demonstrates how to customize AMI registration properties for your Bottlerocket variant.
+# Place this file as `amispec.toml` alongside your variant's `Cargo.toml` to override default values.
+#
+# All fields support handlebars templating using variables provided by pubsys.
+# See the pubsys AMI README for full documentation.
+
+# Override the default AMI name
+# name = "my-custom-{{ ami.unique_name }}"
+
+# Override the default description
+# description = "Custom description: {{ ami.description }}"
+
+# Enable IMDSv2 requirement
+# imds-support = "v2.0"
+
+# Configure boot mode and TPM support
+# boot-mode = "uefi"
+# tpm-support = "v2.0"
+
+# Add tags to the registered AMI
+# Tags can be static values or use template variables
+[tags]
+Environment = "production"
+Team = "platform"
+# Use template variables in tag values
+Name = "{{ ami.unique_name }}"
+Architecture = "{{ ami.arch }}"
+# Custom metadata
+CostCenter = "engineering"
+ManagedBy = "twoliter"
+
+# Override block device mappings
+# Change volume type for root device
+[block-device-mappings."/dev/xvda".ebs]
+volume-type = "gp3"
+# Optionally override volume size (must be >= image size)
+# volume-size = "{{ block_devices.root.volume_size }}"
+
+# Change volume type for data device (if using split partition plan)
+# [block-device-mappings."/dev/xvdb".ebs]
+# volume-type = "gp3"
+
+# Add additional EBS volumes
+# [block-device-mappings."/dev/xvdc".ebs]
+# volume-type = "io2"
+# volume-size = 100
+# iops = 1000
+# delete-on-termination = true
