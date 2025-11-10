@@ -233,7 +233,11 @@ pub(crate) fn workload_crd(region: &str, test_input: TestInput) -> Result<Test> 
             test_input.name_suffix.unwrap_or("test")
         ),
     });
-    let gpu = test_input.crd_input.variant.variant_flavor() == Some("nvidia");
+    let gpu = test_input
+        .crd_input
+        .variant
+        .variant_flavor()
+        .map_or(false, |flavor| flavor.starts_with("nvidia"));
     let plugins: Vec<_> = test_input
         .crd_input
         .config
