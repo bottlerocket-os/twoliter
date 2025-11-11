@@ -7,7 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.12.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.13.0...HEAD
+
+## [0.13.0] - 2025-11-10
+
+### Changed
+* Remove experimental label from `erofs-root-partition` feature ([#586])
+* Sort bootconfig keys across all snippets for consistent output ([#596])
+
+### Added
+* Add experimental `encrypted-storage` image feature for encrypting local storage using TPM2 devices ([#589])
+* Record in-place updates enablement in `image-features.env` for runtime queries ([#589])
+* Emit `artifact-metadata.json` with disk utilization for ROOT and BOOT partitions ([#581])
+
+### Fixed
+* Fix pubsys to copy image tags when replicating AMIs ([#592])
+* Prevent re-packing non-erofs images with EROFS ([#576])
+
+### Deprecated
+* Deprecate `systemd-networkd` image feature ([#589])
+* Deprecate `grub-set-private-var` image feature ([#589])
+
+### Build
+* Update cargo dependencies ([#591])
+* Bump actions/checkout from 4.2.2 to 5.0.0 ([#569])
+* Fail the build if the go compiler fails in krane-bundle ([#568])
+* Update ecr-login to v0.11.0 ([#595])
+
+### Documentation
+* Document and add tests for AMI tagging behavior ([#590])
+* Update README ([#588], thanks @webern)
+
+### Improved
+* TestSys: Run workload tests for different NVIDIA flavors ([#594])
+
+[#568]: https://github.com/bottlerocket-os/twoliter/pull/568
+[#569]: https://github.com/bottlerocket-os/twoliter/pull/569
+[#576]: https://github.com/bottlerocket-os/twoliter/pull/576
+[#581]: https://github.com/bottlerocket-os/twoliter/pull/581
+[#586]: https://github.com/bottlerocket-os/twoliter/pull/586
+[#588]: https://github.com/bottlerocket-os/twoliter/pull/588
+[#589]: https://github.com/bottlerocket-os/twoliter/pull/589
+[#590]: https://github.com/bottlerocket-os/twoliter/pull/590
+[#591]: https://github.com/bottlerocket-os/twoliter/pull/591
+[#592]: https://github.com/bottlerocket-os/twoliter/pull/592
+[#594]: https://github.com/bottlerocket-os/twoliter/pull/594
+[#595]: https://github.com/bottlerocket-os/twoliter/pull/595
+[#596]: https://github.com/bottlerocket-os/twoliter/pull/596
+
+[0.13.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.12.0...v0.13.0
 
 ## [0.12.0] - 2025-08-21
 
