@@ -485,8 +485,16 @@ fi
 
 # Combine any bootconfig snippets in /boot for later use, then clean up.
 if [[ -d "${BOOT_MOUNT}/boot-config.d" ]]; then
+  # Verify all bootconfig snippets are single-line key=value format
+  if grep -E '^\s*[^#].*([:+]=|[{]|[,]\s*$)' "${BOOT_MOUNT}/boot-config.d"/* 2>/dev/null; then
+    echo "ERROR: bootconfig snippets must be single-line 'key = value' format" >&2
+    echo "Unsupported: braces, multi-line arrays, := and += operators" >&2
+    exit 1
+  fi
+
+  # Concatenate and sort snippets to ensure consistent ordering
   find "${BOOT_MOUNT}/boot-config.d" -type f -mindepth 1 -maxdepth 1 -print0 |
-    sort -Vz | xargs -0 cat >"${BOOTCONFIG_INPUT}"
+    xargs -0 cat | sort >"${BOOTCONFIG_INPUT}"
   rm -rf "${BOOT_MOUNT}/boot-config.d"
 fi
 
