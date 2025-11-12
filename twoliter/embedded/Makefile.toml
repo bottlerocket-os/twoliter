@@ -668,6 +668,69 @@ if [[ -d ${migrations_root} ]]; then
     done
 fi
 
+# Third pass: Validate version transitions in Release.toml
+
+# Extract version transitions: "(X.Y.Z, A.B.C)"
+# Pattern: \(                      - literal opening paren
+#          \K                      - discard everything matched so far
+#          [0-9]+\.[0-9]+\.[0-9]+  - first version (X.Y.Z)
+#          ,\s*                    - comma with optional whitespace
+#          [0-9]+\.[0-9]+\.[0-9]+  - second version (A.B.C)
+#          (?=\))                  - followed by closing paren (not captured)
+mapfile -t transitions < <(grep -oP '\(\K[0-9]+\.[0-9]+\.[0-9]+,\s*[0-9]+\.[0-9]+\.[0-9]+(?=\))' Release.toml | sort -V)
+
+if [[ ${#transitions[@]} -gt 0 ]]; then
+    prev_to=""
+    for transition in "${transitions[@]}"; do
+        from="${transition%,*}"; from="${from// /}"
+        to="${transition#*,}"; to="${to// /}"
+
+        # Check 1: No gaps in the transition chain
+        # Each transition's end version must match the next transition's start version
+        # Example: (1.0.0, 1.1.0) followed by (1.2.0, 1.3.0) is invalid - missing (1.1.0, 1.2.0)
+        if [[ -n "${prev_to}" && "${prev_to}" != "${from}" ]]; then
+            problems+=("Missing version transition: (${prev_to}, ${from})")
+        fi
+
+        # Check 2: No skipped versions within a transition
+        # Each transition must increment by exactly one minor or patch version
+        # Example: (1.0.0, 1.2.0) is invalid - skips 1.1.0
+        # This prevents accidentally deleting multiple transitions and bridging with one
+        IFS='.' read -r from_major from_minor from_patch <<< "${from}"
+        IFS='.' read -r to_major to_minor to_patch <<< "${to}"
+
+        if [[ "${from_major}" == "${to_major}" ]]; then
+            if [[ "${from_minor}" == "${to_minor}" ]]; then
+                # Patch increment: must be exactly +1
+                expected_patch=$((from_patch + 1))
+                if [[ "${to_patch}" != "${expected_patch}" ]]; then
+                    problems+=("Skipped version in transition (${from}, ${to}) - expected ${from_major}.${from_minor}.${expected_patch}")
+                fi
+            else
+                # Minor increment: must be exactly +1 and patch resets to 0
+                expected_minor=$((from_minor + 1))
+                if [[ "${to_minor}" != "${expected_minor}" || "${to_patch}" != "0" ]]; then
+                    problems+=("Skipped version in transition (${from}, ${to}) - expected ${from_major}.${expected_minor}.0")
+                fi
+            fi
+        else
+            # Major increment: must be exactly +1, minor and patch reset to 0
+            expected_major=$((from_major + 1))
+            if [[ "${to_major}" != "${expected_major}" || "${to_minor}" != "0" || "${to_patch}" != "0" ]]; then
+                problems+=("Skipped version in transition (${from}, ${to}) - expected ${expected_major}.0.0")
+            fi
+        fi
+
+        prev_to="${to}"
+    done
+
+    # Check 3: Last transition must end at current version
+    # Ensures the transition chain is complete up to the version declared at the top of Release.toml
+    if [[ -n "${prev_to}" && "${prev_to}" != "${version}" ]]; then
+        problems+=("Last transition ends at ${prev_to}, but current version is ${version}")
+    fi
+fi
+
 # Rattle off whatever we found
 
 if [[ ${#problems[@]} -gt 0 ]]; then
