@@ -79,9 +79,14 @@ for i in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY ; do
   fi
 done
 
+# Find highest Go version installed in SDK_IMAGE
+LATEST_GO=$(docker run --rm "${SDK_IMAGE}" \
+  ls /usr/libexec | grep '^go-1\.[0-9]*$' | sort -V | tail -n 1)
+
 docker run --rm \
   -e GOCACHE='/tmp/.cache' \
   -e GOPATH="${GOPATH}" \
+  -e PATH="/usr/libexec/${LATEST_GO}/bin:${PATH}" \
   "${go_env[@]}" \
   "${proxy_env[@]}" \
   --user "$(id -u):$(id -g)" \
