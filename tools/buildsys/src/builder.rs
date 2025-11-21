@@ -281,6 +281,7 @@ struct RepackVariantBuildArgs {
     os_image_size_gib: String,
     partition_plan: String,
     variant: String,
+    variant_platform: String,
     version_build: String,
     version_image: String,
 }
@@ -301,6 +302,7 @@ impl RepackVariantBuildArgs {
         args.build_arg("OS_IMAGE_SIZE_GIB", &self.os_image_size_gib);
         args.build_arg("PARTITION_PLAN", &self.partition_plan);
         args.build_arg("VARIANT", &self.variant);
+        args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
 
@@ -531,6 +533,8 @@ impl DockerBuild {
             image_layout.publish_image_sizes_gib();
 
         let variant = filename(args.common.cargo_manifest_dir);
+        let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
+        let variant_platform = v.platform().into();
 
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
@@ -571,6 +575,7 @@ impl DockerBuild {
                 }
                 .to_string(),
                 variant,
+                variant_platform,
                 version_build: args.version_build,
                 version_image: args.version_image,
             }),

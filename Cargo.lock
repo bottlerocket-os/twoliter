@@ -5259,6 +5259,7 @@ dependencies = [
  "tracing",
  "twoliter-tool-buildsys",
  "twoliter-tool-embedded-bundle",
+ "twoliter-tool-pcrsys",
  "twoliter-tool-pipesys",
  "twoliter-tool-pubsys",
  "twoliter-tool-pubsys-setup",
@@ -5285,6 +5286,14 @@ dependencies = [
  "bytes",
  "flate2",
  "tar",
+]
+
+[[package]]
+name = "twoliter-tool-pcrsys"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "pcrsys",
 ]
 
 [[package]]

@@ -309,6 +309,15 @@ boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
 # Combine usage data into final JSON
 echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
+# Predict PCR values after all signing is complete.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  "${0%/*}/pcrsys" disk \
+    --image "${OS_IMAGE}" \
+    --efi-vars "${SBKEYS}/efi-vars.json" \
+    --platform "${VARIANT_PLATFORM,,}" \
+    > "${OUTPUT_DIR}/pcr-predictions.json"
+fi
+
 ###############################################################################
 # Section 7: generate final artifacts and copy to output dir
 

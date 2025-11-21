@@ -595,6 +595,15 @@ bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
 mkfs.ext4 -b 4096 -i 4096 -I 256 -d "${PRIVATE_MOUNT}" "${PRIVATE_IMAGE}" "${partsize[PRIVATE]}M"
 dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRIVATE]}"
 
+# Predict PCR values after all partitions are written.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  "${0%/*}/pcrsys" disk \
+    --image "${OS_IMAGE}" \
+    --efi-vars "${SBKEYS}/efi-vars.json" \
+    --platform "${VARIANT_PLATFORM,,}" \
+    > "${OUTPUT_DIR}/pcr-predictions.json"
+fi
+
 # BOTTLEROCKET-DATA-A and BOTTLEROCKET-DATA-B
 
 # If we build on a host with SELinux enabled, we could end up with labels that
