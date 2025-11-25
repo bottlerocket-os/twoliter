@@ -17,9 +17,9 @@ pub(crate) async fn wait_for_ami(
     pubsys_aws_config: &PubsysAwsConfig,
 ) -> Result<()> {
     let mut successes = 0;
-    let max_attempts = 90;
+    let max_attempts = 255;
     let mut attempts = 0;
-    let seconds_between_attempts = 2;
+    let seconds_between_attempts = 3;
 
     loop {
         attempts += 1;
