@@ -13,17 +13,27 @@ use crate::cmd::make::Make;
 use crate::cmd::publish_kit::PublishCommand;
 use crate::cmd::update::Update;
 use anyhow::Result;
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser};
 use env_logger::Builder;
 use log::LevelFilter;
 
 const DEFAULT_LEVEL_FILTER: LevelFilter = LevelFilter::Info;
 
+#[derive(Debug, ClapArgs)]
+pub(crate) struct GlobalOpts {
+    /// Reduce output to essential status messages only
+    #[arg(short, long, global = true)]
+    pub(crate) quiet: bool,
+}
+
 /// A tool for building custom variants of Bottlerocket.
 #[derive(Debug, Parser)]
 #[clap(about, long_about = None, version)]
 pub(crate) struct Args {
-    /// Set the logging level. One of [off|error|warn|info|debug|trace]. Defaults to warn. You can
+    #[command(flatten)]
+    pub(crate) global: GlobalOpts,
+
+    /// Set the logging level. One of [off|error|warn|info|debug|trace]. Defaults to info. You can
     /// also leave this unset and use the RUST_LOG env variable. See
     /// https://github.com/rust-cli/env_logger/
     #[clap(long = "log-level")]
@@ -58,9 +68,9 @@ pub(crate) enum Subcommand {
 /// Entrypoint for the `twoliter` command line program.
 pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
-        Subcommand::Build(build_command) => build_command.run().await,
+        Subcommand::Build(build_command) => build_command.run(&args.global).await,
         Subcommand::Fetch(fetch_args) => fetch_args.run().await,
-        Subcommand::Make(make_args) => make_args.run().await,
+        Subcommand::Make(make_args) => make_args.run(&args.global).await,
         Subcommand::Update(update_args) => update_args.run().await,
         Subcommand::Publish(publish_command) => publish_command.run().await,
         Subcommand::Debug(debug_action) => debug_action.run().await,
@@ -68,9 +78,16 @@ pub(super) async fn run(args: Args) -> Result<()> {
 }
 
 /// use `level` if present, or else use `RUST_LOG` if present, or else use a default.
-pub(super) fn init_logger(level: Option<LevelFilter>) {
+/// If `quiet` is true, use Warn level unless explicitly overridden.
+pub(super) fn init_logger(level: Option<LevelFilter>, quiet: bool) {
+    let effective_level = if quiet && level.is_none() {
+        LevelFilter::Warn
+    } else {
+        level.unwrap_or(DEFAULT_LEVEL_FILTER)
+    };
+
     match (std::env::var(env_logger::DEFAULT_FILTER_ENV).ok(), level) {
-        (Some(_), None) => {
+        (Some(_), None) if !quiet => {
             // RUST_LOG exists and level does not; use the environment variable.
             Builder::from_default_env().init();
         }
@@ -79,10 +96,7 @@ pub(super) fn init_logger(level: Option<LevelFilter>) {
             // use provided log level or default for this crate only.
             Builder::new()
                 .parse_default_env()
-                .filter(
-                    Some(env!("CARGO_CRATE_NAME")),
-                    level.unwrap_or(DEFAULT_LEVEL_FILTER),
-                )
+                .filter(Some(env!("CARGO_CRATE_NAME")), effective_level)
                 .init();
         }
     }
@@ -165,7 +179,7 @@ mod test {
             upstream_source_fallback: false,
         };
 
-        command.run().await.unwrap();
+        command.run(&GlobalOpts { quiet: false }).await.unwrap();
         expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
     }
 
@@ -188,7 +202,7 @@ mod test {
             upstream_source_fallback: false,
         };
 
-        command.run().await.unwrap();
+        command.run(&GlobalOpts { quiet: false }).await.unwrap();
         expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
         expect_kit(project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
     }
@@ -212,7 +226,7 @@ mod test {
             upstream_source_fallback: false,
         };
 
-        command.run().await.unwrap();
+        command.run(&GlobalOpts { quiet: false }).await.unwrap();
         expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
         expect_kit(project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
     }
@@ -236,7 +250,7 @@ mod test {
             upstream_source_fallback: false,
         };
 
-        command.run().await.unwrap();
+        command.run(&GlobalOpts { quiet: false }).await.unwrap();
         expect_kit(project_dir, "core-kit", arch, &["pkg-a"]).await;
         expect_kit(project_dir, "extra-1-kit", arch, &["pkg-b", "pkg-d"]).await;
         expect_kit(project_dir, "extra-2-kit", arch, &["pkg-c"]).await;
