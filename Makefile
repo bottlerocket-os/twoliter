@@ -42,7 +42,7 @@ fmt:
 
 .PHONY: test
 test:
-	cargo test --workspace --release --locked
+	cargo test --release --locked
 
 .PHONY: integ
 integ:
