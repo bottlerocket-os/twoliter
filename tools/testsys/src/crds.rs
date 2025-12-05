@@ -648,7 +648,7 @@ pub(crate) trait CrdCreator: Sync {
         crd_input: &CrdInput,
         override_crd_template: Option<PathBuf>,
     ) -> Result<Vec<Crd>> {
-        debug!("Creating custom CRDs for '{}' test", test_type);
+        debug!("Creating custom CRDs for '{test_type}' test");
         let crd_template_file_path = &override_crd_template
             .or_else(|| crd_input.custom_crd_template_file_path())
             .context(error::InvalidSnafu {

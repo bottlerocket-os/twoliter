@@ -167,13 +167,16 @@ impl AmiSpec {
                 vec![
                     aws_sdk_ec2::types::TagSpecification::builder()
                         .resource_type(aws_sdk_ec2::types::ResourceType::Image)
-                        .set_tags(Some(
-                            tags.iter()
+                        .set_tags(Some({
+                            let mut sorted_tags: Vec<_> = tags.iter().collect();
+                            sorted_tags.sort_by_key(|(k, _)| *k);
+                            sorted_tags
+                                .into_iter()
                                 .map(|(k, v)| {
                                     aws_sdk_ec2::types::Tag::builder().key(k).value(v).build()
                                 })
-                                .collect(),
-                        ))
+                                .collect()
+                        }))
                         .build(),
                 ]
             }))
