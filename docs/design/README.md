@@ -178,7 +178,24 @@ These spec files could be added to the above directory tree, or else they could 
 ### Kit Structure
 
 A kit container will be built using `FROM scratch` because it does not need a runtime environment.
-Its directory structure will look like this:
+
+**Internal kit image structure:**
+
+The kit image itself contains RPMs and repo metadata at the root:
+
+```sh
+# Inside the kit container image
+/
+├── repodata/
+│   └── repomd.xml (and other repo metadata files)
+└── Packages/
+    └── <package-name>/
+        └── *.rpm files
+```
+
+**Extracted structure during builds:**
+
+When kits are extracted/mounted during variant builds, they are placed under `/local/kits/`:
 
 ```sh
 # tree /local --dirsfirst
@@ -189,20 +206,14 @@ Its directory structure will look like this:
 └── kits
     └── bottlerocket-core-kit
         ├── repodata
-        │   ├── 30e098715e13cbe4733c6b4518dcc2cdc68d1ac3277eefad2ee5ac171c4b9023-primary.sqlite.bz2
-        │   ├── 5a22c22832fa81e55f84de715cf910cebc64d472be65a7124fd8b02ff7c777fb-filelists.xml.gz
-        │   ├── 719d1eef5ce4d194d4c5c51171dce8987cb21e88338f1d5dff7554dacabf1004-other.sqlite.bz2
-        │   ├── 7cbab1a2f05c1eda86d3d125497af680d9100665e3eb30c7560926eabbc2c655-primary.xml.gz
-        │   ├── d61fe62ca166eab1cbd502cf21cd977798ef348de49fb35e38a93ebf696eb0a5-filelists.sqlite.bz2
-        │   ├── fcd4dadc59c6d6512410b103a38762bf266389e01a60add12319191c4cc16ec4-other.xml.gz
-        │   └── repomd.xml
+        │   └── repomd.xml (and other repo metadata files)
         ├── bottlerocket-x86_64-acpid-2.0.34-1.x86_64.rpm
         ├── bottlerocket-x86_64-apiclient-0.0-0.x86_64.rpm
         ├── ...
         └── bottlerocket-x86_64-wicked-0.6.68-1.x86_64.rpm
 ```
 
-The `/etc/yum.repos.d` file can be used later to configure `dnf`.
+The `/etc/yum.repos.d/*.repo` files are generated during builds (not stored in kit images).
 This will allow `dnf` to treat each kit as a yum repository.
 When aggregating kits, the yum repos will be prioritized according to the maintainer's requirements.
 
@@ -244,17 +255,9 @@ Our JSON metadata for `my-awesome-kit` will let tell us about the kit and SDK de
 
 In this example, it would be an error if `bottlerocket-core-kit-x86_64:v1.15.1` declared that it had been built with anything other `public.ecr.aws/bottlerocket/bottlerocket-sdk-x86_64:v0.50.0`.
 
-This metadata will be stored and tagged with the kit with the following naming convention so that `twoliter` can easily find it.
+> **Implementation Note:** The original design proposed storing metadata as separate `-metadata` tagged images. The actual implementation embeds metadata directly in the kit image as a base64-encoded JSON label (`dev.bottlerocket.kit.v3`). This simplifies distribution by keeping all kit data in a single image.
 
-```
-registry.com/my-awesome-kit-x86_64:v0.1.0
-registry.com/my-awesome-kit-x86_64:v0.1.0-metadata
-registry.com/my-awesome-kit-x86_64:v0.2.0
-registry.com/my-awesome-kit-x86_64:v0.2.0-metadata
-etc.
-```
-
-These metadata files will give twoliter the information it needs to resolve, pull, and aggregate all dependency kits and the correct SDK needed for a build.
+This metadata gives twoliter the information it needs to resolve, pull, and aggregate all dependency kits and the correct SDK needed for a build.
 This dependency resolution will be modeled in Cargo and kept in a `Cargo.lock` file (see [Twoliter Update](#twoliter-update)).
 
 ## Containers
@@ -296,9 +299,10 @@ These will be copied as part of the build system's main Dockerfile (`build.Docke
 
 ### Docker Domain Socket
 
-Depending on how we choose to eliminate the requirement of Cargo and `cargo make` on the host,
-we may choose to invoke `cargo make` from within a container.
-If this is the case, we will need to mount the host's docker domain socket (i.e. `/var/run/docker.sock`) because the build involves additional `docker` commands that need to run on the host.
+> **Implementation Note:** The approach described in this section (mounting docker.sock into a container) was considered but not implemented. In the actual implementation, docker commands run directly on the host rather than from within a container.
+
+The original design considered invoking `cargo make` from within a container.
+If this were the case, we would need to mount the host's docker domain socket (i.e. `/var/run/docker.sock`) because the build involves additional `docker` commands that need to run on the host.
 
 This means that `docker` commands inside the Twoliter container environment will be interacting with the host's daemon.
 This presents certain challenges because directories need to be mounted from "within" this container.
@@ -336,12 +340,12 @@ This will allow the tool to work from any subdirectory within the project (and i
 # schema, or if the directory structure of the project is from an older version.
 schema-version = 1
 
-# This is the name of this project, which can have multiple variants in it.
-project-name = "ootb-variants"
+# Optional: identifies the vendor/maintainer of this project.
+project-vendor = "my-org"
 
 # This allows the maintainer to rev a version globally for all variants defined in
 # the project. Twoliter will enforce semver because the update system requires it.
-project-version = "1.0.0"
+release-version = "1.0.0"
 ```
 
 ### Directory Structure
@@ -389,6 +393,8 @@ Directory descriptions:
 * variants: Where Bottlerocket image builds are defined.
 
 ### Twoliter New
+
+> **Note:** The `twoliter new` commands described below are planned but not yet implemented.
 
 Inspired by `cargo new`, we will implement a `twoliter new` command that creates a new Twoliter project.
 The command creates a directory structure like the one shown above.
@@ -471,7 +477,7 @@ This means we will have the following items and dependencies:
 The user kicks things off with:
 
 ```sh
-twoliter build --variant example-dev --arch aarch64
+twoliter build variant example-dev --arch aarch64
 ```
 
 ![build sequence diagram](diagrams/build-sequence.svg "Build Sequence")
