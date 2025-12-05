@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.13.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.14.0-rc1...HEAD
+
+## [0.14.0-rc1] - 2025-12-05
+
+### Changed
+* Move `fetch-vendored` to use `go-latest` for fetching Go dependencies ([#605])
+
+### Added
+* Add version transition check to `check-migrations` task to validate all version transitions are present in `Release.toml` ([#598])
+
+### Fixed
+* Re-enable all tests on `make test` by removing `default-members` from workspace ([#608])
+* Sort AMI tags by key for deterministic output in amispec ([#608])
+
+### Build
+* Handle release profile in include-env-compressed test ([#608])
+
+[#598]: https://github.com/bottlerocket-os/twoliter/pull/598
+[#605]: https://github.com/bottlerocket-os/twoliter/pull/605
+[#608]: https://github.com/bottlerocket-os/twoliter/pull/608
+
+[0.14.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.13.0...v0.14.0-rc1
 
 ## [0.13.0] - 2025-11-10
 
