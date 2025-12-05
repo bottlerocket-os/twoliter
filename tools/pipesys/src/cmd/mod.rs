@@ -113,7 +113,7 @@ fn fetch_fd(socket: &str) -> Result<OwnedFd> {
 fn duplicate_fd(fd: OwnedFd) -> Result<OwnedFd> {
     let bfd = fd.as_fd();
     let newfd = fcntl(bfd, F_DUPFD(MIN_FD))
-        .with_context(|| format!("failed to duplicate file descriptor"))?;
+        .with_context(|| "failed to duplicate file descriptor".to_string())?;
     // SAFETY: fcntl with F_DUPFD returns a new owned file descriptor
     Ok(unsafe { OwnedFd::from_raw_fd(newfd) })
 }

@@ -237,7 +237,7 @@ pub(crate) fn workload_crd(region: &str, test_input: TestInput) -> Result<Test> 
         .crd_input
         .variant
         .variant_flavor()
-        .map_or(false, |flavor| flavor.starts_with("nvidia"));
+        .is_some_and(|flavor| flavor.starts_with("nvidia"));
     let plugins: Vec<_> = test_input
         .crd_input
         .config
