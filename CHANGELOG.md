@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.14.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.14.0...HEAD
 
-## [0.14.0-rc1] - 2025-12-05
+## [0.14.0] - 2025-12-08
 
 ### Changed
 * Move `fetch-vendored` to use `go-latest` for fetching Go dependencies ([#605])
