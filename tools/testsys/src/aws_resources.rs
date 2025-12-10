@@ -77,7 +77,8 @@ where
                 .build(),
         )
         .send()
-        .await?
+        .await
+        .map_err(|e| Box::new(error_utils::AwsSdkError(e)))?
         .images;
     let images: Vec<&Image> = describe_images.iter().flatten().collect();
     // Make sure there is exactly 1 image that matches the parameters.
