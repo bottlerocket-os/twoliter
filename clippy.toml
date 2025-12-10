@@ -10,3 +10,27 @@ reason = "Twoliter usually does not want to resolve symlinks. Use path_absolutiz
 path = "tokio::fs::canonicalize"
 reason = "Twoliter usually does not want to resolve symlinks. Use path_absolutize instead"
 
+[[disallowed-types]]
+path = "aws_sdk_ec2::error::SdkError"
+reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
+
+[[disallowed-types]]
+path = "aws_sdk_ssm::error::SdkError"
+reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
+
+[[disallowed-types]]
+path = "aws_smithy_runtime_api::client::result::SdkError"
+reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
+
+[[disallowed-types]]
+path = "aws_sdk_ebs::error::SdkError"
+reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
+
+[[disallowed-types]]
+path = "aws_sdk_kms::error::SdkError"
+reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
+
+[[disallowed-types]]
+path = "aws_sdk_sts::error::SdkError"
+reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
+
