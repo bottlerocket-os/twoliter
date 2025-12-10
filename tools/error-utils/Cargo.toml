@@ -1,0 +1,14 @@
+[package]
+name = "error-utils"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[dependencies]
+aws-smithy-runtime-api.workspace = true
+aws-smithy-types.workspace = true
+
+[dev-dependencies]
+aws-sdk-ssm.workspace = true
+aws-smithy-types.workspace = true
