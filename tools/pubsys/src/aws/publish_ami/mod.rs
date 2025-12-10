@@ -7,7 +7,7 @@ use crate::aws::ami::Image;
 use crate::aws::client::build_client_config;
 use crate::aws::region_from_string;
 use crate::Args;
-use aws_sdk_ec2::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_ec2::error::ProvideErrorMetadata;
 use aws_sdk_ec2::operation::{
     modify_image_attribute::{ModifyImageAttributeError, ModifyImageAttributeOutput},
     modify_snapshot_attribute::{ModifySnapshotAttributeError, ModifySnapshotAttributeOutput},
@@ -17,8 +17,10 @@ use aws_sdk_ec2::types::{
 };
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
 use clap::{Args as ClapArgs, Parser};
+use error_utils::AwsSdkError;
 use futures::future::{join, ready};
 use futures::stream::{self, StreamExt};
+use futures::TryFutureExt;
 use log::{debug, error, info, trace};
 use pubsys_config::InfraConfig;
 use snafu::{ensure, OptionExt, ResultExt};
@@ -246,6 +248,7 @@ pub(crate) async fn get_snapshots(
         .set_image_ids(Some(vec![image_id.to_string()]))
         .send()
         .await
+        .map_err(error_utils::AwsSdkError::from)
         .context(error::DescribeImagesSnafu {
             region: region.as_ref(),
         })?;
@@ -359,7 +362,8 @@ pub(crate) async fn modify_snapshots(
             )
             .set_operation_type(Some(operation.clone()))
             .set_snapshot_id(Some(snapshot_id.clone()))
-            .send();
+            .send()
+            .map_err(AwsSdkError::from);
         // Store the snapshot_id so we can include it in any errors
         let info_future = ready(snapshot_id.to_string());
         requests.push(join(info_future, response_future));
@@ -369,7 +373,10 @@ pub(crate) async fn modify_snapshots(
     let request_stream = stream::iter(requests).buffer_unordered(4);
     let responses: Vec<(
         String,
-        std::result::Result<ModifySnapshotAttributeOutput, SdkError<ModifySnapshotAttributeError>>,
+        std::result::Result<
+            ModifySnapshotAttributeOutput,
+            AwsSdkError<ModifySnapshotAttributeError>,
+        >,
     )> = request_stream.collect().await;
 
     for (snapshot_id, response) in responses {
@@ -428,7 +435,9 @@ pub(crate) async fn modify_regional_snapshots(
                         "Failed to modify permissions in {} for snapshots [{}]: {:?}",
                         region.as_ref(),
                         snapshot_ids.join(", "),
-                        err.into_service_error().code().unwrap_or("unknown"),
+                        err.as_service_error()
+                            .and_then(|e| e.code())
+                            .unwrap_or("unknown"),
                     );
                 }
             }
@@ -453,7 +462,7 @@ pub(crate) async fn modify_image(
     operation: &OperationType,
     image_id: &str,
     ec2_client: &Ec2Client,
-) -> std::result::Result<ModifyImageAttributeOutput, SdkError<ModifyImageAttributeError>> {
+) -> std::result::Result<ModifyImageAttributeOutput, AwsSdkError<ModifyImageAttributeError>> {
     ec2_client
         .modify_image_attribute()
         .set_attribute(Some(
@@ -474,6 +483,7 @@ pub(crate) async fn modify_image(
         .set_operation_type(Some(operation.clone()))
         .set_image_id(Some(image_id.to_string()))
         .send()
+        .map_err(AwsSdkError::from)
         .await
 }
 
@@ -502,7 +512,7 @@ pub(crate) async fn modify_regional_images(
     #[allow(clippy::type_complexity)]
     let responses: Vec<(
         (String, String),
-        std::result::Result<ModifyImageAttributeOutput, SdkError<ModifyImageAttributeError>>,
+        std::result::Result<ModifyImageAttributeOutput, AwsSdkError<ModifyImageAttributeError>>,
     )> = request_stream.collect().await;
 
     // Count up successes and failures so we can give a clear total in the final error message.
@@ -545,7 +555,9 @@ pub(crate) async fn modify_regional_images(
                     "Modifying permissions of {} in {} failed: {}",
                     image_id,
                     region,
-                    e.into_service_error().code().unwrap_or("unknown"),
+                    e.as_service_error()
+                        .and_then(|err| err.code())
+                        .unwrap_or("unknown"),
                 );
             }
         }
@@ -564,11 +576,11 @@ pub(crate) async fn modify_regional_images(
 
 mod error {
     use crate::aws::ami;
-    use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::{
         describe_images::DescribeImagesError,
         modify_snapshot_attribute::ModifySnapshotAttributeError,
     };
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
     use std::io;
     use std::path::PathBuf;
@@ -594,7 +606,7 @@ mod error {
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: SdkError<DescribeImagesError>,
+            source: AwsSdkError<DescribeImagesError>,
         },
 
         #[snafu(display("Failed to deserialize input from '{}': {}", path.display(), source))]
@@ -637,7 +649,7 @@ mod error {
         ModifyImageAttribute {
             snapshot_id: String,
             region: String,
-            source: SdkError<ModifySnapshotAttributeError>,
+            source: AwsSdkError<ModifySnapshotAttributeError>,
         },
 
         #[snafu(display(

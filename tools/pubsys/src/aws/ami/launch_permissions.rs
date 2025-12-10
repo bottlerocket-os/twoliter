@@ -2,6 +2,7 @@ use aws_sdk_ec2::{
     types::{ImageAttributeName, LaunchPermission},
     Client as Ec2Client,
 };
+use error_utils::AwsSdkError;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 
@@ -17,6 +18,7 @@ pub(crate) async fn get_launch_permissions(
         .attribute(ImageAttributeName::LaunchPermission)
         .send()
         .await
+        .map_err(AwsSdkError::from)
         .context(error::DescribeImageAttributeSnafu {
             ami_id,
             region: region.to_string(),
@@ -75,9 +77,9 @@ impl TryFrom<LaunchPermission> for LaunchPermissionDef {
 }
 
 mod error {
-    use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::describe_image_attribute::DescribeImageAttributeError;
     use aws_sdk_ec2::types::LaunchPermission;
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -87,8 +89,8 @@ mod error {
         DescribeImageAttribute {
             ami_id: String,
             region: String,
-            #[snafu(source(from(SdkError<DescribeImageAttributeError>, Box::new)))]
-            source: Box<SdkError<DescribeImageAttributeError>>,
+            #[snafu(source(from(AwsSdkError<DescribeImageAttributeError>, Box::new)))]
+            source: Box<AwsSdkError<DescribeImageAttributeError>>,
         },
 
         #[snafu(display("Invalid launch permission: {:?}", launch_permission))]

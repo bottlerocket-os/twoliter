@@ -1,6 +1,7 @@
 //! The ami module owns the describing of images in EC2.
 
 use aws_sdk_ec2::{config::Region, types::Image, Client as Ec2Client};
+use error_utils::AwsSdkError;
 use futures::future::{join, ready};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{info, trace};
@@ -132,6 +133,7 @@ pub(crate) async fn describe_images_in_region(
     // Iterate over the retrieved images
     while let Some(page) = get_future.next().await {
         let retrieved_images = page
+            .map_err(AwsSdkError::from)
             .context(error::DescribeImagesSnafu {
                 region: region.to_string(),
             })?
@@ -181,22 +183,17 @@ pub(crate) async fn describe_images_in_region(
 
 pub(crate) mod error {
     use aws_sdk_ec2::operation::describe_images::DescribeImagesError;
-    use aws_sdk_ssm::error::SdkError;
-    use aws_smithy_types::error::display::DisplayErrorContext;
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     #[allow(clippy::large_enum_variant)]
     pub(crate) enum Error {
-        #[snafu(display(
-            "Failed to describe images in {}: {}",
-            region,
-            DisplayErrorContext(source)
-        ))]
+        #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: SdkError<DescribeImagesError>,
+            source: AwsSdkError<DescribeImagesError>,
         },
 
         #[snafu(display(

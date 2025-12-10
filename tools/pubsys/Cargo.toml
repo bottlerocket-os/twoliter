@@ -25,6 +25,7 @@ chrono = { workspace = true, features = ["clock", "std"] }
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
 duct.workspace = true
+error-utils.workspace = true
 futures.workspace = true
 governor.workspace = true
 indicatif.workspace = true

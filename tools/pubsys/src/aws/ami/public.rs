@@ -12,10 +12,8 @@ pub(crate) async fn ami_is_public(
         .image_ids(ami_id.to_string())
         .send()
         .await
-        .context(error::DescribeImagesSnafu {
-            ami_id: ami_id.to_string(),
-            region: region.to_string(),
-        })?;
+        .map_err(error_utils::AwsSdkError::from)
+        .context(error::DescribeImagesSnafu { ami_id, region })?;
 
     let returned_images = ec2_response.images();
 
@@ -38,8 +36,8 @@ pub(crate) async fn ami_is_public(
 }
 
 mod error {
-    use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::describe_images::DescribeImagesError;
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -49,8 +47,8 @@ mod error {
         DescribeImages {
             ami_id: String,
             region: String,
-            #[snafu(source(from(SdkError<DescribeImagesError>, Box::new)))]
-            source: Box<SdkError<DescribeImagesError>>,
+            #[snafu(source(from(AwsSdkError<DescribeImagesError>, Box::new)))]
+            source: Box<AwsSdkError<DescribeImagesError>>,
         },
 
         #[snafu(display("AMI {} not found in {}", ami_id, region))]

@@ -15,7 +15,7 @@ use crate::aws::{client::build_client_config, region_from_string};
 use crate::frompath::FromPath;
 use crate::Args;
 use aws_sdk_ebs::Client as EbsClient;
-use aws_sdk_ec2::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_ec2::error::ProvideErrorMetadata;
 use aws_sdk_ec2::operation::copy_image::{CopyImageError, CopyImageOutput};
 use aws_sdk_ec2::types::OperationType;
 use aws_sdk_ec2::{config::Region, Client as Ec2Client};
@@ -25,8 +25,10 @@ use aws_sdk_sts::operation::get_caller_identity::{
 use aws_sdk_sts::Client as StsClient;
 use buildsys::manifest::ManifestInfo;
 use clap::Parser;
+use error_utils::AwsSdkError;
 use futures::future::{join, lazy, ready, FutureExt};
 use futures::stream::{self, StreamExt};
+use futures::TryFutureExt;
 use log::{error, info, trace, warn};
 use pubsys_config::{AwsConfig as PubsysAwsConfig, InfraConfig};
 use register::{get_ami_id, register_image, RegisteredIds};
@@ -271,11 +273,14 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     let client_config = build_client_config(&base_region, &base_region, &aws).await;
     let base_sts_client = StsClient::new(&client_config);
 
-    let response = base_sts_client.get_caller_identity().send().await.context(
-        error::GetCallerIdentitySnafu {
+    let response = base_sts_client
+        .get_caller_identity()
+        .send()
+        .await
+        .map_err(AwsSdkError::from)
+        .context(error::GetCallerIdentitySnafu {
             region: base_region.as_ref(),
-        },
-    )?;
+        })?;
     let base_account_id = response.account.context(error::MissingInResponseSnafu {
         request_type: "GetCallerIdentity",
         missing: "account",
@@ -391,7 +396,8 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
             .set_source_image_id(Some(ids_of_image.image_id.clone()))
             .set_source_region(Some(base_region.as_ref().to_string()))
             .set_copy_image_tags(Some(true))
-            .send();
+            .send()
+            .map_err(AwsSdkError::from);
 
         // Store the region so we can output it to the user
         let region_future = ready(region.clone());
@@ -414,7 +420,7 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
     // Run through the stream and collect results into a list.
     let copy_responses: Vec<(
         Region,
-        std::result::Result<CopyImageOutput, SdkError<CopyImageError>>,
+        std::result::Result<CopyImageOutput, AwsSdkError<CopyImageError>>,
     )> = request_stream.collect().await;
 
     // Report on successes and errors; don't fail immediately if we see an error so we can report
@@ -450,7 +456,9 @@ async fn _run(args: &Args, ami_args: &AmiArgs) -> Result<HashMap<String, Image>>
                 error!(
                     "Copy to {} failed: {}",
                     region,
-                    e.into_service_error().code().unwrap_or("unknown")
+                    e.as_service_error()
+                        .and_then(|err| err.code())
+                        .unwrap_or("unknown")
                 );
             }
         }
@@ -508,7 +516,10 @@ async fn get_account_ids(
     let mut requests = Vec::with_capacity(regions.len());
     for region in regions.iter() {
         let sts_client = &sts_clients[region];
-        let response_future = sts_client.get_caller_identity().send();
+        let response_future = sts_client
+            .get_caller_identity()
+            .send()
+            .map_err(AwsSdkError::from);
 
         // Store the region so we can include it in any errors
         let region_future = ready(region.clone());
@@ -519,7 +530,7 @@ async fn get_account_ids(
     // Run through the stream and collect results into a list.
     let responses: Vec<(
         Region,
-        std::result::Result<GetCallerIdentityOutput, SdkError<GetCallerIdentityError>>,
+        std::result::Result<GetCallerIdentityOutput, AwsSdkError<GetCallerIdentityError>>,
     )> = request_stream.collect().await;
 
     for (region, response) in responses {
@@ -567,10 +578,10 @@ pub(crate) fn parse_uefi_data(filepath: &str) -> Result<FromPath<String>> {
 mod error {
     use super::register::mk_amispec;
     use crate::aws::{ami, publish_ami};
-    use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::modify_image_attribute::ModifyImageAttributeError;
     use aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityError;
     use buildsys::manifest;
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
     use std::path::PathBuf;
 
@@ -613,8 +624,8 @@ mod error {
         #[snafu(display("Error getting account ID in {}: {}", region, source))]
         GetCallerIdentity {
             region: String,
-            #[snafu(source(from(SdkError<GetCallerIdentityError>, Box::new)))]
-            source: Box<SdkError<GetCallerIdentityError>>,
+            #[snafu(source(from(AwsSdkError<GetCallerIdentityError>, Box::new)))]
+            source: Box<AwsSdkError<GetCallerIdentityError>>,
         },
 
         #[snafu(display(
@@ -642,8 +653,8 @@ mod error {
         GrantImageAccess {
             thing: String,
             region: String,
-            #[snafu(source(from(SdkError<ModifyImageAttributeError>, Box::new)))]
-            source: Box<SdkError<ModifyImageAttributeError>>,
+            #[snafu(source(from(AwsSdkError<ModifyImageAttributeError>, Box::new)))]
+            source: Box<AwsSdkError<ModifyImageAttributeError>>,
         },
 
         #[snafu(display(

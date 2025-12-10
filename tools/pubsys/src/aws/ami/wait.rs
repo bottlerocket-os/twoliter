@@ -42,6 +42,7 @@ pub(crate) async fn wait_for_ami(
             .set_image_ids(Some(vec![id.to_string()]))
             .send()
             .await
+            .map_err(error_utils::AwsSdkError::from)
             .context(error::DescribeImagesSnafu {
                 region: region.as_ref(),
             })?;
@@ -100,8 +101,8 @@ pub(crate) async fn wait_for_ami(
 }
 
 mod error {
-    use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::describe_images::DescribeImagesError;
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -111,7 +112,7 @@ mod error {
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: SdkError<DescribeImagesError>,
+            source: AwsSdkError<DescribeImagesError>,
         },
 
         #[snafu(display(
