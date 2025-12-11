@@ -298,7 +298,7 @@ RUN --mount=target=/host \
       EXTERNAL_KIT_REPOS+=("--repofrompath=${REPO_NAME},${REPO_PATH}" --enablerepo "${REPO_NAME}"); \
     done && \
     echo "${EXTERNAL_KIT_REPOS[@]}" && \
-    mkdir -p /local/rpms && \
+    mkdir -p /local/rpms /local/sbom-rpms && \
     download_dir_opt="$(dnf install --help | grep -Fwq downloaddir && echo "--downloaddir /local/rpms" ||:)" && \
     dnf -y \
       --disablerepo '*' \
@@ -312,7 +312,8 @@ RUN --mount=target=/host \
       install \
         --downloadonly \
 	${download_dir_opt} \
-        $(printf "bottlerocket-%s\n" metadata ${PACKAGES}) && \
+        $(printf "bottlerocket-%s\n" metadata metadata-sbom ${PACKAGES}) && \
+    find /local/rpms -mindepth 2 -type f -name '*-sbom-*.rpm' -exec mv -t /local/sbom-rpms {} + && \
     find /local/rpms -mindepth 2 -type f -name '*.rpm' -exec mv -t /local/rpms {} + && \
     find /local/rpms -mindepth 1 ! -name '*.rpm' -delete && \
     rm /output && \
@@ -371,6 +372,7 @@ RUN --mount=target=/host \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
     /host/build/tools/rpm2img \
       --package-dir=/local/rpms \
+      --sbom-package-dir=/local/sbom-rpms \
       --output-dir=/output \
       --external-kits-path="/bypass/build/external-kits" \
       --output-fmt="${IMAGE_FORMAT}" \
