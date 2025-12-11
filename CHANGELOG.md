@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.14.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.0-rc1...HEAD
+
+## [0.15.0-rc1] - 2025-12-11
+
+### Changed
+* Consolidate SBOM packages into a single merged SBOM ([#583])
+* Update Bottlerocket SDK to version 0.66.0 ([#583])
+
+[#583]: https://github.com/bottlerocket-os/twoliter/pull/583
+
+[0.15.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.14.0...v0.15.0-rc1
 
 ## [0.14.0] - 2025-12-08
 
