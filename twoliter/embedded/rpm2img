@@ -168,6 +168,7 @@ rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
 # Inventory installed packages.
 INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
+,\"SourcePackage\":\"%{SOURCERPM}\"\
 ,\"Publisher\":\"Bottlerocket\"\
 ,\"Version\":\"%{Version}\"\
 ,\"Release\":\"%{Release}\"\
@@ -186,6 +187,22 @@ mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
 INVENTORY_DATA="$(jq --raw-output . <<<"${installed_rpms[@]}")"
 # Sort by package name and add 'Content' as top-level.
 INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<<"${INVENTORY_DATA}" | jq '{"Content": .}')"
+
+INVENTORY_BEFORE_PARENTS="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
+INVENTORY_DATA="$(jq '
+  .Content |= (
+    . + map(
+      (.Version) as $v | (.Release) as $r | (.SourcePackage | sub("-" + $v + "-" + $r + "\\.src\\.rpm$";"")) as $p |
+      . + {Name: $p, Summary: ($p + " (source package)")}
+    )
+    | unique_by(.Name)
+    | map(del(.SourcePackage))
+    | sort_by(.Name)
+  )
+' <<<"${INVENTORY_DATA}")"
+
+INVENTORY_AFTER_PARENTS="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
+ADDED_PARENTS=$((INVENTORY_AFTER_PARENTS - INVENTORY_BEFORE_PARENTS))
 
 # Iterate through all kits used to build this variant.
 EXTERNAL_KIT_METADATA_PATH="${EXTERNAL_KITS_PATH}/external-kit-metadata.json"
@@ -240,8 +257,8 @@ done
 # Verify we successfully inventoried some RPMs.
 INVENTORY_COUNT="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
 RPM_COUNT="$(find "${PACKAGE_DIR}" -maxdepth 1 -type f -name '*.rpm' | wc -l)"
-if [[ "${INVENTORY_COUNT}" -ne "${RPM_COUNT}" ]]; then
-  echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/${RPM_COUNT}'" >&2
+if [[ "${INVENTORY_COUNT}" -ne "$((RPM_COUNT + ADDED_PARENTS))" ]]; then
+  echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/$((RPM_COUNT + ADDED_PARENTS))'" >&2
   exit 1
 fi
 if grep -q "bottlerocket-release" <<<"${INVENTORY_DATA}"; then
