@@ -33,9 +33,9 @@ sanity_checks() {
   partition_plan="${2:?}"
   ovf_template="${3:?}"
   uefi_secure_boot="${4:?}"
-  sbom_package_dir="${5:?}"
+  sbom_package_dir="${5:-}"
 
-  if [[ ! -d "${sbom_package_dir}" ]]; then
+  if [[ -n "${sbom_package_dir}" ]] && [[ ! -d "${sbom_package_dir}" ]]; then
     echo "SBOM package directory does not exist: ${sbom_package_dir}" >&2
     exit 1
   fi

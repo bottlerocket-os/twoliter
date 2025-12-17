@@ -7,6 +7,7 @@ use std::process::Command;
 use tempfile::TempDir;
 
 mod appinventory;
+mod imghelper;
 mod twoliter_build;
 mod twoliter_update;
 
