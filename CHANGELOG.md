@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.1-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.1...HEAD
 
-## [0.15.1-rc1] - 2025-12-16
+## [0.15.1] - 2025-12-17
 
 ### Fixed
 * Fix sbom_package_dir optional in imghelper ([#618])
 
 [#618]: https://github.com/bottlerocket-os/twoliter/pull/618
 
-[0.15.1-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.0...v0.15.1-rc1
+[0.15.1]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.0...v0.15.1
 
 ## [0.15.0] - 2025-12-11
 
