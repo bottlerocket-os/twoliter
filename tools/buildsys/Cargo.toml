@@ -18,7 +18,7 @@ guppy.workspace = true
 hex.workspace = true
 lazy_static.workspace = true
 pipesys.workspace = true
-rand = { workspace = true, features = ["std", "std_rng"] }
+rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 regex.workspace = true
 reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
 semver.workspace = true
