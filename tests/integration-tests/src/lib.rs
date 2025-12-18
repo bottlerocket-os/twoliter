@@ -10,6 +10,7 @@ mod appinventory;
 mod imghelper;
 mod twoliter_build;
 mod twoliter_update;
+mod variant_build;
 
 pub const TWOLITER_PATH: &str = env!("CARGO_BIN_FILE_TWOLITER");
 
