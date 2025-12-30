@@ -272,25 +272,32 @@ if [[ ${#sbom_rpms[@]} -gt 1 ]]; then
   ln -rs "${usr_dir}" "${SBOM_MOUNT}/usr"
 fi
 
+# Generate SBOM for variant RPMs
+RPM_SBOM_DIR=$(mktemp -d)
+sbomtool generate --name variant-rpms --build-dir "${PACKAGE_DIR}" --out-dir "${RPM_SBOM_DIR}" --spdx --cyclonedx
+
 # Merge SBOMs into a single json file
 KIT_SBOMS_DIR="${SBOM_MOUNT}/usr/share/sboms"
-if [ -d "${KIT_SBOMS_DIR}" ]; then
-  IMAGE_SBOM_DIR="${ROOT_MOUNT}/usr/share/bottlerocket"
-  mkdir -p "${IMAGE_SBOM_DIR}"
-  for format in "spdx" "cyclonedx"; do
-    image_sbom="${format}-sbom.json"
-    image_sbom_path="${IMAGE_SBOM_DIR}/${image_sbom}"
-    find "${KIT_SBOMS_DIR}" -name "*-${format}.json" -type f -exec sbomtool merge --output "${image_sbom_path}" {} \+
-    if [[ ! -f "${image_sbom_path}" ]]; then
-      echo "Could not find image SBOM path: ${image_sbom_path}" >&2
-      exit 1
-    fi
-    cp "${image_sbom_path}" "${OUTPUT_DIR}/${image_sbom}"
-    if [[ "${EROFS_ROOT_PARTITION}" == "no" ]]; then
-      lz4 -z -f "${image_sbom_path}" "${image_sbom_path}.lz4"
-    fi
-  done
-fi
+IMAGE_SBOM_DIR="${ROOT_MOUNT}/usr/share/bottlerocket"
+mkdir -p "${IMAGE_SBOM_DIR}"
+for format in "spdx" "cyclonedx"; do
+  image_sbom="${format}-sbom.json"
+  image_sbom_path="${IMAGE_SBOM_DIR}/${image_sbom}"
+  rpm_sbom="${RPM_SBOM_DIR}/variant-rpms-${format}.json"
+  if [ -d "${KIT_SBOMS_DIR}" ]; then
+    find "${KIT_SBOMS_DIR}" -name "*-${format}.json" -type f -exec sbomtool merge --output "${image_sbom_path}" "${rpm_sbom}" {} \+
+  else
+    cp "${rpm_sbom}" "${image_sbom_path}"
+  fi
+  if [[ ! -f "${image_sbom_path}" ]]; then
+    echo "Could not find image SBOM path: ${image_sbom_path}" >&2
+    exit 1
+  fi
+  cp "${image_sbom_path}" "${OUTPUT_DIR}/${image_sbom}"
+  if [[ "${EROFS_ROOT_PARTITION}" == "no" ]]; then
+    lz4 -z -f "${image_sbom_path}" "${image_sbom_path}.lz4"
+  fi
+done
 
 # Regenerate module dependencies, if possible.
 KMOD_DIR="${ROOT_MOUNT}/lib/modules"
