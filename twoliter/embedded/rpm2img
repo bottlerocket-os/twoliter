@@ -296,6 +296,7 @@ for format in "spdx" "cyclonedx"; do
   cp "${image_sbom_path}" "${OUTPUT_DIR}/${image_sbom}"
   if [[ "${EROFS_ROOT_PARTITION}" == "no" ]]; then
     lz4 -z -f "${image_sbom_path}" "${image_sbom_path}.lz4"
+    rm "${image_sbom_path}"
   fi
 done
 
