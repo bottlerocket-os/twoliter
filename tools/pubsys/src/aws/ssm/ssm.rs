@@ -2,15 +2,17 @@
 
 use super::{SsmKey, SsmParameters};
 use async_stream::stream;
-use aws_sdk_ssm::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_ssm::error::ProvideErrorMetadata;
 use aws_sdk_ssm::operation::{
     get_parameters::{GetParametersError, GetParametersOutput},
     put_parameter::{PutParameterError, PutParameterOutput},
 };
 use aws_sdk_ssm::{config::Region, types::ParameterType, Client as SsmClient};
+use error_utils::AwsSdkError;
 use futures::future::{join, ready};
 use futures::pin_mut;
 use futures::stream::{self, FuturesUnordered, StreamExt};
+use futures::TryFutureExt;
 use governor::Jitter;
 use governor::{
     clock::DefaultClock, middleware::NoOpMiddleware, state::keyed::DefaultKeyedStateStore, Quota,
@@ -103,6 +105,7 @@ where
                         .get_parameters()
                         .set_names((!names_chunk.is_empty()).then_some(names_chunk))
                         .send()
+                        .map_err(AwsSdkError::from)
                         .await
                 }
             };
@@ -118,7 +121,7 @@ where
     #[allow(clippy::type_complexity)]
     let responses: Vec<(
         (Region, usize),
-        std::result::Result<GetParametersOutput, SdkError<GetParametersError>>,
+        std::result::Result<GetParametersOutput, AwsSdkError<GetParametersError>>,
     )> = request_stream.collect().await;
 
     // If you're checking parameters in a region you haven't pushed to before, you can get an
@@ -234,7 +237,7 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
             rate_limit_ssm_get_parameters(region).await;
             paginated_request.next().await
         } {
-            yield page;
+            yield page.map_err(AwsSdkError::from);
         }
     };
     pin_mut!(paginated_response_stream);
@@ -343,7 +346,8 @@ pub(crate) async fn set_parameters(
                 .set_value(Some(context.value.to_string()))
                 .set_overwrite(Some(true))
                 .set_type(Some(ParameterType::String))
-                .send();
+                .send()
+                .map_err(AwsSdkError::from);
 
             let regional_list = regional_requests
                 .entry(context.region)
@@ -367,7 +371,7 @@ pub(crate) async fn set_parameters(
         let parallel_requests = stream::select_all(throttled_streams).buffer_unordered(4);
         let responses: Vec<(
             RequestContext<'_>,
-            std::result::Result<PutParameterOutput, SdkError<PutParameterError>>,
+            std::result::Result<PutParameterOutput, AwsSdkError<PutParameterError>>,
         )> = parallel_requests.collect().await;
 
         // For each error response, check if we should retry or bail.
@@ -375,8 +379,8 @@ pub(crate) async fn set_parameters(
             if let Err(e) = response {
                 // Throttling errors are not currently surfaced in AWS SDK Rust, doing a string match is best we can do
                 let error_type = e
-                    .into_service_error()
-                    .code()
+                    .as_service_error()
+                    .and_then(|err| err.code())
                     .unwrap_or("unknown")
                     .to_owned();
                 if error_type.contains("ThrottlingException") {
@@ -489,26 +493,25 @@ async fn validate_parameters_inner(
 }
 
 pub(crate) mod error {
-    use aws_sdk_ssm::error::SdkError;
     use aws_sdk_ssm::operation::{
         get_parameters::GetParametersError, get_parameters_by_path::GetParametersByPathError,
     };
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
-    use std::error::Error as _;
     use std::time::Duration;
 
     #[derive(Debug, Snafu)]
     #[snafu(visibility(pub(super)))]
     #[allow(clippy::large_enum_variant)]
     pub enum Error {
-        #[snafu(display("Failed to fetch SSM parameters in {}: {}", region, source.source().map(|x| x.to_string()).unwrap_or("unknown".to_string())))]
+        #[snafu(display("Failed to fetch SSM parameters in {}: {}", region, source))]
         GetParameters {
             region: String,
-            source: SdkError<GetParametersError>,
+            source: AwsSdkError<GetParametersError>,
         },
 
         #[snafu(display(
-            "Failed to fetch SSM parameters by path {} in {}: {}",
+            "Failed to fetch SSM parameters by path '{}' in {}: {}",
             path,
             region,
             source
@@ -516,7 +519,7 @@ pub(crate) mod error {
         GetParametersByPath {
             path: String,
             region: String,
-            source: SdkError<GetParametersByPathError>,
+            source: AwsSdkError<GetParametersByPathError>,
         },
 
         #[snafu(display("Missing field in parameter in {}: {}", region, field))]

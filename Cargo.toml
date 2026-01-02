@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "tools/amispec",
     "tools/bottlerocket-variant",
+    "tools/error-utils",
     "tools/buildsys",
     "tools/buildsys-config",
     "tools/include-env-compressed",
@@ -58,6 +59,7 @@ bottlerocket-types = { version = "0.0.16", git = "https://github.com/bottlerocke
 bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
 buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys" ] }
 buildsys-config = { version = "0.1", path = "tools/buildsys-config" }
+error-utils = { version = "0.1", path = "tools/error-utils" }
 include-env-compressed = { version = "0.1", path = "tools/include-env-compressed" }
 include-env-compressed-macro = { version = "0.1", path = "tools/include-env-compressed/include-env-compressed-macro" }
 krane-bundle = { version = "0.1", path = "tools/krane" }
@@ -99,6 +101,7 @@ aws-sdk-ec2 = { version = "1", default-features = false, features = ["default-ht
 aws-sdk-kms = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-ssm = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-smithy-runtime-api = { version = "1", features = ["client"] }
 aws-smithy-types = "1"
 aws-types = "1"
 base64 = "0.22"

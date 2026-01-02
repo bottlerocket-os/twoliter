@@ -305,7 +305,7 @@ async fn check_public_namespace_amis_are_public(
         let is_public = ami_is_public(&update.ec2_client, region.as_ref(), ami_id)
             .await
             .context(error::CheckAmiPublicSnafu {
-                ami_id: ami_id.to_string(),
+                ami_id,
                 region: region.to_string(),
             });
 

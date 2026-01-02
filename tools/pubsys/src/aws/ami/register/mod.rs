@@ -50,6 +50,7 @@ async fn _register_image(
         .as_register_image_call()
         .send_with(ec2_client)
         .await
+        .map_err(error_utils::AwsSdkError)
         .context(error::RegisterImageSnafu {
             region: region.as_ref(),
         })?;
@@ -258,6 +259,7 @@ where
         ]))
         .send()
         .await
+        .map_err(error_utils::AwsSdkError)
         .context(error::DescribeImagesSnafu {
             region: region.as_ref(),
         })?;
@@ -288,10 +290,10 @@ where
 
 mod error {
     use super::mk_amispec;
-    use aws_sdk_ec2::error::SdkError;
     use aws_sdk_ec2::operation::{
         describe_images::DescribeImagesError, register_image::RegisterImageError,
     };
+    use error_utils::AwsSdkError;
     use snafu::Snafu;
     use std::path::PathBuf;
 
@@ -307,7 +309,7 @@ mod error {
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: SdkError<DescribeImagesError>,
+            source: AwsSdkError<DescribeImagesError>,
         },
 
         #[snafu(display("Image response in {} did not include image ID", region))]
@@ -319,7 +321,7 @@ mod error {
         #[snafu(display("Failed to register image in {}: {}", region, source))]
         RegisterImage {
             region: String,
-            source: SdkError<RegisterImageError>,
+            source: AwsSdkError<RegisterImageError>,
         },
 
         #[snafu(display("Failed to create progress bar: {}", source))]

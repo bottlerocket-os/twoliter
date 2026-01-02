@@ -1,5 +1,5 @@
-use aws_sdk_ec2::error::SdkError;
 use aws_sdk_ec2::operation::describe_images::DescribeImagesError;
+use error_utils::AwsSdkError;
 use snafu::Snafu;
 use std::path::PathBuf;
 
@@ -28,8 +28,7 @@ pub enum Error {
 
     #[snafu(context(false), display("{}", source))]
     DescribeImages {
-        #[snafu(source(from(SdkError<DescribeImagesError>, Box::new)))]
-        source: Box<SdkError<DescribeImagesError>>,
+        source: Box<AwsSdkError<DescribeImagesError>>,
     },
 
     #[snafu(display("Unable to read file '{}': {}", path.display(), source))]

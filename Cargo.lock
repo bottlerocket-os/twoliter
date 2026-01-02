@@ -1428,6 +1428,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "error-utils"
+version = "0.1.0"
+dependencies = [
+ "aws-sdk-ssm",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+]
+
+[[package]]
 name = "event-listener"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3131,6 +3140,7 @@ dependencies = [
  "clap",
  "coldsnap",
  "duct",
+ "error-utils",
  "futures",
  "governor",
  "indicatif",
@@ -4267,6 +4277,7 @@ dependencies = [
  "bottlerocket-variant",
  "clap",
  "env_logger",
+ "error-utils",
  "fastrand",
  "futures",
  "handlebars",
