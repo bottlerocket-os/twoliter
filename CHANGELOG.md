@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.16.0...HEAD
+
+
+## [0.16.0-rc1] - 2026-01-06
+
+### Added
+* Add sbomtool step to generate an SBOM of the RPMs in an image for use in the SBOM merge ([#627])
+* Add AWS SDK messages to errors ([#613])
+
+### Fixed
+* Fixed non-EROFS variants to properly remove uncompressed SBOM after compression ([#627])
+
+[#613]: https://github.com/bottlerocket-os/twoliter/pull/613
+[#627]: https://github.com/bottlerocket-os/twoliter/pull/627
+
+[0.16.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.15.1...v0.16.0-rc1
+
 
 ## [0.15.1] - 2025-12-17
 
