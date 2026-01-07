@@ -4850,7 +4850,7 @@ dependencies = [
 
 [[package]]
 name = "twoliter"
-version = "0.16.0-rc1"
+version = "0.16.0"
 dependencies = [
  "anyhow",
  "async-recursion",
