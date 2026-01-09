@@ -2,6 +2,7 @@ use std::{env, path::Path};
 
 use duct::cmd;
 use reqwest::Url;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Cursor};
@@ -14,6 +15,10 @@ use crate::{run_command, twoliter_build::copy_project_to_temp_dir, TWOLITER_PATH
 
 const EXPECTED_INVENTORY_PATH: &str =
     "build/images/x86_64-aws-ecs-2/latest/application-inventory.json";
+
+// Last Bottlerocket release that doesn't include source packages in application inventory.
+// For older releases, we check that reference inventory is a subset of current.
+const SOURCE_PACKAGE_INVENTORY_ANCHOR_VERSION: &str = "1.52.0";
 
 #[derive(Serialize, Deserialize)]
 pub struct GithubRelease {
@@ -57,6 +62,11 @@ async fn find_latest_version(repository: &str) -> String {
         .strip_prefix("refs/tags/")
         .unwrap_or(tag_name)
         .to_string()
+}
+
+fn parse_version(release: &str) -> Version {
+    let version = release.strip_prefix("v").unwrap_or(release);
+    Version::parse(version).expect("failed to parse")
 }
 
 async fn create_bob(version: &str) -> TempDir {
@@ -150,10 +160,28 @@ async fn test_twoliter_application_inventory() {
     let current_aif = build_and_fetch_application_inventory(TWOLITER_PATH, bob_src.path());
     let current_set: InventoryView = serde_json::from_str(current_aif.as_str())
         .expect("failed to deserialize current inventory file");
-    assert_eq!(
-        reference_set, current_set,
-        "twoliter generated different application inventory than last released twoliter"
-    );
+
+    // Last Bottlerocket release that doesn't include source packages in application inventory.
+    // For older releases, we check that reference inventory is a subset of current.
+    let anchor = parse_version(SOURCE_PACKAGE_INVENTORY_ANCHOR_VERSION);
+    let bob_ver = parse_version(&bob_version);
+
+    // For BOB versions before source package support, check that reference is a subset of current
+    // current may have additional source package entries
+    if bob_ver <= anchor {
+        for item in &reference_set.content {
+            assert!(
+                current_set.content.contains(item),
+                "current inventory missing package from reference: {:?}",
+                item
+            );
+        }
+    } else {
+        assert_eq!(
+            reference_set, current_set,
+            "twoliter generated different application inventory than last released twoliter"
+        );
+    }
 }
 
 fn build_and_fetch_application_inventory(
