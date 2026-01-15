@@ -1,0 +1,11 @@
+diff --git a/packages/settings-defaults/settings-defaults.spec b/packages/settings-defaults/settings-defaults.spec
+--- a/packages/settings-defaults/settings-defaults.spec
++++ b/packages/settings-defaults/settings-defaults.spec
+@@ -36,6 +36,7 @@ Requires: (%{shrink:
+ Provides: %{_cross_os}settings-defaults(any)
+ Provides: %{_cross_os}settings-defaults(aws-ecs-2)
+ Provides: %{_cross_os}settings-defaults(aws-ecs-2-fips)
++Obsoletes: %{_cross_os}test-obsolete-pkg
+ Conflicts: %{_cross_os}settings-defaults(any)
+ 
+ %description aws-ecs-2

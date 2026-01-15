@@ -166,6 +166,8 @@ fi
 INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
+PKG_PREFIX="bottlerocket-"
+
 # Inventory installed packages.
 INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"SourcePackage\":\"%{SOURCERPM}\"\
@@ -177,7 +179,8 @@ INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
 ,\"ApplicationType\":\"%{GROUP}\"\
 ,\"Architecture\":\"%{ARCH}\"\
 ,\"Url\":\"%{URL}\"\
-,\"Summary\":\"%{Summary}\"\}\n"
+,\"Summary\":\"%{Summary}\"\
+,\"Alias\":\"[%{Obsoletes},]\"\}\n"
 
 # shellcheck disable=SC2312 # Array is validated elsewhere.
 mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
@@ -186,14 +189,18 @@ mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
 # Wrap installed_rpms mapfile into json.
 INVENTORY_DATA="$(jq --raw-output . <<<"${installed_rpms[@]}")"
 # Sort by package name and add 'Content' as top-level.
-INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<<"${INVENTORY_DATA}" | jq '{"Content": .}')"
+# We convert comma separated Aliases to a json array.
+INVENTORY_DATA="$(jq --slurp '
+  map(.Alias |= (if . and . != "" then (split(",") | map(select(. != ""))) else [] end))
+  | sort_by(.Name)
+  | {Content: .}' <<<"${INVENTORY_DATA}")"
 
 INVENTORY_BEFORE_PARENTS="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
 INVENTORY_DATA="$(jq '
   .Content |= (
     . + map(
       (.Version) as $v | (.Release) as $r | (.SourcePackage | sub("-" + $v + "-" + $r + "\\.src\\.rpm$";"")) as $p |
-      . + {Name: $p, Summary: ($p + " (source package)")}
+      . + {Name: $p, Summary: ("Source Package for " + $p)}
     )
     | unique_by(.Name)
     | map(del(.SourcePackage))
@@ -223,12 +230,12 @@ for kit in "${kits[@]}"; do
   kit_path="${EXTERNAL_KITS_PATH}/${kit_vendor}/${kit}/${ARCH}"
 
   # Query the kit repo of RPMs for all package names.
-  kit_inventory_query="%{NAME}\n"
+  kit_inventory_query="%{NAME}\n%{Obsoletes}"
   # shellcheck disable=SC2312 # Array is validated elsewhere.
   mapfile -t KIT_PKGS <<<"$(dnf -q --repofrompath \
     kit,file://"${kit_path}" \
     --repo=kit repoquery \
-    --queryformat "${kit_inventory_query}" | grep -v "^$")"
+    --queryformat "${kit_inventory_query}" | grep -v "^$" | awk '{print $1}')"
   # Convert the bash array of kit packages to a JSON array.
   kit_list="$(\
     jq \
@@ -241,24 +248,65 @@ for kit in "${kits[@]}"; do
   # for search and replace in the installed application inventory.
   jq \
     --compact-output \
-    'map({ (.|tostring): (.|sub("^bottlerocket-";""))}) | add' <<<"${kit_list}" \
+    --arg prefix "${PKG_PREFIX}" \
+    'map({ (.|tostring): (.|sub("^" + $prefix;""))}) | add' <<<"${kit_list}" \
     > kit-replacements.json
 
   # For any packages in the installed app inventory that came from the kit, replace
   # the Publisher with the kit's vendor and replace the name with the unprefixed name.
   INVENTORY_DATA="$(jq \
-    --slurpfile replace kit-replacements.json \
-    --arg KIT "${kit}" \
-    '(.Content[] | select(.Name | $replace[][.] != null) | .Publisher) = $KIT |
-      .Content[].Name |= (if $replace[][.] then $replace[][.] else . end)' \
-    <<<"${INVENTORY_DATA}")"
+  --slurpfile replace kit-replacements.json \
+  --arg KIT "${kit}" \
+  '(.Content[] | select(.Name | $replace[][.] != null) | .Publisher) = $KIT |
+    .Content[].Name |= (if $replace[][.] then $replace[][.] else . end) |
+    .Content[].Alias |= map(if $replace[][.] then $replace[][.] else . end)' \
+  <<<"${INVENTORY_DATA}")"
 done
+
+# We ensured all names are unique before creating additional entries for Aliases. If this generated
+# duplicate entries then there exists 2 packages in a variant that do the same function, so we error out
+# We append an additional list of aliases with the prefix so that we test both {_cross_os}pkg and pkg since
+# they refer to the same packages.
+CONFLICT_CHECK=$(jq --arg prefix "${PKG_PREFIX}" '
+  [.Content[].Name] +
+  [.Content[].Alias[]] +
+  [.Content[].Alias[] | $prefix + .]
+' <<<"${INVENTORY_DATA}")
+
+TOTAL_COUNT=$(jq 'length' <<<"${CONFLICT_CHECK}")
+UNIQUE_COUNT=$(jq 'unique | length' <<<"${CONFLICT_CHECK}")
+
+if [[ "${TOTAL_COUNT}" -ne "${UNIQUE_COUNT}" ]]; then
+  echo "Package conflict detected - a package name or alias collides with another." >&2
+  jq -r 'group_by(.) | map(select(length > 1)) | .[][0]' <<<"${CONFLICT_CHECK}" >&2
+  exit 1
+fi
+
+# Add alias entries from Obsoletes field.
+INVENTORY_DATA=$(jq '
+  .Content |= (
+    . + [
+      .[] |
+      select(.Alias != null and (.Alias | length) > 0) |
+      . as $orig |
+      .Alias[] |
+      ($orig + {Name: ., Summary: ("Alias for " + $orig.Name)})
+    ] |
+    map(del(.Alias)) |
+    sort_by(.Name)
+  )
+' <<<"${INVENTORY_DATA}")
+
+ALIAS_COUNT=$(($(jq '.Content | length' <<<"${INVENTORY_DATA}") - INVENTORY_AFTER_PARENTS))
 
 # Verify we successfully inventoried some RPMs.
 INVENTORY_COUNT="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
 RPM_COUNT="$(find "${PACKAGE_DIR}" -maxdepth 1 -type f -name '*.rpm' | wc -l)"
-if [[ "${INVENTORY_COUNT}" -ne "$((RPM_COUNT + ADDED_PARENTS))" ]]; then
-  echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/$((RPM_COUNT + ADDED_PARENTS))'" >&2
+if [[ "${INVENTORY_COUNT}" -ne "$((RPM_COUNT + ADDED_PARENTS + ALIAS_COUNT))" ]]; then
+  echo "Inventory count mismatch: \
+  Inventory count: ${INVENTORY_COUNT} \
+  Expected Inventory count: $((RPM_COUNT + ADDED_PARENTS + ALIAS_COUNT)) \
+    (${RPM_COUNT} RPMs, ${ADDED_PARENTS} source packages, ${ALIAS_COUNT} aliases)" >&2
   exit 1
 fi
 if grep -q "bottlerocket-release" <<<"${INVENTORY_DATA}"; then

@@ -76,6 +76,8 @@ async fn create_bob(version: &str) -> TempDir {
     cmd!(
         git,
         "clone",
+        "--depth",
+        "1",
         "-b",
         version,
         "https://github.com/bottlerocket-os/bottlerocket.git",
@@ -232,4 +234,76 @@ fn build_and_fetch_application_inventory(
         "twoliter did not generate application-inventory.json"
     );
     std::fs::read_to_string(&aif).expect("failed to read application-inventory.json file")
+}
+const SINGLE_OBSOLETE_PATCH: &str = include_str!("patches/single-obsolete.patch");
+const MULTIPLE_OBSOLETES_PATCH: &str = include_str!("patches/multiple-obsoletes.patch");
+
+fn apply_patch(bob_path: &Path, patch: &str) {
+    let git = which("git").expect("failed to find git");
+    cmd!(git, "-C", bob_path, "apply", "-")
+        .stdin_bytes(patch.as_bytes())
+        .run()
+        .expect("failed to apply patch");
+}
+
+#[tokio::test]
+async fn test_application_inventory_single_obsolete() {
+    // We clone v1.52.0 bob to ensure the patches are applied reliably
+    let bob_version = "v1.52.0";
+    let bob_src = create_bob(bob_version).await;
+
+    // To test aliases, we add a single obsoletes in settings-defaults package
+    apply_patch(bob_src.path(), SINGLE_OBSOLETE_PATCH);
+
+    // Build and get the application inventory file contents with this twoliter
+    let aif = build_and_fetch_application_inventory(TWOLITER_PATH, bob_src.path());
+    let inventory: InventoryView =
+        serde_json::from_str(&aif).expect("failed to deserialize inventory");
+
+    // In this case an extra entry is added in the application-inventory
+    assert!(
+        inventory
+            .content
+            .iter()
+            .any(|c| c.name == "bottlerocket-test-obsolete-pkg" && c.publisher == "Bottlerocket"),
+        "expected test-obsolete-pkg in inventory from Obsoletes"
+    );
+}
+
+#[tokio::test]
+async fn test_application_inventory_multiple_obsoletes() {
+    // We clone v1.52.0 bob to ensure the patches are applied reliably
+    let bob_version = "v1.52.0";
+    let bob_src = create_bob(bob_version).await;
+    apply_patch(bob_src.path(), MULTIPLE_OBSOLETES_PATCH);
+
+    // To test aliases, we add 2 obsoletes in settings-defaults package
+    let aif = build_and_fetch_application_inventory(TWOLITER_PATH, bob_src.path());
+    let inventory: InventoryView =
+        serde_json::from_str(&aif).expect("failed to deserialize inventory");
+
+    // In this case 2 extra entries are added in the application-inventory
+    let settings_defaults_publisher = inventory
+        .content
+        .iter()
+        .find(|c| c.name == "bottlerocket-settings-defaults")
+        .map(|c| c.publisher.clone())
+        .expect("expected bottlerocket-settings-defaults in inventory");
+
+    assert!(
+        inventory
+            .content
+            .iter()
+            .any(|c| c.name == "bottlerocket-test-obsolete-one"
+                && c.publisher == settings_defaults_publisher),
+        "expected test-obsolete-one in inventory from Obsoletes"
+    );
+    assert!(
+        inventory
+            .content
+            .iter()
+            .any(|c| c.name == "bottlerocket-test-obsolete-two"
+                && c.publisher == settings_defaults_publisher),
+        "expected test-obsolete-two in inventory from Obsoletes"
+    );
 }
