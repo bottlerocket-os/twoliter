@@ -1,3 +1,4 @@
+mod efi;
 mod error;
 mod platform;
 
