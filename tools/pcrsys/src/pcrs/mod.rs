@@ -7,3 +7,4 @@ pub mod pcr3;
 pub mod pcr4;
 pub mod pcr5;
 pub mod pcr6;
+pub mod pcr7;
