@@ -4,6 +4,7 @@ mod efi;
 mod error;
 mod gpt;
 mod parsers;
+mod pcrs;
 mod pe;
 mod platform;
 mod predict;
