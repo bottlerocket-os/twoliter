@@ -1,5 +1,6 @@
 mod efi;
 mod error;
+mod gpt;
 mod platform;
 
 use crate::error::Result;
