@@ -747,19 +747,15 @@ pub enum MigrationDirection {
     Downgrade,
 }
 
+#[derive(Default)]
 pub enum CreateCrdOutput {
     /// A new CRD was created and needs to be applied to the cluster.
     NewCrd(Box<Crd>),
     /// An existing CRD is already representing this object.
     ExistingCrd(String),
     /// There is no CRD to create for this step of this family.
+    #[default]
     None,
-}
-
-impl Default for CreateCrdOutput {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl CreateCrdOutput {

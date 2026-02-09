@@ -330,17 +330,12 @@ impl GenericVariantConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub enum ResourceAgentType {
     Karpenter,
+    #[default]
     Ec2,
-}
-
-impl Default for ResourceAgentType {
-    fn default() -> Self {
-        Self::Ec2
-    }
 }
 
 derive_fromstr_from_deserialize!(ResourceAgentType);
