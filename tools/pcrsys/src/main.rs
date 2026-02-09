@@ -1,3 +1,4 @@
+mod diskfs;
 mod efi;
 mod error;
 mod gpt;
