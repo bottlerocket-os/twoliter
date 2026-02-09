@@ -1,3 +1,4 @@
+mod aws;
 mod diskfs;
 mod efi;
 mod error;
