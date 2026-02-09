@@ -1,4 +1,5 @@
 mod error;
+mod platform;
 
 use crate::error::Result;
 
