@@ -1,6 +1,7 @@
 mod efi;
 mod error;
 mod gpt;
+mod parsers;
 mod pe;
 mod platform;
 
