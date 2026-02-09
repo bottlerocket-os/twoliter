@@ -6,6 +6,7 @@ mod gpt;
 mod parsers;
 mod pe;
 mod platform;
+mod predict;
 
 use crate::error::Result;
 
