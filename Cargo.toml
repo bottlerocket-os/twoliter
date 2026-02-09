@@ -11,6 +11,7 @@ members = [
     "tools/include-env-compressed/include-env-compressed-macro",
     "tools/oci-cli-wrapper",
     "tools/parse-datetime",
+    "tools/pcrsys",
     "tools/pipesys",
     "tools/pubsys",
     "tools/pubsys-config",
@@ -63,9 +64,11 @@ error-utils = { version = "0.1", path = "tools/error-utils" }
 include-env-compressed = { version = "0.1", path = "tools/include-env-compressed" }
 include-env-compressed-macro = { version = "0.1", path = "tools/include-env-compressed/include-env-compressed-macro" }
 krane-bundle = { version = "0.1", path = "tools/krane" }
+nutype = "0.5"
 oci-cli-wrapper = { version = "0.1", path = "tools/oci-cli-wrapper" }
 parse-datetime = { version = "0.1", path = "tools/parse-datetime" }
 path-absolutize = "3.1"
+pcrsys = { version = "0.1", path = "tools/pcrsys", artifact = [ "bin:pcrsys" ] }
 pipesys = { version = "0.1", path = "tools/pipesys", lib = true, artifact = [ "bin:pipesys" ] }
 pubsys = { version = "0.1", path = "tools/pubsys", artifact = [ "bin:pubsys" ] }
 pubsys-config = { version = "0.1", path = "tools/pubsys-config" }
@@ -94,6 +97,7 @@ async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 async-walkdir = "1"
+authenticode = "0.5"
 aws-config = { version = "1", default-features = false, features = ["credentials-process", "default-https-client", "rt-tokio" ] }
 aws-credential-types = "1"
 aws-sdk-ebs = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
@@ -105,24 +109,30 @@ aws-smithy-runtime-api = { version = "1", features = ["client"] }
 aws-smithy-types = "1"
 aws-types = "1"
 base64 = "0.22"
+bit_field = "0.10"
 bon = "3"
 bounded-integer = "0.5"
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
 clap = "4"
 coldsnap = { version = "0.9", default-features = false }
+crc32fast = "1"
 daemonize = "0.5"
 darling = "0.21"
 duct = "1.1"
 env_logger = "0.11"
+ext4-view = "0.9"
 fastrand = "2"
+fatfs = "0.3"
 filetime = "0.2"
 flate2 = "1"
 futures = "0.3"
 governor = "0.10"
+gptman = "2"
 guppy = "0.17"
 handlebars = "6"
 hex = "0.4"
+hex-literal = "1"
 home = "0.5"
 indicatif = "0.18"
 inotify = "0.11"
@@ -136,8 +146,11 @@ nix = "0.30"
 nonzero_ext = "0.3"
 num_cpus = "1"
 num-traits = "0.2"
+object = "0.37"
 once_cell = "1.21"
 olpc-cjson = "0.1"
+pest = "2.8"
+pest_derive = "2.8"
 proc-macro2 = "1"
 quote = "1"
 rand = { version = "0.9", default-features = false }
