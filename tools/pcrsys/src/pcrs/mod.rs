@@ -2,3 +2,4 @@
 
 pub mod pcr0;
 pub mod pcr1;
+pub mod pcr2;
