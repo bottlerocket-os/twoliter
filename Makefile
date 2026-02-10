@@ -36,6 +36,9 @@ deny:
 clippy:
 	cargo clippy --locked -- -D warnings --no-deps
 
+.PHONY: fast
+fast: fmt clippy test
+
 .PHONY: fmt
 fmt:
 	cargo fmt --check
