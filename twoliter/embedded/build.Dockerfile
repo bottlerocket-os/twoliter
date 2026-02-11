@@ -331,6 +331,7 @@ ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
 ARG VARIANT
+ARG VARIANT_PLATFORM
 ARG PRETTY_NAME
 ARG IMAGE_NAME
 ARG IMAGE_FORMAT
@@ -346,7 +347,8 @@ ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
 ARG ENCRYPTED_STORAGE
 ARG PROJECT_VENDOR
-ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
+ENV VARIANT=${VARIANT} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
+    VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
     KERNEL_PARAMETERS=${KERNEL_PARAMETERS}
 WORKDIR /root
@@ -364,6 +366,7 @@ RUN --mount=target=/host \
     --mount=type=secret,id=code-sign.key,target=/root/sbkeys/code-sign.key \
     --mount=type=secret,id=code-sign.crt,target=/root/sbkeys/code-sign.crt \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
+    --mount=type=secret,id=efi-vars.json,target=/root/sbkeys/efi-vars.json \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
@@ -492,6 +495,7 @@ ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
 ARG VARIANT
+ARG VARIANT_PLATFORM
 ARG IMAGE_NAME
 ARG IMAGE_FORMAT
 ARG OS_IMAGE_SIZE_GIB
@@ -502,7 +506,8 @@ ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG UEFI_SECURE_BOOT
 ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
-ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
+ENV VARIANT=${VARIANT} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
+    VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
 
 USER root
@@ -518,6 +523,7 @@ RUN --mount=target=/host \
     --mount=type=secret,id=code-sign.key,target=/root/sbkeys/code-sign.key \
     --mount=type=secret,id=code-sign.crt,target=/root/sbkeys/code-sign.crt \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
+    --mount=type=secret,id=efi-vars.json,target=/root/sbkeys/efi-vars.json \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \

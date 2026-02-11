@@ -41,6 +41,7 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
             &dir,
             mtime,
         ),
+        write_bin("pcrsys", twoliter_tool_pcrsys::PCRSYS.reader(), &dir, mtime),
         write_bin(
             "pipesys",
             twoliter_tool_pipesys::PIPESYS.reader(),
@@ -153,6 +154,7 @@ async fn test_install_tools() {
 
     // Check that binaries were copied.
     assert!(toolsdir.join("buildsys").is_file());
+    assert!(toolsdir.join("pcrsys").is_file());
     assert!(toolsdir.join("pipesys").is_file());
     assert!(toolsdir.join("pubsys").is_file());
     assert!(toolsdir.join("pubsys-setup").is_file());

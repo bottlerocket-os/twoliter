@@ -13,6 +13,21 @@ license-files = [
   { path = "aws-lc/third_party/fiat/LICENSE", hash = 0x75829ee2 },
 ]
 
+[clarify.libm]
+expression = "MIT OR Apache-2.0"
+license-files = [
+  { path = "LICENSE.txt", hash = 0x2d75fe33 },
+]
+
+[clarify.libz-sys]
+expression = "(MIT OR Apache-2.0) AND Zlib"
+license-files = [
+  { path = "LICENSE-APACHE", hash = 0x24b54f4b },
+  { path = "LICENSE-MIT", hash = 0x88396382 },
+  { path = "src/zlib/LICENSE", hash = 0xe8a00937 },
+  { path = "src/zlib-ng/LICENSE.md", hash = 0x464d0f42 },
+]
+
 [clarify.minimal-lexical]
 expression = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 license-files = [

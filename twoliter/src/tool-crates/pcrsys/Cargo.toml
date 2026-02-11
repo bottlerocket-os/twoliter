@@ -1,0 +1,12 @@
+[package]
+name = "twoliter-tool-pcrsys"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+pcrsys.workspace = true
+include-env-compressed.workspace = true
+
+[lints]
+workspace = true
