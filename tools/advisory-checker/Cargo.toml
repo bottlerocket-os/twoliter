@@ -1,0 +1,22 @@
+[package]
+name = "advisory-checker"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+publish = false
+exclude = ["README.md"]
+
+[dependencies]
+nutype = { workspace = true, features = ["regex", "serde"] }
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
+snafu.workspace = true
+toml.workspace = true
+rpm.workspace = true
+
+[dev-dependencies]
+test-case.workspace = true
+
+[lints]
+workspace = true

@@ -62,6 +62,15 @@ RUN \
    && find . -maxdepth 1 -not -path '*/\.*' -type f -exec mv {} rpmbuild/SOURCES/ \; \
    && echo ${NOCACHE}
 
+RUN --mount=target=/host \
+    if [ -d "/host/advisories/" ]; then \
+        /host/build/tools/advisory-checker \
+            --packages-dir /host/packages/ \
+            --advisories-dir /host/advisories/; \
+    else \
+        echo "Advisories directory not found, skipping check."; \
+    fi
+
 USER root
 ARG BYPASS_SOCKET
 RUN --mount=target=/host \

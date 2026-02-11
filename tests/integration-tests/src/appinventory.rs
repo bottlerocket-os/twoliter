@@ -18,7 +18,7 @@ const EXPECTED_INVENTORY_PATH: &str =
 
 // Last Bottlerocket release that doesn't include source packages in application inventory.
 // For older releases, we check that reference inventory is a subset of current.
-const SOURCE_PACKAGE_INVENTORY_ANCHOR_VERSION: &str = "1.55.0";
+const SOURCE_PACKAGE_INVENTORY_ANCHOR_VERSION: &str = "1.56.0";
 
 #[derive(Serialize, Deserialize)]
 pub struct GithubRelease {
