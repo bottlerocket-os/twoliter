@@ -52,7 +52,7 @@ PUBLISH_INFRA_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Infra.toml"
 # Default repo to read from PUBLISH_INFRA_CONFIG_PATH
 PUBLISH_REPO = "default"
 
-PUBLISH_LOG_LEVEL = "info"
+PUBLISH_LOG_LEVEL = { script = ["if [ \"${TWOLITER_QUIET}\" = \"1\" ]; then echo warn; else echo info; fi"], condition = { env_not_set = ["PUBLISH_LOG_LEVEL"] } }
 
 # This can be overridden with -e to change the path to the file containing SSM
 # parameter templates.  This file determines the parameter names and values
@@ -142,7 +142,7 @@ TESTSYS_STARTING_COMMIT = { script = ["git describe --tag ${TESTSYS_STARTING_VER
 TESTSYS_TESTS_DIR = "${BUILDSYS_ROOT_DIR}/tests"
 TESTSYS_TEST_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Test.toml"
 
-TESTSYS_LOG_LEVEL = "info"
+TESTSYS_LOG_LEVEL = { script = ["if [ \"${TWOLITER_QUIET}\" = \"1\" ]; then echo warn; else echo info; fi"], condition = { env_not_set = ["TESTSYS_LOG_LEVEL"] } }
 
 [env.development]
 # Certain variables are defined here to allow us to override a component value

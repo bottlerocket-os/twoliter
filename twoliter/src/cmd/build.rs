@@ -1,4 +1,5 @@
 use super::build_clean::BuildClean;
+use super::GlobalOpts;
 use crate::cargo_make::CargoMake;
 use crate::common::fs;
 use crate::project::{self, Locked};
@@ -16,11 +17,11 @@ pub(crate) enum BuildCommand {
 }
 
 impl BuildCommand {
-    pub(crate) async fn run(self) -> Result<()> {
+    pub(crate) async fn run(self, global_opts: &GlobalOpts) -> Result<()> {
         match self {
             BuildCommand::Clean(command) => command.run().await,
-            BuildCommand::Kit(command) => command.run().await,
-            BuildCommand::Variant(command) => command.run().await,
+            BuildCommand::Kit(command) => command.run(global_opts).await,
+            BuildCommand::Variant(command) => command.run(global_opts).await,
         }
     }
 }
@@ -50,7 +51,7 @@ pub(crate) struct BuildKit {
 }
 
 impl BuildKit {
-    pub(super) async fn run(&self) -> Result<()> {
+    pub(super) async fn run(&self, global_opts: &GlobalOpts) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let project = project.load_lock::<Locked>().await?;
         project.fetch(self.arch.as_str()).await?;
@@ -76,6 +77,7 @@ impl BuildKit {
                 "BUILDSYS_UPSTREAM_SOURCE_FALLBACK",
                 self.upstream_source_fallback.to_string(),
             )
+            .env("TWOLITER_QUIET", if global_opts.quiet { "1" } else { "0" })
             .envs(optional_envs.into_iter())
             .makefile(makefile_path)
             .project_dir(project.project_dir())
@@ -113,7 +115,7 @@ pub(crate) struct BuildVariant {
 }
 
 impl BuildVariant {
-    pub(super) async fn run(&self) -> Result<()> {
+    pub(super) async fn run(&self, global_opts: &GlobalOpts) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let project = project.load_lock::<Locked>().await?;
         project.fetch(self.arch.as_str()).await?;
@@ -150,6 +152,7 @@ impl BuildVariant {
                 "BUILDSYS_UPSTREAM_SOURCE_FALLBACK",
                 self.upstream_source_fallback.to_string(),
             )
+            .env("TWOLITER_QUIET", if global_opts.quiet { "1" } else { "0" })
             .envs(optional_envs.into_iter())
             .makefile(makefile_path)
             .project_dir(project.project_dir())

@@ -20,7 +20,7 @@ mod tools;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    init_logger(args.log_level);
+    init_logger(args.log_level, args.global.quiet);
     preflight::preflight().await?;
     cmd::run(args).await
 }

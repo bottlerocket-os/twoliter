@@ -1,3 +1,4 @@
+use super::GlobalOpts;
 use crate::cargo_make::CargoMake;
 use crate::project::{self, Locked, SDKLocked, Unlocked};
 use crate::tools::install_tools;
@@ -52,7 +53,7 @@ pub(crate) struct Make {
 }
 
 impl Make {
-    pub(super) async fn run(&self) -> Result<()> {
+    pub(super) async fn run(&self, global_opts: &GlobalOpts) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let sdk_source = self.lock_and_fetch(&project).await?;
         let toolsdir = project.project_dir().join("build/tools");
@@ -62,6 +63,7 @@ impl Make {
             .env("CARGO_HOME", self.cargo_home.display().to_string())
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
+            .env("TWOLITER_QUIET", if global_opts.quiet { "1" } else { "0" })
             .makefile(makefile_path)
             .project_dir(project.project_dir())
             .exec_with_args(&self.makefile_task, self.additional_args.clone())
