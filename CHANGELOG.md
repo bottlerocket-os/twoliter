@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.16.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.0-rc1...HEAD
+
+## [0.17.0-rc1] - 2026-02-26
+
+### Added
+* Add pcrsys to predict PCR values ([#625])
+* Add --quiet flag to reduce build output ([#607])
+* Add check-advisories to validate BRSA fields ([#604])
+
+### Changed
+* Update design documentation ([#610])
+* Update Rust nightly toolchain and fix rand features for buildsys ([#624])
+* Bump source package anchor version ([#637])
+
+### Fixed
+* Add source packages of sub-packages in rpm2img for application-inventory generation ([#606])
+
+### Build
+* Add e2e test for build-variant and repack-variant build targets ([#623])
+* Update cargo dependencies ([#632], [#630], [#631], [#640], [#633])
+
+[#604]: https://github.com/bottlerocket-os/twoliter/pull/604
+[#606]: https://github.com/bottlerocket-os/twoliter/pull/606
+[#607]: https://github.com/bottlerocket-os/twoliter/pull/607
+[#610]: https://github.com/bottlerocket-os/twoliter/pull/610
+[#623]: https://github.com/bottlerocket-os/twoliter/pull/623
+[#624]: https://github.com/bottlerocket-os/twoliter/pull/624
+[#625]: https://github.com/bottlerocket-os/twoliter/pull/625
+[#630]: https://github.com/bottlerocket-os/twoliter/pull/630
+[#631]: https://github.com/bottlerocket-os/twoliter/pull/631
+[#632]: https://github.com/bottlerocket-os/twoliter/pull/632
+[#633]: https://github.com/bottlerocket-os/twoliter/pull/633
+[#637]: https://github.com/bottlerocket-os/twoliter/pull/637
+[#640]: https://github.com/bottlerocket-os/twoliter/pull/640
+
+[0.17.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.16.0...v0.17.0-rc1
 
 
 ## [0.16.0] - 2026-01-06
