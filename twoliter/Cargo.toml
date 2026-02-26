@@ -43,6 +43,7 @@ zstd.workspace = true
 maplit.workspace = true
 
 # Binary dependencies. These are binaries that we want to embed in the Twoliter binary
+twoliter-tool-advisory-checker.workspace = true
 twoliter-tool-buildsys.workspace = true
 twoliter-tool-embedded-bundle.workspace = true
 twoliter-tool-pcrsys.workspace = true

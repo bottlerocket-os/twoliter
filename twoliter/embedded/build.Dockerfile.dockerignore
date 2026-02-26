@@ -12,5 +12,8 @@
 # Include everything under sources.
 !/sources
 
+# Include everything under advisories.
+!/advisories
+
 # Exclude "target" directories everywhere.
 */target/*
