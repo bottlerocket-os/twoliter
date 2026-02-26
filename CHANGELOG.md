@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.0...HEAD
 
-## [0.17.0-rc1] - 2026-02-26
+## [0.17.0] - 2026-02-26
 
 ### Added
 * Add pcrsys to predict PCR values ([#625])
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#637]: https://github.com/bottlerocket-os/twoliter/pull/637
 [#640]: https://github.com/bottlerocket-os/twoliter/pull/640
 
-[0.17.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.16.0...v0.17.0-rc1
+[0.17.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.16.0...v0.17.0
 
 
 ## [0.16.0] - 2026-01-06
