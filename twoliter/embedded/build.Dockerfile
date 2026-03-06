@@ -340,6 +340,7 @@ ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
 ARG VARIANT
+ARG VARIANT_NAME=${VARIANT}
 ARG VARIANT_PLATFORM
 ARG PRETTY_NAME
 ARG IMAGE_NAME
@@ -356,7 +357,7 @@ ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
 ARG ENCRYPTED_STORAGE
 ARG PROJECT_VENDOR
-ENV VARIANT=${VARIANT} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
+ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
     KERNEL_PARAMETERS=${KERNEL_PARAMETERS}
@@ -393,7 +394,7 @@ RUN --mount=target=/host \
       --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
       --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
       --partition-plan="${PARTITION_PLAN}" \
-      --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
+      --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
       ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
@@ -413,11 +414,12 @@ ARG VERSION_ID
 ARG BUILD_ID
 ARG NOCACHE
 ARG VARIANT
+ARG VARIANT_NAME=${VARIANT}
 ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
 ARG IN_PLACE_UPDATES
-ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
+ENV VARIANT=${VARIANT_NAME} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
 
 USER root
@@ -453,7 +455,8 @@ ARG VERSION_ID
 ARG BUILD_ID
 ARG NOCACHE
 ARG VARIANT
-ENV VARIANT=${VARIANT} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
+ARG VARIANT_NAME=${VARIANT}
+ENV VARIANT=${VARIANT_NAME} VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
@@ -504,6 +507,7 @@ ARG BYPASS_SOCKET
 ARG OUTPUT_SOCKET
 ARG BUILDER_UID
 ARG VARIANT
+ARG VARIANT_NAME=${VARIANT}
 ARG VARIANT_PLATFORM
 ARG IMAGE_NAME
 ARG IMAGE_FORMAT
@@ -515,7 +519,7 @@ ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG UEFI_SECURE_BOOT
 ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
-ENV VARIANT=${VARIANT} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
+ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
 
@@ -541,7 +545,7 @@ RUN --mount=target=/host \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
     rm -rf /output/* && \
     /host/build/tools/img2img \
-      --input-dir="/bypass/build/images/${ARCH}-${VARIANT}/${VERSION_ID}-${BUILD_ID}" \
+      --input-dir="/bypass/build/images/${ARCH}-${VARIANT_NAME}/${VERSION_ID}-${BUILD_ID}" \
       --output-dir=/output \
       --output-fmt="${IMAGE_FORMAT}" \
       --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
@@ -549,7 +553,7 @@ RUN --mount=target=/host \
       --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
       --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
       --partition-plan="${PARTITION_PLAN}" \
-      --ovf-template="/bypass/variants/${VARIANT}/template.ovf" \
+      --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
       ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
