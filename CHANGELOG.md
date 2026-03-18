@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.1-rc1...HEAD
+
+## [0.17.1-rc-1] - 2026-03-18
+
+### Build
+* Bump actions/setup-go from 6.2.0 to 6.3.0 ([#644])
+* Bump aws-lc-sys from 0.37.1 to 0.38.0 ([#646])
+* Bump quinn-proto from 0.11.13 to 0.11.14 ([#648])
+
+[#644]: https://github.com/bottlerocket-os/twoliter/pull/644
+[#646]: https://github.com/bottlerocket-os/twoliter/pull/646
+[#648]: https://github.com/bottlerocket-os/twoliter/pull/648
+
+[0.17.1-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.0...v0.17.1-rc1
 
 ## [0.17.0] - 2026-02-26
 
