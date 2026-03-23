@@ -191,6 +191,50 @@ impl Variant {
         );
     }
 
+    /// Apply overrides to create a new Variant with the specified attributes replaced.
+    ///
+    /// If an override is `Some`, it replaces the original value. If `None`, the original is kept.
+    /// Family is recomputed from final platform/runtime UNLESS family was explicitly overridden.
+    pub fn with_overrides(&self, overrides: &VariantOverrides) -> Self {
+        let platform = overrides
+            .platform
+            .clone()
+            .unwrap_or_else(|| self.platform.clone());
+        let runtime = overrides
+            .runtime
+            .clone()
+            .unwrap_or_else(|| self.runtime.clone());
+        let family = overrides
+            .family
+            .clone()
+            .unwrap_or_else(|| format!("{platform}-{runtime}"));
+        let version = overrides.version.clone().or_else(|| self.version.clone());
+        let variant_flavor = overrides
+            .flavor
+            .clone()
+            .or_else(|| self.variant_flavor.clone());
+
+        // Reconstruct variant string from final attributes: platform-runtime[-version][-flavor]
+        let mut variant = format!("{platform}-{runtime}");
+        if let Some(ref v) = version {
+            variant.push('-');
+            variant.push_str(v);
+        }
+        if let Some(ref f) = variant_flavor {
+            variant.push('-');
+            variant.push_str(f);
+        }
+
+        Self {
+            variant,
+            platform,
+            runtime,
+            family,
+            version,
+            variant_flavor,
+        }
+    }
+
     fn parse<S: Into<String>>(value: S) -> Result<Self> {
         let variant = value.into();
         let mut parts = variant.split('-');
@@ -438,5 +482,136 @@ fn parse_err() {
             "Expected Variant::new(\"{}\") to return an error",
             test
         );
+    }
+}
+
+/// Overrides for variant attributes that can be specified in a package's Cargo.toml.
+///
+/// These overrides are read from `[package.metadata.bottlerocket-variant]` and allow
+/// packages to override the variant attributes derived from the variant string.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+pub struct VariantOverrides {
+    pub platform: Option<String>,
+    pub runtime: Option<String>,
+    pub family: Option<String>,
+    pub version: Option<String>,
+    pub flavor: Option<String>,
+}
+
+impl VariantOverrides {
+    /// Returns true if no overrides are set.
+    pub fn is_empty(&self) -> bool {
+        self.platform.is_none()
+            && self.runtime.is_none()
+            && self.family.is_none()
+            && self.version.is_none()
+            && self.flavor.is_none()
+    }
+}
+
+#[cfg(test)]
+mod with_overrides_tests {
+    use super::*;
+
+    #[test]
+    fn test_with_overrides_platform_only() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("metal".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides);
+        assert_eq!(result.platform(), "metal");
+        assert_eq!(result.runtime(), "k8s");
+        assert_eq!(result.family(), "metal-k8s");
+        assert_eq!(result.version(), Some("1.32"));
+    }
+
+    #[test]
+    fn test_with_overrides_runtime_only() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            runtime: Some("ecs".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides);
+        assert_eq!(result.platform(), "aws");
+        assert_eq!(result.runtime(), "ecs");
+        assert_eq!(result.family(), "aws-ecs");
+        assert_eq!(result.version(), Some("1.32"));
+    }
+
+    #[test]
+    fn test_with_overrides_family_explicit() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("metal".to_string()),
+            family: Some("custom-family".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides);
+        assert_eq!(result.platform(), "metal");
+        assert_eq!(result.runtime(), "k8s");
+        assert_eq!(result.family(), "custom-family");
+    }
+
+    #[test]
+    fn test_with_overrides_family_computed() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("vmware".to_string()),
+            runtime: Some("dev".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides);
+        assert_eq!(result.family(), "vmware-dev");
+    }
+
+    #[test]
+    fn test_with_overrides_all_fields() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("metal".to_string()),
+            runtime: Some("dev".to_string()),
+            family: Some("custom".to_string()),
+            version: Some("2.0".to_string()),
+            flavor: Some("nvidia".to_string()),
+        };
+        let result = variant.with_overrides(&overrides);
+        assert_eq!(result.platform(), "metal");
+        assert_eq!(result.runtime(), "dev");
+        assert_eq!(result.family(), "custom");
+        assert_eq!(result.version(), Some("2.0"));
+        assert_eq!(result.variant_flavor(), Some("nvidia"));
+    }
+
+    #[test]
+    fn test_with_overrides_none() {
+        let variant = Variant::new("aws-k8s-1.32-nvidia").unwrap();
+        let overrides = VariantOverrides::default();
+        let result = variant.with_overrides(&overrides);
+        assert_eq!(result.platform(), "aws");
+        assert_eq!(result.runtime(), "k8s");
+        assert_eq!(result.family(), "aws-k8s");
+        assert_eq!(result.version(), Some("1.32"));
+        assert_eq!(result.variant_flavor(), Some("nvidia"));
+    }
+
+    #[test]
+    fn test_existing_parsing_unchanged() {
+        // Ensure original parsing still works correctly
+        let variant = Variant::new("aws-k8s-1.32-nvidia").unwrap();
+        assert_eq!(variant.platform(), "aws");
+        assert_eq!(variant.runtime(), "k8s");
+        assert_eq!(variant.family(), "aws-k8s");
+        assert_eq!(variant.version(), Some("1.32"));
+        assert_eq!(variant.variant_flavor(), Some("nvidia"));
+
+        let variant2 = Variant::new("metal-dev").unwrap();
+        assert_eq!(variant2.platform(), "metal");
+        assert_eq!(variant2.runtime(), "dev");
+        assert_eq!(variant2.family(), "metal-dev");
+        assert_eq!(variant2.version(), None);
+        assert_eq!(variant2.variant_flavor(), None);
     }
 }

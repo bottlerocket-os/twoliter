@@ -224,6 +224,7 @@ struct VariantBuildArgs {
     partition_plan: String,
     pretty_name: String,
     variant: String,
+    variant_name: String,
     variant_family: String,
     variant_flavor: String,
     variant_platform: String,
@@ -257,6 +258,7 @@ impl VariantBuildArgs {
         args.build_arg("PARTITION_PLAN", &self.partition_plan);
         args.build_arg("PRETTY_NAME", &self.pretty_name);
         args.build_arg("VARIANT", &self.variant);
+        args.build_arg("VARIANT_NAME", &self.variant_name);
         args.build_arg("VARIANT_FAMILY", &self.variant_family);
         args.build_arg("VARIANT_FLAVOR", &self.variant_flavor);
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
@@ -281,6 +283,7 @@ struct RepackVariantBuildArgs {
     os_image_size_gib: String,
     partition_plan: String,
     variant: String,
+    variant_name: String,
     variant_platform: String,
     version_build: String,
     version_image: String,
@@ -302,6 +305,7 @@ impl RepackVariantBuildArgs {
         args.build_arg("OS_IMAGE_SIZE_GIB", &self.os_image_size_gib);
         args.build_arg("PARTITION_PLAN", &self.partition_plan);
         args.build_arg("VARIANT", &self.variant);
+        args.build_arg("VARIANT_NAME", &self.variant_name);
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
@@ -445,6 +449,10 @@ impl DockerBuild {
         let variant = filename(args.common.cargo_manifest_dir);
 
         let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
+        let overrides = manifest.info().variant_overrides();
+        let v = v.with_overrides(&overrides);
+        let variant_name = variant.clone();
+        let variant: String = v.as_ref().into();
         let variant_platform = v.platform().into();
         let variant_runtime = v.runtime().into();
         let variant_family = v.family().into();
@@ -457,15 +465,18 @@ impl DockerBuild {
             context: args.common.root_dir.clone(),
             target: "variant".to_string(),
             tag: append_token(
-                format!("buildsys-var-{variant}-{arch}", arch = args.common.arch),
+                format!(
+                    "buildsys-var-{variant_name}-{arch}",
+                    arch = args.common.arch
+                ),
                 &args.common.root_dir,
             ),
             root_dir: args.common.root_dir.clone(),
             artifacts_dirs: vec![args
                 .image_dir
-                .join(format!("{}-{}", args.common.arch, variant))],
+                .join(format!("{}-{}", args.common.arch, variant_name))],
             state_dir: args.common.state_dir,
-            artifact_name: variant.clone(),
+            artifact_name: variant_name.clone(),
             common_build_args: CommonBuildArgs::new(
                 &args.common.root_dir,
                 args.common.sdk_image,
@@ -508,6 +519,7 @@ impl DockerBuild {
                 .to_string(),
                 pretty_name: args.pretty_name,
                 variant,
+                variant_name,
                 variant_family,
                 variant_flavor,
                 variant_platform,
@@ -534,6 +546,10 @@ impl DockerBuild {
 
         let variant = filename(args.common.cargo_manifest_dir);
         let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
+        let overrides = manifest.info().variant_overrides();
+        let v = v.with_overrides(&overrides);
+        let variant_name = variant.clone();
+        let variant: String = v.as_ref().into();
         let variant_platform = v.platform().into();
 
         Ok(Self {
@@ -575,6 +591,7 @@ impl DockerBuild {
                 }
                 .to_string(),
                 variant,
+                variant_name,
                 variant_platform,
                 version_build: args.version_build,
                 version_image: args.version_image,
