@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.17.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.18.0-rc1...HEAD
+
+## [0.18.0-rc1] - 2026-03-25
+
+### Added
+* Add ability to override variant properties in bottlerocket-variant ([#647])
+
+### Build
+* Bump actions/setup-go from 6.2.0 to 6.3.0 ([#644])
+* Update cargo dependencies ([#646], [#648], [#650], [#651], [#652])
+
+[#644]: https://github.com/bottlerocket-os/twoliter/pull/644
+[#646]: https://github.com/bottlerocket-os/twoliter/pull/646
+[#647]: https://github.com/bottlerocket-os/twoliter/pull/647
+[#648]: https://github.com/bottlerocket-os/twoliter/pull/648
+[#650]: https://github.com/bottlerocket-os/twoliter/pull/650
+[#651]: https://github.com/bottlerocket-os/twoliter/pull/651
+[#652]: https://github.com/bottlerocket-os/twoliter/pull/652
 
 ## [0.17.0] - 2026-02-26
 

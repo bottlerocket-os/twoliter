@@ -24,7 +24,8 @@ expression = "(MIT OR Apache-2.0) AND Zlib"
 license-files = [
   { path = "LICENSE-APACHE", hash = 0x24b54f4b },
   { path = "LICENSE-MIT", hash = 0x88396382 },
-  { path = "src/zlib/LICENSE", hash = 0xe8a00937 },
+  { path = "src/zlib/LICENSE", hash = 0xcbc15cd1 },
+  { path = "src/zlib/contrib/minizip/LICENSE.Info-Zip", hash = 0x8e918937 },
   { path = "src/zlib-ng/LICENSE.md", hash = 0x464d0f42 },
 ]
 
