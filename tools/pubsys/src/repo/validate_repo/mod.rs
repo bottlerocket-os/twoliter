@@ -5,7 +5,7 @@ use crate::repo::{error as repo_error, repo_urls};
 use crate::{read_stream, repo, Args};
 use clap::Parser;
 use futures::{stream, StreamExt};
-use log::{info, trace};
+use log::{error, info, trace};
 use pubsys_config::InfraConfig;
 use snafu::{OptionExt, ResultExt};
 use std::io::Cursor;
@@ -56,6 +56,19 @@ async fn retrieve_targets(repo: &Repository) -> Result<(), Error> {
     Ok(())
 }
 
+/// Walks an error's source chain, logging each cause with Debug formatting.
+/// This surfaces details (like HTTP status codes) that Display formatting hides.
+fn log_error_chain(err: &dyn std::error::Error) {
+    error!("Error details: {:?}", err);
+    let mut source = err.source();
+    let mut depth = 1;
+    while let Some(cause) = source {
+        error!("  Cause #{}: {:?}", depth, cause);
+        source = cause.source();
+        depth += 1;
+    }
+}
+
 async fn download_target(repo: Repository, target: TargetName) -> Result<u64, Error> {
     info!("Downloading target: {}", target.raw());
     let stream = match repo.read_target(&target).await {
@@ -67,12 +80,17 @@ async fn download_target(repo: Repository, target: TargetName) -> Result<u64, Er
             .fail()
         }
         Err(e) => {
+            log_error_chain(&e);
             return Err(e).context(error::TargetReadSnafu {
                 target: target.raw(),
-            })
+            });
         }
     };
-    let mut bytes = Cursor::new(read_stream(stream).await.context(error::StreamSnafu)?);
+    let stream_result = read_stream(stream).await;
+    if let Err(ref e) = stream_result {
+        log_error_chain(e);
+    }
+    let mut bytes = Cursor::new(stream_result.context(error::StreamSnafu)?);
     // tough's `Read` implementation validates the target as it's being downloaded
     io::copy(&mut bytes, &mut io::sink())
         .await
