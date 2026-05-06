@@ -36,6 +36,7 @@ fn main() {
     paths.copy_file("rpm2kmodkit");
     paths.copy_file("rpm2migrations");
     paths.copy_file("metadata.spec");
+    paths.copy_file("builder-group.spec");
     paths.copy_file("ocihelper");
     paths.copy_file("waves/accelerated-waves.toml");
     paths.copy_file("waves/default-waves.toml");
