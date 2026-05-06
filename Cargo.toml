@@ -187,7 +187,7 @@ tough = "0.21"
 tough-kms = "0.13"
 tough-ssm = "0.16"
 tracing = "0.1"
-tuftool = { version = "0.14", artifact = [ "bin:tuftool" ] }
+tuftool = { version = "0.15", artifact = [ "bin:tuftool" ] }
 uds = "0.4"
 unescape = "0.1"
 url = "2"

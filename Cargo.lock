@@ -3637,9 +3637,9 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "toml",
- "tough",
- "tough-kms",
- "tough-ssm",
+ "tough 0.21.0",
+ "tough-kms 0.13.0",
+ "tough-ssm 0.16.0",
  "update-metadata",
  "url",
 ]
@@ -4567,7 +4567,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5202,6 +5202,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "tough"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8031cff0872dd1c6312370515a6be8098f6ea5512f1bad725016046fc725f272"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "aws-lc-rs",
+ "bytes",
+ "chrono",
+ "dyn-clone",
+ "futures",
+ "futures-core",
+ "globset",
+ "hex",
+ "log",
+ "olpc-cjson",
+ "pem",
+ "percent-encoding",
+ "reqwest",
+ "rustls 0.23.37",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "typed-path",
+ "untrusted 0.7.1",
+ "url",
+ "walkdir",
+]
+
+[[package]]
 name = "tough-kms"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5214,7 +5249,23 @@ dependencies = [
  "pem",
  "snafu",
  "tokio",
- "tough",
+ "tough 0.21.0",
+]
+
+[[package]]
+name = "tough-kms"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0dff0b351f00e22f1a98abeb4dc2756e04e354e82d5d2d8c8adae96ec2e9a50"
+dependencies = [
+ "aws-config",
+ "aws-lc-rs",
+ "aws-sdk-kms",
+ "aws-smithy-http-client",
+ "pem",
+ "snafu",
+ "tokio",
+ "tough 0.22.0",
 ]
 
 [[package]]
@@ -5228,7 +5279,21 @@ dependencies = [
  "aws-smithy-http-client",
  "snafu",
  "tokio",
- "tough",
+ "tough 0.21.0",
+]
+
+[[package]]
+name = "tough-ssm"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7ac4ab021c7aacf1306b0dde75af35aaf86e7894221263d2ecd8e03e771cc64"
+dependencies = [
+ "aws-config",
+ "aws-sdk-ssm",
+ "aws-smithy-http-client",
+ "snafu",
+ "tokio",
+ "tough 0.22.0",
 ]
 
 [[package]]
@@ -5354,14 +5419,15 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuftool"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad7d36c2b5b994b609e53ba2856520235d061793fac57dcf117b2209d22c52c9"
+checksum = "cd25c9be852ff1817f883df956db4808d8817e9a2dc714fc290c946e9aca42cf"
 dependencies = [
  "aws-config",
  "aws-lc-rs",
  "aws-sdk-kms",
  "aws-sdk-ssm",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "futures",
@@ -5378,9 +5444,9 @@ dependencies = [
  "snafu",
  "tempfile",
  "tokio",
- "tough",
- "tough-kms",
- "tough-ssm",
+ "tough 0.22.0",
+ "tough-kms 0.14.0",
+ "tough-ssm 0.17.0",
  "url",
  "walkdir",
 ]
