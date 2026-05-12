@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.19.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.19.0...HEAD
 
-## [0.19.0-rc1] - 2026-05-11
+## [0.19.0] - 2026-05-12
 
 ### Changed
 * pubsys: add Debug-level error chain logging for target download failure ([#649])
+
+### Fixed
+* rpm2img: Quote VENDOR_NAME value in os-release to handle spaces ([#665])
 
 ### Build
 * Bump actions/setup-go from 6.3.0 to 6.4.0 ([#654])
@@ -23,8 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#656]: https://github.com/bottlerocket-os/twoliter/pull/656
 [#658]: https://github.com/bottlerocket-os/twoliter/pull/658
 [#662]: https://github.com/bottlerocket-os/twoliter/pull/662
+[#665]: https://github.com/bottlerocket-os/twoliter/pull/665
 
-[0.19.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.18.0...v0.19.0-rc1
+[0.19.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.18.0...v0.19.0
 
 ## [0.18.0] - 2026-04-02
 
