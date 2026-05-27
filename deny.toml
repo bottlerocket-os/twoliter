@@ -62,8 +62,11 @@ wildcards = "deny"
 skip = [
     # several dependencies are using multiple versions of base64
     { name = "base64" },
-    # governor and guppy collide bringing two versions of hashbrown
-    { name = "hashbrown" }
+    # governor and guppy collide bringing two versions of hashbrown and foldhash
+    { name = "hashbrown" },
+    { name = "foldhash" },
+    # tokio-retry uses rand 0.10 while other crates use rand 0.9
+    { name = "rand" },
 ]
 
 skip-tree = [
