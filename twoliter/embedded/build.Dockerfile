@@ -71,6 +71,13 @@ RUN --mount=target=/host \
         echo "Advisories directory not found, skipping check."; \
     fi
 
+RUN --mount=target=/host \
+    cp /host/build/tools/builder-group.spec rpmbuild/SPECS/builder-group.spec \
+    && rpmbuild -bb --clean \
+         --undefine _auto_set_build_flags \
+         --define "_target_cpu ${ARCH}" \
+         rpmbuild/SPECS/builder-group.spec
+
 USER root
 ARG BYPASS_SOCKET
 RUN --mount=target=/host \
@@ -144,6 +151,7 @@ ARG OUTPUT_SOCKET
 RUN --mount=target=/host \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
     rm -rf /output/* && \
+    find /home/builder/rpmbuild/RPMS -type f -name 'bottlerocket-builder-group-*.rpm' -delete && \
     cp /home/builder/rpmbuild/RPMS/*/*.rpm /output/ && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm -f /home/builder/rpmbuild/RPMS/*/*.rpm && \
