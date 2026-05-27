@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...HEAD
 
-## [0.20.0-rc1] - 2026-05-27
+## [0.20.0] - 2026-05-27
 
 ### Added
 * Generate builder-group RPM to provide group(builder) ([#661])
 
 [#661]: https://github.com/bottlerocket-os/twoliter/pull/661
 
-[0.20.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.19.0...v0.20.0-rc1
+[0.20.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.19.0...v0.20.0
 
 
 ## [0.19.0] - 2026-05-12
