@@ -11,6 +11,24 @@ BOOT_IMAGE_SUFFIX="-boot"
 VERITY_IMAGE_SUFFIX="-root"
 ROOT_IMAGE_SUFFIX="-root"
 
+# Single source of truth for the file extensions produced by an image build.
+# `compress_image` below validates its `ext` argument against this list, and
+# `guest-images-helper` iterates it to pick which artifacts to embed into a
+# host variant's rootfs. Adding a new image format therefore means adding its
+# suffix here first; forgetting to update this list will fail the build at
+# `compress_image` rather than silently dropping the artifact from an
+# embedding host. `ova` is included because a `.ova` bundle is a first-class
+# image artifact even though it is assembled by `generate_ova` (via `tar`)
+# rather than by `compress_image`.
+IMAGE_ARTIFACT_SUFFIXES=(
+  "img.lz4"
+  "qcow2"
+  "vmdk"
+  "ova"
+  "ext4.lz4"
+  "verity.lz4"
+)
+
 OS_IMAGE_NAME="${FILENAME_PREFIX}"
 DATA_IMAGE_NAME="${FILENAME_PREFIX}${DATA_IMAGE_SUFFIX}"
 BOOT_IMAGE_NAME="${FILENAME_PREFIX}${BOOT_IMAGE_SUFFIX}"
@@ -122,6 +140,23 @@ compress_image() {
   input_image="${what^^}"
   image_name="${what^^}_NAME"
 
+  # Reject any extension that isn't in the canonical artifact list, so that a
+  # new image format cannot slip past the drift-detection contract with
+  # `guest-images-helper`. `.ova` is intentionally in the array but not here:
+  # OVAs are built by `generate_ova`, not `compress_image`.
+  local known suffix
+  known="no"
+  for suffix in "${IMAGE_ARTIFACT_SUFFIXES[@]}"; do
+    if [[ "${ext}" == "${suffix}" ]]; then
+      known="yes"
+      break
+    fi
+  done
+  if [[ "${known}" != "yes" ]]; then
+    echo "compress_image: '${ext}' is not in IMAGE_ARTIFACT_SUFFIXES; add it to imghelper" >&2
+    exit 1
+  fi
+
   case "${ext}" in
   *lz4)
     lz4 -9vc "${!input_image}" >"${output_dir}/${!image_name}${ext:+.${ext}}"
@@ -136,7 +171,7 @@ compress_image() {
       "${!input_image}" "${output_dir}/${!image_name}${ext:+.${ext}}"
     ;;
   *)
-    echo "unexpected extension: ${ext}" >&2
+    echo "compress_image: '${ext}' is a known artifact suffix but has no compressor case" >&2
     exit 1
     ;;
   esac

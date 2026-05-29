@@ -369,6 +369,7 @@ ARG ENCRYPTED_STORAGE
 ARG FIRST_PARTY_STACK
 ARG PROJECT_VENDOR
 ARG TWOLITER_VERSION
+ARG GUEST_IMAGES
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
@@ -430,6 +431,7 @@ RUN --mount=target=/host \
         --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
         --partition-plan="${PARTITION_PLAN}" \
         --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
+        --guest-images="${GUEST_IMAGES}" \
         ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
         ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
         ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \

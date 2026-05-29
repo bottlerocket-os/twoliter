@@ -1,0 +1,12 @@
+[package]
+name = "transitive"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "../../lib.rs"
+
+[package.metadata.build-variant]
+included-packages = []
+kernel-parameters = []

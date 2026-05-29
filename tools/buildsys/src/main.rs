@@ -270,11 +270,25 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     check_arch_support(manifest.info(), args.common.arch);
     validate_first_party_stack_or_warn(manifest.info())?;
 
+    // Resolve declared guest-images and emit a rerun-if-changed for each guest's image
+    // directory, so rebuilding a guest variant triggers a rebuild of this host variant.
+    let guest_images = manifest
+        .guest_image_variant_deps()
+        .context(error::ManifestParseSnafu)?;
+    let arch = args.common.arch.to_string();
+    for (guest, _install_path) in &guest_images {
+        let guest_image_dir = args
+            .image_dir
+            .join(format!("{arch}-{guest}"))
+            .join(&args.common.version_full);
+        println!("cargo:rerun-if-changed={}", guest_image_dir.display());
+    }
+
     if args.common.cicd_hack {
         return Ok(());
     }
 
-    DockerBuild::new_variant(args, &manifest)
+    DockerBuild::new_variant(args, &manifest, guest_images)
         .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)

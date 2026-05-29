@@ -1,0 +1,2 @@
+[bottlerocket.bottlerocket-sdk]
+registry = "public.ecr.aws/bottlerocket"

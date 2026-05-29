@@ -12,9 +12,10 @@ UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
 FIRST_PARTY_STACK="yes"
+GUEST_IMAGES=""
 
 for opt in "$@"; do
-  optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
+  optarg="${opt#*=}"
   case "${opt}" in
   --package-dir=*) PACKAGE_DIR="${optarg}" ;;
   --output-dir=*) OUTPUT_DIR="${optarg}" ;;
@@ -32,6 +33,7 @@ for opt in "$@"; do
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
   --with-first-party-stack=*) FIRST_PARTY_STACK="${optarg}" ;;
+  --guest-images=*) GUEST_IMAGES="${optarg}" ;;
   --sbom-package-dir=*) SBOM_PACKAGE_DIR="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
@@ -47,6 +49,10 @@ done
 # Import the image helper functions.
 # shellcheck source=imghelper
 . "${0%/*}/imghelper"
+
+# Import the guest-images copy helper.
+# shellcheck source=guest-images-helper
+. "${0%/*}/guest-images-helper"
 
 sanity_checks \
   "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}" "${SBOM_PACKAGE_DIR}"
@@ -204,6 +210,51 @@ fi
 INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
+# Embed any declared guest variant images into the host rootfs. Each entry has the form
+# `<guest>:<install_path>:<host_image_dir>` separated by newlines. The host image dir is
+# expressed relative to the project root, which is mounted at /bypass.
+#
+# For the copy into the rootfs at `<install_path>` we take only the bootable image
+# artifacts (and their stable-name symlinks). Sidecar build outputs -- `application
+# -inventory.json`, `artifact-metadata.json`, `pcr-predictions.json`, and the
+# `*-sbom-*.json` files -- are intentionally *not* copied into the guest install
+# directory: their contents describe the guest build, and downstream tools discover them
+# via well-known paths under `/usr/share/bottlerocket/`, not under the guest install
+# directory. The bootable-artifact filter lives in `guest-images-helper` (sourced above)
+# so that it can be unit-tested in isolation.
+#
+# The guest's SBOMs and application inventory are, however, treated as first-class inputs
+# to the *host*'s equivalents: the host's SBOM and inventory should record everything that
+# ships as part of the host image, and any embedded guest is effectively another component
+# of the host. We remember each guest's image dir here and merge its SBOM files into the
+# host SBOM (and its application-inventory into the host's) further down.
+GUEST_SBOM_DIRS=()
+GUEST_INVENTORY_FILES=()
+if [ -n "${GUEST_IMAGES}" ]; then
+  while IFS=: read -r guest install_path host_dir; do
+    [ -z "${guest}" ] && continue
+    src="/bypass/${host_dir}"
+    if [ ! -d "${src}" ]; then
+      echo "guest-images: source directory '${src}' for guest '${guest}' does not exist" >&2
+      exit 1
+    fi
+    dst="${ROOT_MOUNT}${install_path}"
+    mkdir -p "${dst}"
+    if ! copy_guest_image_artifacts "${src}" "${dst}"; then
+      echo "guest-images: no image artifacts found for guest '${guest}' under '${src}'" >&2
+      exit 1
+    fi
+    GUEST_SBOM_DIRS+=("${src}")
+    guest_inventory="${src}/application-inventory.json"
+    if [[ -f "${guest_inventory}" ]]; then
+      GUEST_INVENTORY_FILES+=("${guest_inventory}")
+    else
+      echo "guest-images: expected application-inventory '${guest_inventory}' for embedded guest not found" >&2
+      exit 1
+    fi
+  done <<< "${GUEST_IMAGES}"
+fi
+
 # Inventory installed packages. The heavy lifting lives in imghelper so that
 # rpm2img and rpm2eif emit identical inventory payloads.
 generate_application_inventory \
@@ -213,6 +264,29 @@ generate_application_inventory \
   "${ARCH}" \
   "${OUTPUT_DIR}" \
   "${INSTALL_TIME}"
+
+# Merge each embedded guest variant's application-inventory into the host's, so the host
+# image inventory reflects every component that ships in the resulting rootfs. We fold
+# the guest entries into the host `.Content` array, dedupe on the full package identity
+# (Name + Version + Release + Epoch + Architecture) so that two builds of the *same*
+# package version collapse to one entry, but two *different* versions of the same
+# package -- e.g. `foo-1.0` in the host and `foo-1.1` in an embedded guest -- both
+# survive and remain visible to downstream patch/CVE tooling. We rewrite both the
+# in-rootfs and the side-car copies that `generate_application_inventory` produced.
+if [[ ${#GUEST_INVENTORY_FILES[@]} -gt 0 ]]; then
+  HOST_INVENTORY="${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
+  MERGED_INVENTORY="$(jq --slurp '
+    { "Content": (
+        map(.Content)
+        | add
+        | unique_by([.Name, .Version, .Release, .Epoch, .Architecture])
+        | sort_by([.Name, .Version, .Release, .Epoch, .Architecture])
+      )
+    }
+  ' "${HOST_INVENTORY}" "${GUEST_INVENTORY_FILES[@]}")"
+  printf "%s\n" "${MERGED_INVENTORY}" >"${HOST_INVENTORY}"
+  printf "%s\n" "${MERGED_INVENTORY}" >"${OUTPUT_DIR}/application-inventory.json"
+fi
 
 # Install SBOM packages
 SBOM_MOUNT=$(mktemp -d)
@@ -241,8 +315,27 @@ for format in "spdx" "cyclonedx"; do
   image_sbom="${format}-sbom.json"
   image_sbom_path="${IMAGE_SBOM_DIR}/${image_sbom}"
   rpm_sbom="${RPM_SBOM_DIR}/variant-rpms-${format}.json"
+
+  # Collect guest SBOMs (one per guest, in this format) so the host SBOM records the
+  # embedded guest images as components of the host.
+  guest_sboms=()
+  for guest_dir in "${GUEST_SBOM_DIRS[@]}"; do
+    guest_sbom="${guest_dir}/${format}-sbom.json"
+    if [[ -f "${guest_sbom}" ]]; then
+      guest_sboms+=("${guest_sbom}")
+    else
+      echo "guest-images: expected SBOM '${guest_sbom}' for embedded guest not found" >&2
+      exit 1
+    fi
+  done
+
   if [ -d "${KIT_SBOMS_DIR}" ]; then
-    find "${KIT_SBOMS_DIR}" -name "*-${format}.json" -type f -exec sbomtool merge --output "${image_sbom_path}" "${rpm_sbom}" {} \+
+    # Merge RPM SBOM + kit SBOMs (+ any guest SBOMs) into the image SBOM.
+    find "${KIT_SBOMS_DIR}" -name "*-${format}.json" -type f -exec \
+      sbomtool merge --output "${image_sbom_path}" "${rpm_sbom}" "${guest_sboms[@]}" {} \+
+  elif [[ ${#guest_sboms[@]} -gt 0 ]]; then
+    # No kits, but embedded guests contribute additional components; still need a merge.
+    sbomtool merge --output "${image_sbom_path}" "${rpm_sbom}" "${guest_sboms[@]}"
   else
     cp "${rpm_sbom}" "${image_sbom_path}"
   fi
