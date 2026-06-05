@@ -66,6 +66,18 @@ Provides: %{_cross_os}image-feature(encrypted-storage)
 Provides: %{_cross_os}image-feature(no-encrypted-storage)
 %endif
 
+%if %{with no_data_partitions}
+Provides: %{_cross_os}image-feature(no-data-partitions)
+%else
+Provides: %{_cross_os}image-feature(data-partitions)
+%endif
+
+%if %{with no_private_partition}
+Provides: %{_cross_os}image-feature(no-private-partition)
+%else
+Provides: %{_cross_os}image-feature(private-partition)
+%endif
+
 %description
 %{summary}.
 

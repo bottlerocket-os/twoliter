@@ -9,6 +9,8 @@ OVF_TEMPLATE=""
 EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
+NO_DATA_PARTITIONS="no"
+NO_PRIVATE_PARTITION="no"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -25,6 +27,8 @@ for opt in "$@"; do
   --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
+  --with-no-data-partitions=*) NO_DATA_PARTITIONS="${optarg}" ;;
+  --with-no-private-partition=*) NO_PRIVATE_PARTITION="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -66,6 +70,16 @@ check_debugfs_errors() {
 sanity_checks \
   "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
 
+# Fail fast on unsupported flag combinations. UEFI Secure Boot relies on the
+# in-tree grub flow (and PCR predictions reference the PRIVATE partition), so
+# it cannot be combined with `no-private-partition`. The same combinations
+# are rejected up-front by `buildsys`'s manifest validator and by `rpm2img`,
+# but img2img can be invoked independently so we re-check here.
+if [[ "${NO_PRIVATE_PARTITION}" == "yes" && "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  echo "no-private-partition is incompatible with uefi-secure-boot" >&2
+  exit 1
+fi
+
 ###############################################################################
 # Section 1: prepare working environment
 
@@ -91,7 +105,8 @@ declare -A partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff
+  partsize partoff \
+  "${NO_PRIVATE_PARTITION}" "${NO_DATA_PARTITIONS}"
 
 # Process and stage the input images to the working directory.
 declare OS_IMAGE DATA_IMAGE

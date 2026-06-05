@@ -192,6 +192,7 @@ get_partition_sizes() {
 # Populate the caller's tables with sizes and offsets for known partitions.
 set_partition_sizes() {
   local os_image_gib data_image_gib partition_plan in_place_updates
+  local no_private_partition no_data_partitions
   local -n pp_size pp_offset
   os_image_gib="${1:?}"
   data_image_gib="${2:?}"
@@ -211,8 +212,18 @@ set_partition_sizes() {
   # Table for partition offsets from start of disk, in MiB.
   pp_offset="${6:?}"
 
+  # Optional: skip allocating the BOTTLEROCKET-PRIVATE partition. Reclaimed
+  # space is folded into the trailing RESERVED partition so existing OS
+  # partition offsets are preserved.
+  no_private_partition="${7:-no}"
+
+  # Optional: skip allocating BOTTLEROCKET-DATA-A (and DATA-B for split). On
+  # unified, the data region at the end of the disk is dropped entirely. On
+  # split, the data image is not partitioned at all.
+  no_data_partitions="${8:-no}"
+
   # Most of the partitions on the main image scale with the overall size.
-  local boot_mib root_mib hash_mib reserved_mib private_mib
+  local boot_mib root_mib hash_mib reserved_mib private_mib data_a_mib
   boot_mib="$((os_image_gib * BOOT_SCALE_FACTOR))"
   root_mib="$((os_image_gib * ROOT_SCALE_FACTOR))"
   hash_mib="$((os_image_gib * HASH_SCALE_FACTOR))"
@@ -224,7 +235,36 @@ set_partition_sizes() {
   # Private space scales per GiB, minus the BIOS and GPT partition overhead.
   private_mib=$((os_image_gib * PRIVATE_SCALE_FACTOR - OVERHEAD_MIB))
   # We need 1 MiB of space for data partition A.
-  private_mib=$((private_mib - DATA_A_MIB))
+  data_a_mib="${DATA_A_MIB}"
+  private_mib=$((private_mib - data_a_mib))
+
+  # If the data partitions are disabled, the 1 MiB nominally reserved for
+  # DATA-A on the OS image is reclaimed by the trailing partition. For unified
+  # plans we skip it entirely (the disk shrinks); for split plans the DATA-A
+  # slot is folded into PRIVATE (or, below, into RESERVED if PRIVATE is also
+  # disabled) so the GPT footer stays correctly placed.
+  if [[ "${no_data_partitions}" == "yes" ]]; then
+    if [[ "${no_private_partition}" != "yes" ]]; then
+      private_mib=$((private_mib + data_a_mib))
+      data_a_mib=0
+    fi
+    # If both flags are set, data_a_mib is folded into RESERVED below.
+  fi
+
+  # If the private partition is disabled, fold its space into the trailing
+  # reserved partition of the last bank so that the OS partitions keep their
+  # offsets and the disk size stays the same. When DATA-A is also disabled
+  # (split plan), fold its MiB into RESERVED as well so no gap remains before
+  # the GPT footer.
+  local extra_reserved_mib=0
+  if [[ "${no_private_partition}" == "yes" ]]; then
+    extra_reserved_mib="${private_mib}"
+    private_mib=0
+    if [[ "${no_data_partitions}" == "yes" ]]; then
+      extra_reserved_mib=$((extra_reserved_mib + data_a_mib))
+      data_a_mib=0
+    fi
+  fi
 
   # Skip the GPT label at start of disk.
   local offset
@@ -254,8 +294,15 @@ set_partition_sizes() {
       ((offset += hash_mib))
 
       pp_offset["RESERVED-${bank}"]="${offset}"
-      pp_size["RESERVED-${bank}"]="${reserved_mib}"
-      ((offset += reserved_mib))
+      # The last bank's RESERVED partition absorbs any space reclaimed from a
+      # disabled PRIVATE partition so that the OS image size is unchanged.
+      if [[ "${bank}" == "B" ]]; then
+        pp_size["RESERVED-${bank}"]="$((reserved_mib + extra_reserved_mib))"
+        ((offset += reserved_mib + extra_reserved_mib))
+      else
+        pp_size["RESERVED-${bank}"]="${reserved_mib}"
+        ((offset += reserved_mib))
+      fi
     done
   else
     # Allocate a single partition bank, where each partition is twice as large.
@@ -276,32 +323,41 @@ set_partition_sizes() {
     ((offset += hash_mib * 2))
 
     pp_offset["RESERVED-A"]="${offset}"
-    pp_size["RESERVED-A"]="$(( reserved_mib * 2 ))"
-    ((offset += reserved_mib * 2))
+    # The single-bank RESERVED partition absorbs any space reclaimed from a
+    # disabled PRIVATE partition so that the OS image size is unchanged.
+    pp_size["RESERVED-A"]="$(( reserved_mib * 2 + extra_reserved_mib ))"
+    ((offset += reserved_mib * 2 + extra_reserved_mib))
   fi
 
-  pp_offset["PRIVATE"]="${offset}"
-  pp_size["PRIVATE"]="${private_mib}"
-  ((offset += private_mib))
+  # Allocate PRIVATE only when it is enabled.
+  if [[ "${no_private_partition}" != "yes" ]]; then
+    pp_offset["PRIVATE"]="${offset}"
+    pp_size["PRIVATE"]="${private_mib}"
+    ((offset += private_mib))
+  fi
 
   case "${partition_plan}" in
   split)
-    # For data partition A that lives on the OS image
-    pp_offset["DATA-A"]="${offset}"
-    pp_size["DATA-A"]="${DATA_A_MIB}"
-    ((offset += DATA_A_MIB))
+    if [[ "${no_data_partitions}" != "yes" ]]; then
+      # For data partition A that lives on the OS image
+      pp_offset["DATA-A"]="${offset}"
+      pp_size["DATA-A"]="${data_a_mib}"
+      ((offset += data_a_mib))
 
-    # For a split data image, the first and last MiB are reserved for the GPT
-    # labels, and the rest is for data partition B.
-    pp_size["DATA-B"]="$((data_image_gib * 1024 - GPT_MIB * 2))"
-    pp_offset["DATA-B"]="1"
+      # For a split data image, the first and last MiB are reserved for the GPT
+      # labels, and the rest is for data partition B.
+      pp_size["DATA-B"]="$((data_image_gib * 1024 - GPT_MIB * 2))"
+      pp_offset["DATA-B"]="1"
+    fi
     ;;
   unified)
-    # For a unified image, we've already accounted for the GPT label space in
-    # the earlier calculations, so all the space is for the data partition.
-    pp_size["DATA-A"]="$((data_image_gib * 1024))"
-    pp_offset["DATA-A"]="${offset}"
-    ((offset += data_image_gib * 1024))
+    if [[ "${no_data_partitions}" != "yes" ]]; then
+      # For a unified image, we've already accounted for the GPT label space in
+      # the earlier calculations, so all the space is for the data partition.
+      pp_size["DATA-A"]="$((data_image_gib * 1024))"
+      pp_offset["DATA-A"]="${offset}"
+      ((offset += data_image_gib * 1024))
+    fi
     ;;
   *)
     echo "unknown partition plan '${partition_plan}'" >&2

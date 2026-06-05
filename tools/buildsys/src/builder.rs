@@ -460,6 +460,14 @@ impl DockerBuild {
         let external_kit_metadata_view =
             ExternalKitMetadataView::load(&args.common.root_dir).context(error::GraphSnafu)?;
 
+        // Validate image-feature combinations up-front so misconfigured
+        // variants fail before any container build is dispatched.
+        manifest
+            .info()
+            .validate_image_features()
+            .context(error::GraphSnafu)?;
+        let image_features = manifest.info().image_features().unwrap_or_default();
+
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
@@ -490,7 +498,7 @@ impl DockerBuild {
                 project_vendor: external_kit_metadata_view.get_project_vendor().to_owned(),
                 data_image_publish_size_gib,
                 data_image_size_gib: data_image_size_gib.to_string(),
-                image_features: manifest.info().image_features().unwrap_or_default(),
+                image_features,
                 image_format: match manifest.info().image_format() {
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",
@@ -552,6 +560,14 @@ impl DockerBuild {
         let variant: String = v.as_ref().into();
         let variant_platform = v.platform().into();
 
+        // Validate image-feature combinations up-front so misconfigured
+        // variants fail before any container build is dispatched.
+        manifest
+            .info()
+            .validate_image_features()
+            .context(error::GraphSnafu)?;
+        let image_features = manifest.info().image_features().unwrap_or_default();
+
         Ok(Self {
             dockerfile: args.common.tools_dir.join("build.Dockerfile"),
             context: args.common.root_dir.clone(),
@@ -575,7 +591,7 @@ impl DockerBuild {
             target_build_args: TargetBuildArgs::Repack(RepackVariantBuildArgs {
                 data_image_publish_size_gib,
                 data_image_size_gib: data_image_size_gib.to_string(),
-                image_features: manifest.info().image_features().unwrap_or_default(),
+                image_features,
                 image_format: match manifest.info().image_format() {
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",

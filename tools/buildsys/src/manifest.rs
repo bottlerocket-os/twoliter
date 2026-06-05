@@ -254,6 +254,28 @@ only be enabled for variants that can guarantee that a TPM 2.0 device will be pr
 encrypted-storage = true
 ```
 
+`no-data-partitions` skips creation of the `BOTTLEROCKET-DATA-A` and `BOTTLEROCKET-DATA-B`
+filesystems in `rpm2img`, and suppresses the separate data-image artifact for the `split`
+partition plan. The partition layout itself is unchanged; only the `mkfs` and `dd` steps for
+the data partitions are skipped. This is intended for advanced/opt-in callers that supply
+data persistence externally (e.g. EIF/Firecracker images). Defaults to `false`.
+
+```ignore
+[package.metadata.build-variant.image-features]
+no-data-partitions = true
+```
+
+`no-private-partition` skips `bootconfig` generation and creation of the `BOTTLEROCKET-PRIVATE`
+filesystem in `rpm2img`. The partition layout itself is unchanged; only the `mkfs` and `dd`
+steps for the private partition are skipped. Enabling this flag produces an image that cannot
+boot via the in-tree grub flow — it is intended for callers that supply an external
+bootloader (e.g. EIF/Firecracker). Incompatible with `uefi-secure-boot`. Defaults to `false`.
+
+```ignore
+[package.metadata.build-variant.image-features]
+no-private-partition = true
+```
+
 */
 
 mod error;
@@ -531,7 +553,39 @@ impl ManifestInfo {
                 println!("cargo:warning=Image feature {deprecated} is deprecated and will be removed in a future release!");
             }
         }
+        if features.contains(&ImageFeature::NoPrivatePartition) {
+            println!(
+                "cargo:warning=Image feature no-private-partition is enabled: the variant image \
+                will be built without Bottlerocket's settings and apiserver. You are responsible \
+                for owning the configuration of the services inside the image."
+            );
+        }
+        if features.contains(&ImageFeature::NoDataPartitions) {
+            println!(
+                "cargo:warning=Image feature no-data-partitions is enabled: the variant image \
+                will be built without pre-provisioned data partition(s). You are responsible \
+                for mounting a partition with PARTLABEL=BOTTLEROCKET-DATA at runtime."
+            );
+        }
         Some(features)
+    }
+
+    /// Validate that the configured image features are mutually compatible.
+    ///
+    /// Returns an error for known-bad combinations so that misconfigured
+    /// `Cargo.toml` / `Twoliter.toml` files fail fast — before any build
+    /// artifact is produced — rather than failing later inside `rpm2img`
+    /// or as opaque RPM dependency-resolution errors.
+    ///
+    /// Note: `uefi-secure-boot` × `no-data-partitions` is intentionally
+    /// allowed. Secure Boot's PCR predictions reference the BOOT, ROOT,
+    /// HASH, and PRIVATE partitions but not BOTTLEROCKET-DATA, so omitting
+    /// the data partition does not break the secure-boot flow.
+    pub fn validate_image_features(&self) -> Result<()> {
+        let Some(features) = self.image_features() else {
+            return Ok(());
+        };
+        validate_image_feature_set(&features)
     }
 
     /// Returns the type of build the manifest is requesting.
@@ -849,14 +903,62 @@ pub enum ImageFeature {
     HostContainers,
     ExternalKmodDevelopment,
     EncryptedStorage,
+    NoDataPartitions,
+    NoPrivatePartition,
 }
 
-const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[&ImageFeature::EncryptedStorage];
+const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[
+    &ImageFeature::EncryptedStorage,
+    &ImageFeature::NoDataPartitions,
+    &ImageFeature::NoPrivatePartition,
+];
 
 const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::GrubSetPrivateVar,
     &ImageFeature::SystemdNetworkd,
 ];
+
+/// Validate that a set of image features is mutually compatible.
+///
+/// Pure helper extracted from [`ManifestInfo::validate_image_features`] so
+/// that the rules can be unit-tested independently of a `Cargo.toml`
+/// fixture.
+fn validate_image_feature_set(features: &HashSet<ImageFeature>) -> Result<()> {
+    // `uefi-secure-boot` relies on the in-tree grub flow (and PCR
+    // predictions reference the PRIVATE partition), so it cannot be
+    // combined with `no-private-partition`.
+    if features.contains(&ImageFeature::UefiSecureBoot)
+        && features.contains(&ImageFeature::NoPrivatePartition)
+    {
+        return error::IncompatibleImageFeaturesSnafu {
+            first: "uefi-secure-boot",
+            second: "no-private-partition",
+        }
+        .fail()?;
+    }
+    // `encrypted-storage` relies on both BOTTLEROCKET-DATA (LUKS device)
+    // and BOTTLEROCKET-PRIVATE (datastore directory + keystore), so it
+    // cannot be combined with the partition-omitting features.
+    if features.contains(&ImageFeature::EncryptedStorage)
+        && features.contains(&ImageFeature::NoDataPartitions)
+    {
+        return error::IncompatibleImageFeaturesSnafu {
+            first: "encrypted-storage",
+            second: "no-data-partitions",
+        }
+        .fail()?;
+    }
+    if features.contains(&ImageFeature::EncryptedStorage)
+        && features.contains(&ImageFeature::NoPrivatePartition)
+    {
+        return error::IncompatibleImageFeaturesSnafu {
+            first: "encrypted-storage",
+            second: "no-private-partition",
+        }
+        .fail()?;
+    }
+    Ok(())
+}
 
 impl TryFrom<String> for ImageFeature {
     type Error = Error;
@@ -872,6 +974,8 @@ impl TryFrom<String> for ImageFeature {
             "host-containers" => Ok(ImageFeature::HostContainers),
             "external-kmod-development" => Ok(ImageFeature::ExternalKmodDevelopment),
             "encrypted-storage" => Ok(ImageFeature::EncryptedStorage),
+            "no-data-partitions" => Ok(ImageFeature::NoDataPartitions),
+            "no-private-partition" => Ok(ImageFeature::NoPrivatePartition),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
@@ -890,6 +994,8 @@ impl fmt::Display for ImageFeature {
             ImageFeature::HostContainers => write!(f, "HOST_CONTAINERS"),
             ImageFeature::ExternalKmodDevelopment => write!(f, "EXTERNAL_KMOD_DEVELOPMENT"),
             ImageFeature::EncryptedStorage => write!(f, "ENCRYPTED_STORAGE"),
+            ImageFeature::NoDataPartitions => write!(f, "NO_DATA_PARTITIONS"),
+            ImageFeature::NoPrivatePartition => write!(f, "NO_PRIVATE_PARTITION"),
         }
     }
 }
@@ -1032,5 +1138,98 @@ mod test {
             "extra-3-kit".to_string(),
         ];
         assert_eq!(kit_list, expected);
+    }
+
+    fn feature_set<I: IntoIterator<Item = ImageFeature>>(features: I) -> HashSet<ImageFeature> {
+        features.into_iter().collect()
+    }
+
+    #[test]
+    fn validate_image_features_accepts_empty_set() {
+        validate_image_feature_set(&HashSet::new()).expect("empty feature set must be valid");
+    }
+
+    #[test]
+    fn validate_image_features_accepts_default_runtime_features() {
+        // The implicit defaults injected by `ManifestInfo::image_features()`
+        // must always validate cleanly.
+        let features = feature_set([
+            ImageFeature::InPlaceUpdates,
+            ImageFeature::HostContainers,
+            ImageFeature::ExternalKmodDevelopment,
+        ]);
+        validate_image_feature_set(&features).expect("default features must be valid");
+    }
+
+    #[test]
+    fn validate_image_features_accepts_uefi_with_no_data_partitions() {
+        // `uefi-secure-boot` × `no-data-partitions` is intentionally allowed:
+        // PCR predictions don't reference BOTTLEROCKET-DATA.
+        let features = feature_set([ImageFeature::UefiSecureBoot, ImageFeature::NoDataPartitions]);
+        validate_image_feature_set(&features)
+            .expect("uefi-secure-boot is compatible with no-data-partitions");
+    }
+
+    #[test]
+    fn validate_image_features_rejects_uefi_with_no_private_partition() {
+        let features = feature_set([
+            ImageFeature::UefiSecureBoot,
+            ImageFeature::NoPrivatePartition,
+        ]);
+        let err = validate_image_feature_set(&features)
+            .expect_err("uefi-secure-boot × no-private-partition must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("uefi-secure-boot"), "error message: {msg}");
+        assert!(msg.contains("no-private-partition"), "error message: {msg}");
+    }
+
+    #[test]
+    fn validate_image_features_rejects_encrypted_storage_with_no_data_partitions() {
+        let features = feature_set([
+            ImageFeature::EncryptedStorage,
+            ImageFeature::NoDataPartitions,
+        ]);
+        let err = validate_image_feature_set(&features)
+            .expect_err("encrypted-storage × no-data-partitions must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("encrypted-storage"), "error message: {msg}");
+        assert!(msg.contains("no-data-partitions"), "error message: {msg}");
+    }
+
+    #[test]
+    fn validate_image_features_rejects_encrypted_storage_with_no_private_partition() {
+        let features = feature_set([
+            ImageFeature::EncryptedStorage,
+            ImageFeature::NoPrivatePartition,
+        ]);
+        let err = validate_image_feature_set(&features)
+            .expect_err("encrypted-storage × no-private-partition must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("encrypted-storage"), "error message: {msg}");
+        assert!(msg.contains("no-private-partition"), "error message: {msg}");
+    }
+
+    #[test]
+    fn validate_image_features_rejects_all_three_partition_omitting_combo() {
+        // The "user accidentally enables every dangerous flag at once" case.
+        // The validator should reject it eagerly with a single clear message
+        // (rather than letting RPM dependency-resolution noise leak through).
+        let features = feature_set([
+            ImageFeature::EncryptedStorage,
+            ImageFeature::NoDataPartitions,
+            ImageFeature::NoPrivatePartition,
+        ]);
+        validate_image_feature_set(&features)
+            .expect_err("encrypted-storage with both partition-omitting features must fail");
+    }
+
+    #[test]
+    fn validate_image_features_accepts_no_data_and_no_private_without_encrypted_storage() {
+        let features = feature_set([
+            ImageFeature::NoDataPartitions,
+            ImageFeature::NoPrivatePartition,
+        ]);
+        validate_image_feature_set(&features)
+            .expect("partition-omitting features alone must be valid");
     }
 }

@@ -43,6 +43,13 @@ pub(super) enum Error {
     ParseImageFeature { what: String },
 
     #[snafu(display(
+        "Image feature '{}' is incompatible with image feature '{}'",
+        first,
+        second
+    ))]
+    IncompatibleImageFeatures { first: String, second: String },
+
+    #[snafu(display(
         "The cargo package we are building, '{name}', could not be found in the graph"
     ))]
     RootDependencyMissing { name: String },
