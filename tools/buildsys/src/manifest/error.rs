@@ -47,6 +47,9 @@ pub(super) enum Error {
     ))]
     RootDependencyMissing { name: String },
 
-    #[snafu(display("`first-party-stack = false` is incompatible with: {reason}"))]
-    IncompatibleImageFeatures { reason: String },
+    #[snafu(display("{context} is incompatible with: {reason}"))]
+    IncompatibleImageFeatures {
+        context: &'static str,
+        reason: String,
+    },
 }

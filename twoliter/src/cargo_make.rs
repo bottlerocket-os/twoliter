@@ -50,10 +50,17 @@ impl CargoMake {
     /// Create a new `cargo make` command. The sdk environment variable will be set based on the
     /// definition in `Twoliter.toml`.
     pub(crate) fn new(sdk: &str) -> Result<Self> {
-        Ok(Self::default().env("TLPRIVATE_SDK_IMAGE", sdk).env(
-            "BUILDSYS_OUTPUT_GENERATION_ID",
-            BUILDSYS_OUTPUT_GENERATION_ID.to_string(),
-        ))
+        Ok(Self::default()
+            .env("TLPRIVATE_SDK_IMAGE", sdk)
+            .env(
+                "BUILDSYS_OUTPUT_GENERATION_ID",
+                BUILDSYS_OUTPUT_GENERATION_ID.to_string(),
+            )
+            // Expose twoliter's own package version to child processes
+            // (buildsys, rpm2eif, eif-builder). Used to populate the
+            // `BuildToolVersion` field of EIF metadata so consumers can tell
+            // which twoliter release produced a given EIF.
+            .env("TWOLITER_VERSION", env!("CARGO_PKG_VERSION")))
     }
 
     /// Specify the path to the `Makefile.toml` for the `cargo make` command

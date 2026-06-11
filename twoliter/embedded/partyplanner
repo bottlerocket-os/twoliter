@@ -413,6 +413,115 @@ set_partition_sizes() {
   esac
 }
 
+# Populate the caller's tables with sizes and offsets for the EIF sidecar
+# disk-image layout: a minimal 2-partition GPT with just ROOT-A (erofs
+# rootfs) and HASH-A (dm-verity hash tree).
+#
+# EIF images do not use any of the scale factors that drive the standard
+# `set_partition_sizes` layout, because there is no fixed 2 GiB reference
+# point to scale against: the rootfs is whatever `mkfs.erofs` produces, and
+# the verity hash tree is a function of the rootfs size. This helper is a
+# separate entry point (rather than a mode of `set_partition_sizes`) so
+# that:
+#   - The math stays simple to read and easy to test in isolation.
+#   - The existing `first_party_stack=no` path continues to size ROOT-A
+#     against the nominal image size (residual), while EIF sizes the disk
+#     image against the *actual* content plus optional padding.
+#   - Direct callers of `set_partition_sizes` cannot accidentally invoke
+#     the EIF layout by passing a sentinel value.
+#
+# Positional arguments:
+#   $1  rootfs_mib      Size of the erofs rootfs, rounded up to a whole MiB.
+#                       Required, must be a positive integer.
+#   $2  verity_mib      Size reserved for the dm-verity hash tree, in MiB.
+#                       Required, must be a positive integer. Callers
+#                       typically compute this from `rootfs_mib` (roughly
+#                       `rootfs_mib/64 + a few MiB slack`) and pass it
+#                       through unchanged.
+#   $3  pp_size         (nameref) bash assoc-array to populate with sizes.
+#   $4  pp_offset       (nameref) bash assoc-array to populate with offsets.
+#   $5  target_mib      (optional) target total disk size in MiB. When
+#                       provided (and non-zero), ROOT-A is padded upward
+#                       from `rootfs_mib` so that the resulting disk image
+#                       is exactly `target_mib` MiB. Must be at least
+#                       `rootfs_mib + verity_mib + 2` (2 MiB of GPT
+#                       overhead). When omitted or 0, the disk is
+#                       tight-fitted at `rootfs_mib + verity_mib + 2` MiB.
+#
+# Layout produced (offsets in MiB from start of disk):
+#
+#   +-------------------------------------------+
+#   | GPT header                        1 MiB   | offset 0
+#   +-------------------------------------------+
+#   | ROOT-A          rootfs_mib (+padding)     | offset 1
+#   +-------------------------------------------+
+#   | HASH-A                     verity_mib     | offset 1 + ROOT-A size
+#   +-------------------------------------------+
+#   | GPT footer                        1 MiB   | offset = disk - 1
+#   +-------------------------------------------+
+set_eif_partition_sizes() {
+  local rootfs_mib verity_mib target_mib
+  local -n pp_size pp_offset
+  rootfs_mib="${1:?rootfs_mib required}"
+  verity_mib="${2:?verity_mib required}"
+  pp_size="${3:?}"
+  pp_offset="${4:?}"
+  target_mib="${5:-0}"
+
+  # Validate positive integers so we don't hand `sgdisk` garbage. The `:?`
+  # above only rejects empty strings; explicit numeric checks catch
+  # non-numeric input and negative sizes.
+  local n
+  for n in "${rootfs_mib}" "${verity_mib}" "${target_mib}"; do
+    if ! [[ "${n}" =~ ^[0-9]+$ ]]; then
+      echo "set_eif_partition_sizes: expected non-negative integer, got '${n}'" >&2
+      exit 1
+    fi
+  done
+  # Defensive: the regex above already restricts to non-negative integers, so
+  # in practice only 0 can slip through. Comparing `<= 0` still catches any
+  # future regression that lets a signed value through.
+  if (( rootfs_mib <= 0 )) || (( verity_mib <= 0 )); then
+    echo "set_eif_partition_sizes: rootfs_mib and verity_mib must be > 0" >&2
+    exit 1
+  fi
+
+  # `2` accounts for the GPT header + footer, each 1 MiB.
+  local minimum_mib=$(( rootfs_mib + verity_mib + 2 ))
+  local root_a_mib=${rootfs_mib}
+  if (( target_mib > 0 )); then
+    if (( target_mib < minimum_mib )); then
+      echo "set_eif_partition_sizes: target ${target_mib} MiB is smaller than \
+required minimum ${minimum_mib} MiB (rootfs=${rootfs_mib}, verity=${verity_mib}, \
+GPT overhead=2)" >&2
+      exit 1
+    fi
+    # Grow ROOT-A to absorb the padding. rpm2eif does not use this extra
+    # space at runtime -- it's for downstream consumers that want a
+    # predictable disk-image size (e.g., embedding the EIF disk into a
+    # larger host image, or aligning to a cloud volume size).
+    root_a_mib=$(( target_mib - verity_mib - 2 ))
+  fi
+
+  local offset=1 # skip GPT header
+  pp_offset["ROOT-A"]="${offset}"
+  pp_size["ROOT-A"]="${root_a_mib}"
+  ((offset += root_a_mib))
+
+  pp_offset["HASH-A"]="${offset}"
+  pp_size["HASH-A"]="${verity_mib}"
+  ((offset += verity_mib))
+
+  # Sanity check: the final offset plus the GPT footer must equal the
+  # total disk size. This catches arithmetic mistakes in the branches
+  # above rather than surfacing them as cryptic `sgdisk` errors later.
+  local expected_total=$(( target_mib > 0 ? target_mib : minimum_mib ))
+  if (( offset + 1 != expected_total )); then
+    echo "set_eif_partition_sizes: offset mismatch: offset=${offset}, expected_total=${expected_total}" >&2
+    exit 1
+  fi
+}
+
 # Populate the caller's table with labels for known partitions.
 set_partition_labels() {
   local -n pp_label

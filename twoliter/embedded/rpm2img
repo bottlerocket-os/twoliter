@@ -204,113 +204,15 @@ fi
 INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
-# Inventory installed packages.
-INVENTORY_QUERY="\{\"Name\":\"%{NAME}\"\
-,\"SourcePackage\":\"%{SOURCERPM}\"\
-,\"Publisher\":\"Bottlerocket\"\
-,\"Version\":\"%{Version}\"\
-,\"Release\":\"%{Release}\"\
-,\"Epoch\":\"%|Epoch?{%{EPOCH}}:{0}|\"\
-,\"InstalledTime\":\"${INSTALL_TIME}\"\
-,\"ApplicationType\":\"%{GROUP}\"\
-,\"Architecture\":\"%{ARCH}\"\
-,\"Url\":\"%{URL}\"\
-,\"Summary\":\"%{Summary}\"\}\n"
-
-# shellcheck disable=SC2312 # Array is validated elsewhere.
-mapfile -t installed_rpms <<<"$(rpm -qa --root "${ROOT_MOUNT}" \
-  --queryformat "${INVENTORY_QUERY}")"
-
-# Wrap installed_rpms mapfile into json.
-INVENTORY_DATA="$(jq --raw-output . <<<"${installed_rpms[@]}")"
-# Sort by package name and add 'Content' as top-level.
-INVENTORY_DATA="$(jq --slurp 'sort_by(.Name)' <<<"${INVENTORY_DATA}" | jq '{"Content": .}')"
-
-INVENTORY_BEFORE_PARENTS="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
-INVENTORY_DATA="$(jq '
-  .Content |= (
-    . + map(
-      (.Version) as $v | (.Release) as $r | (.SourcePackage | sub("-" + $v + "-" + $r + "\\.src\\.rpm$";"")) as $p |
-      . + {Name: $p, Summary: ($p + " (source package)")}
-    )
-    | unique_by(.Name)
-    | map(del(.SourcePackage))
-    | sort_by(.Name)
-  )
-' <<<"${INVENTORY_DATA}")"
-
-INVENTORY_AFTER_PARENTS="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
-ADDED_PARENTS=$((INVENTORY_AFTER_PARENTS - INVENTORY_BEFORE_PARENTS))
-
-# Iterate through all kits used to build this variant.
-EXTERNAL_KIT_METADATA_PATH="${EXTERNAL_KITS_PATH}/external-kit-metadata.json"
-mapfile -t kits < <(jq -r ".kit[].name" "${EXTERNAL_KIT_METADATA_PATH}")
-for kit in "${kits[@]}"; do
-  kit_version=$(jq --arg kit "${kit}" --raw-output '.kit[]|select(.name == $kit)|.version' "${EXTERNAL_KIT_METADATA_PATH}")
-  kit_vendor=$(jq --arg kit "${kit}" --raw-output '.kit[]|select(.name == $kit)|.vendor' "${EXTERNAL_KIT_METADATA_PATH}")
-  if [[ -z "${kit_version}" ]]; then
-      echo "Failed to extract version of kit '${kit}'" >&2
-      exit 1
-  fi
-  if [[ -z "${kit_vendor}" ]]; then
-      echo "Failed to extract vendor of kit '${kit}'" >&2
-      exit 1
-  fi
-
-  # Set the path inside the build container to the kit RPMs and repo.
-  kit_path="${EXTERNAL_KITS_PATH}/${kit_vendor}/${kit}/${ARCH}"
-
-  # Query the kit repo of RPMs for all package names.
-  kit_inventory_query="%{NAME}\n"
-  # shellcheck disable=SC2312 # Array is validated elsewhere.
-  mapfile -t KIT_PKGS <<<"$(dnf -q --repofrompath \
-    kit,file://"${kit_path}" \
-    --repo=kit repoquery \
-    --queryformat "${kit_inventory_query}" | grep -v "^$")"
-  # Convert the bash array of kit packages to a JSON array.
-  kit_list="$(\
-    jq \
-      --null-input \
-      --compact-output \
-      '$ARGS.positional // []' \
-      --args "${KIT_PKGS[@]}")"
-
-  # Convert the JSON array to a map of 'bottlerocket-' prefixed names to unprefixed package names
-  # for search and replace in the installed application inventory.
-  jq \
-    --compact-output \
-    'map({ (.|tostring): (.|sub("^bottlerocket-";""))}) | add' <<<"${kit_list}" \
-    > kit-replacements.json
-
-  # For any packages in the installed app inventory that came from the kit, replace
-  # the Publisher with the kit's vendor and replace the name with the unprefixed name.
-  INVENTORY_DATA="$(jq \
-    --slurpfile replace kit-replacements.json \
-    --arg KIT "${kit}" \
-    '(.Content[] | select(.Name | $replace[][.] != null) | .Publisher) = $KIT |
-      .Content[].Name |= (if $replace[][.] then $replace[][.] else . end)' \
-    <<<"${INVENTORY_DATA}")"
-done
-
-# Verify we successfully inventoried some RPMs.
-INVENTORY_COUNT="$(jq '.Content | length' <<<"${INVENTORY_DATA}")"
-RPM_COUNT="$(find "${PACKAGE_DIR}" -maxdepth 1 -type f -name '*.rpm' | wc -l)"
-if [[ "${INVENTORY_COUNT}" -ne "$((RPM_COUNT + ADDED_PARENTS))" ]]; then
-  echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/$((RPM_COUNT + ADDED_PARENTS))'" >&2
-  exit 1
-fi
-if grep -q "bottlerocket-release" <<<"${INVENTORY_DATA}"; then
-  echo "Inventory of RPMs includes packages prefixed with 'bottlerocket-'" >&2
-  exit 1
-fi
-
-# Write the inventory.
-mkdir -p "${ROOT_MOUNT}/usr/share/bottlerocket"
-printf "%s\n" "${INVENTORY_DATA}" >"${ROOT_MOUNT}/usr/share/bottlerocket/application-inventory.json"
-
-# Write the the inventory to a file in the local build output directory so that builders
-# can access the inventory without needed to dig into the generated image.
-printf "%s\n" "${INVENTORY_DATA}" >"${OUTPUT_DIR}/application-inventory.json"
+# Inventory installed packages. The heavy lifting lives in imghelper so that
+# rpm2img and rpm2eif emit identical inventory payloads.
+generate_application_inventory \
+  "${ROOT_MOUNT}" \
+  "${PACKAGE_DIR}" \
+  "${EXTERNAL_KITS_PATH}" \
+  "${ARCH}" \
+  "${OUTPUT_DIR}" \
+  "${INSTALL_TIME}"
 
 # Install SBOM packages
 SBOM_MOUNT=$(mktemp -d)

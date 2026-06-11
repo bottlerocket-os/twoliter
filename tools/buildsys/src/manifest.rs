@@ -115,7 +115,22 @@ included-packages = ["release"]
 ```
 
 `image-format` is the desired format for the built images.
-This can be `raw` (the default), `vmdk`, or `qcow2`.
+This can be `raw` (the default), `vmdk`, `qcow2`, or `eif`
+(AWS Nitro Enclaves Image Format).
+
+When `image-format = "eif"`, the image pipeline switches to `rpm2eif`,
+which produces a dm-verity-protected, single-bank sidecar EIF plus a
+minimal GPT disk image and a bare kernel. EIF is inherently a
+stripped-down layout — no BOTTLEROCKET-DATA, PRIVATE, or RESERVED
+partitions, no second bank of OS partitions, no in-place updates — so
+the following features are automatically dropped from the silent
+default seed for an EIF variant: `first-party-stack`, `in-place-updates`,
+`host-containers`. The following combinations are rejected at build
+time (in the same style as `first-party-stack = false`):
+`uefi-secure-boot`, `encrypted-storage`, `in-place-updates`,
+`host-containers`, and `partition-plan = "split"`. The
+`os-image-size-gib` default is 1 GiB (vs. 2 GiB for a full image), and
+the partition plan is forced to `unified`.
 ```ignore
 [package.metadata.build-variant]
 image-format = "vmdk"
@@ -539,6 +554,14 @@ impl ManifestInfo {
         // defaults for `in-place-updates` and `host-containers` (and
         // `first-party-stack` itself). An explicit `in-place-updates = true`
         // is still rejected later by the validator.
+        //
+        // `image-format = "eif"` is treated the same as `first-party-stack =
+        // false` for seeding purposes: an EIF is inherently a stripped-down
+        // single-bank image, so shipping the second bank / host-containers /
+        // BOTTLEROCKET-DATA subsystems by default only invites silent
+        // misconfiguration when the Dockerfile drops those flags on the way
+        // to `rpm2eif`. The validator will still reject an *explicit*
+        // conflicting feature set with a clear error.
         let first_party_stack_explicitly_disabled = variant
             .image_features
             .as_ref()
@@ -546,7 +569,8 @@ impl ManifestInfo {
             .copied()
             .map(|enabled| !enabled)
             .unwrap_or(false);
-        let mut features = if first_party_stack_explicitly_disabled {
+        let is_eif = matches!(variant.image_format, Some(ImageFormat::Eif));
+        let mut features = if first_party_stack_explicitly_disabled || is_eif {
             HashSet::from([ImageFeature::ExternalKmodDevelopment])
         } else {
             HashSet::from([
@@ -765,6 +789,7 @@ pub struct BuildVariant {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
+    Eif,
     Qcow2,
     Raw,
     Vmdk,
@@ -922,26 +947,53 @@ const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::SystemdNetworkd,
 ];
 
-/// Returns an [`ImageLayout`] with the OS image size adjusted for the given
-/// feature set. If `first-party-stack` is disabled and the manifest did not
-/// explicitly set `os-image-size-gib`, the default OS image size is reduced
-/// from 2 GiB to 1 GiB. All other fields are passed through unchanged.
+/// Returns an [`ImageLayout`] with fields adjusted for the given feature set
+/// and image format.
+///
+/// - If `first-party-stack` is disabled (or the image format is `eif`, which
+///   is inherently first-party-stack-free) and the manifest did not
+///   explicitly set `os-image-size-gib`, the default OS image size is
+///   reduced from 2 GiB to 1 GiB.
+/// - If the image format is `eif`, the partition plan is forced to
+///   `unified`. EIF images are inherently single-disk (no separate DATA
+///   image), and `rpm2eif` ignores the partition-plan flag anyway; forcing
+///   `unified` here means variants don't have to write out
+///   `partition-plan = "unified"` boilerplate purely to satisfy the
+///   validator, and the historical default (`split`) doesn't turn into an
+///   error the moment the user opts into EIF.
+///
+/// `image_format` is optional so that call sites which don't yet have access
+/// to the manifest's image format (or don't care) can pass `None` and get
+/// the pre-existing `first-party-stack`-only behavior.
 pub fn resolved_image_layout(
     layout: &ImageLayout,
     features: &HashSet<ImageFeature>,
+    image_format: Option<&ImageFormat>,
 ) -> ImageLayout {
     let mut resolved = *layout;
-    if !features.contains(&ImageFeature::FirstPartyStack) && !layout.os_image_size_gib_was_set() {
+    let is_eif = matches!(image_format, Some(ImageFormat::Eif));
+    let stripped = !features.contains(&ImageFeature::FirstPartyStack) || is_eif;
+    if stripped && !layout.os_image_size_gib_was_set() {
         resolved.os_image_size_gib = Some(DEFAULT_NO_FIRST_PARTY_OS_IMAGE_SIZE_GIB);
+    }
+    if is_eif {
+        resolved.partition_plan = PartitionPlan::Unified;
     }
     resolved
 }
 
 /// Validate that the requested image features and layout are compatible.
 ///
-/// Currently this enforces that disabling `first-party-stack` is not combined
-/// with any of `uefi-secure-boot`, `encrypted-storage`, `in-place-updates`,
-/// `host-containers`, or with a `split` partition plan.
+/// This enforces that disabling `first-party-stack` is not combined with any
+/// of `uefi-secure-boot`, `encrypted-storage`, `in-place-updates`,
+/// `host-containers`, `xfs-data-partition`, or with a `split` partition plan.
+///
+/// An `image-format = "eif"` build is subject to the same constraints
+/// regardless of the `first-party-stack` toggle: an EIF is a single-bank,
+/// dm-verity-protected, partitionless (no DATA/PRIVATE/RESERVED) image, and
+/// `rpm2eif` silently ignores every one of those knobs. Enforcing the
+/// constraints up-front turns a subtle "build succeeds, image is wrong"
+/// footgun into a clear build-time error.
 ///
 /// All discovered conflicts are reported in a single error so that users see
 /// the complete list in one build cycle. The conflict list is iterated in a
@@ -958,30 +1010,89 @@ pub fn resolved_image_layout(
 pub fn validate_image_features(
     features: &HashSet<ImageFeature>,
     layout: &ImageLayout,
+    image_format: Option<&ImageFormat>,
 ) -> Result<()> {
-    if features.contains(&ImageFeature::FirstPartyStack) {
+    let is_eif = matches!(image_format, Some(ImageFormat::Eif));
+    // With `first-party-stack` enabled *and* a non-EIF format, every
+    // combination is legal.
+    if features.contains(&ImageFeature::FirstPartyStack) && !is_eif {
         return Ok(());
     }
-    let conflicts: &[(ImageFeature, &str, &str)] = &[
+
+    // Explain conflicts as either a first-party-stack violation or an EIF
+    // violation, whichever applies. EIF takes precedence in the message
+    // because it's the more surprising case (the format silently strips
+    // features rather than an explicit `first-party-stack = false`).
+    let context: &str = if is_eif {
+        "`image-format = \"eif\"`"
+    } else {
+        "`first-party-stack = false`"
+    };
+    let reason_secure_boot: String = if is_eif {
+        "secure boot is not supported by the EIF pipeline; `rpm2eif` does not sign shim/grub/vmlinuz".to_string()
+    } else {
+        "secure boot relies on signed first-party artifacts that are not present when `first-party-stack = false`".to_string()
+    };
+    let reason_encrypted_storage: String = if is_eif {
+        "encrypted storage requires the BOTTLEROCKET-PRIVATE/DATA partitions, which an EIF image does not have".to_string()
+    } else {
+        "encrypted storage requires the BOTTLEROCKET-PRIVATE/DATA partitions, which are not built when `first-party-stack = false`".to_string()
+    };
+    let reason_ipu: String = if is_eif {
+        "in-place updates require two banks of OS partitions; an EIF ships a single ROOT-A/HASH-A pair".to_string()
+    } else {
+        "in-place updates require two banks of OS partitions, which are not built when `first-party-stack = false`".to_string()
+    };
+    let reason_host_containers: String = if is_eif {
+        "host-containers require the BOTTLEROCKET-DATA partition, which an EIF image does not have"
+            .to_string()
+    } else {
+        "host-containers require the BOTTLEROCKET-DATA partition, which is not built when `first-party-stack = false`".to_string()
+    };
+    let reason_first_party_stack =
+        "the EIF pipeline is inherently stripped down; `rpm2eif` requires `first-party-stack = false`";
+    let reason_xfs_data_partition: String = if is_eif {
+        "xfs-data-partition requires the BOTTLEROCKET-DATA partition, which an EIF image does not have".to_string()
+    } else {
+        "xfs-data-partition requires the BOTTLEROCKET-DATA partition, which is not built when `first-party-stack = false`".to_string()
+    };
+
+    let conflicts: &[(ImageFeature, &str, &str, bool)] = &[
+        (
+            ImageFeature::FirstPartyStack,
+            "first-party-stack",
+            reason_first_party_stack,
+            true,
+        ),
+        (
+            ImageFeature::XfsDataPartition,
+            "xfs-data-partition",
+            &reason_xfs_data_partition,
+            false,
+        ),
         (
             ImageFeature::UefiSecureBoot,
             "uefi-secure-boot",
-            "secure boot relies on signed first-party artifacts that are not present when `first-party-stack = false`",
+            &reason_secure_boot,
+            false,
         ),
         (
             ImageFeature::EncryptedStorage,
             "encrypted-storage",
-            "encrypted storage requires the BOTTLEROCKET-PRIVATE/DATA partitions, which are not built when `first-party-stack = false`",
+            &reason_encrypted_storage,
+            false,
         ),
         (
             ImageFeature::InPlaceUpdates,
             "in-place-updates",
-            "in-place updates require two banks of OS partitions, which are not built when `first-party-stack = false`",
+            &reason_ipu,
+            false,
         ),
         (
             ImageFeature::HostContainers,
             "host-containers",
-            "host-containers require the BOTTLEROCKET-DATA partition, which is not built when `first-party-stack = false`",
+            &reason_host_containers,
+            false,
         ),
     ];
 
@@ -991,16 +1102,19 @@ pub fn validate_image_features(
     // wrote and the error messages produced by the shell-side validators.
     let mut conflict_messages: Vec<String> = conflicts
         .iter()
-        .filter(|(feature, _, _)| features.contains(feature))
-        .map(|(_, name, reason)| format!("`{name}`: {reason}"))
+        .filter(|(feature, _, _, eif_only)| features.contains(feature) && (!eif_only || is_eif))
+        .map(|(_, name, reason, _)| format!("`{name}`: {reason}"))
         .collect();
 
     if matches!(layout.partition_plan, PartitionPlan::Split) {
-        conflict_messages.push(
+        let reason = if is_eif {
+            "`partition-plan=split`: an EIF is a single unified disk; the split \
+             layout has no meaning"
+        } else {
             "`partition-plan=split`: when `first-party-stack = false`, the image uses a \
              single unified disk with no separate data image"
-                .to_string(),
-        );
+        };
+        conflict_messages.push(reason.to_string());
     }
 
     if !conflict_messages.is_empty() {
@@ -1008,7 +1122,7 @@ pub fn validate_image_features(
         // message remains readable when several conflicts are reported at
         // once.
         let reason = format!("\n  - {}", conflict_messages.join("\n  - "));
-        return error::IncompatibleImageFeaturesSnafu { reason }.fail()?;
+        return error::IncompatibleImageFeaturesSnafu { context, reason }.fail()?;
     }
 
     Ok(())
@@ -1230,7 +1344,7 @@ mod test {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         // No FirstPartyStack in the set → stripped image, default 1 GiB.
         let features: HashSet<ImageFeature> = HashSet::new();
-        let resolved = resolved_image_layout(&layout, &features);
+        let resolved = resolved_image_layout(&layout, &features, None);
         assert_eq!(resolved.os_image_size_gib().0, 1);
     }
 
@@ -1238,7 +1352,7 @@ mod test {
     fn first_party_stack_disabled_respects_explicit_os_size() {
         let layout = first_party_stack_disabled_layout(Some(4), PartitionPlan::Unified);
         let features: HashSet<ImageFeature> = HashSet::new();
-        let resolved = resolved_image_layout(&layout, &features);
+        let resolved = resolved_image_layout(&layout, &features, None);
         assert_eq!(resolved.os_image_size_gib().0, 4);
     }
 
@@ -1246,7 +1360,7 @@ mod test {
     fn first_party_stack_default_os_size_is_two_gib() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         let features = HashSet::from([ImageFeature::FirstPartyStack]);
-        let resolved = resolved_image_layout(&layout, &features);
+        let resolved = resolved_image_layout(&layout, &features, None);
         assert_eq!(resolved.os_image_size_gib().0, 2);
     }
 
@@ -1254,7 +1368,7 @@ mod test {
     fn first_party_stack_disabled_alone_passes_validation() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         let features: HashSet<ImageFeature> = HashSet::new();
-        validate_image_features(&features, &layout)
+        validate_image_features(&features, &layout, None)
             .expect("first-party-stack=false + unified should validate");
     }
 
@@ -1262,28 +1376,28 @@ mod test {
     fn first_party_stack_disabled_rejects_secure_boot() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         let features = HashSet::from([ImageFeature::UefiSecureBoot]);
-        assert!(validate_image_features(&features, &layout).is_err());
+        assert!(validate_image_features(&features, &layout, None).is_err());
     }
 
     #[test]
     fn first_party_stack_disabled_rejects_encrypted_storage() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         let features = HashSet::from([ImageFeature::EncryptedStorage]);
-        assert!(validate_image_features(&features, &layout).is_err());
+        assert!(validate_image_features(&features, &layout, None).is_err());
     }
 
     #[test]
     fn first_party_stack_disabled_rejects_in_place_updates() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         let features = HashSet::from([ImageFeature::InPlaceUpdates]);
-        assert!(validate_image_features(&features, &layout).is_err());
+        assert!(validate_image_features(&features, &layout, None).is_err());
     }
 
     #[test]
     fn first_party_stack_disabled_rejects_split_partition_plan() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Split);
         let features: HashSet<ImageFeature> = HashSet::new();
-        assert!(validate_image_features(&features, &layout).is_err());
+        assert!(validate_image_features(&features, &layout, None).is_err());
     }
 
     #[test]
@@ -1297,7 +1411,7 @@ mod test {
             ImageFeature::EncryptedStorage,
             ImageFeature::InPlaceUpdates,
         ]);
-        validate_image_features(&features, &layout)
+        validate_image_features(&features, &layout, None)
             .expect("validation should be no-op with first-party-stack enabled");
     }
 
@@ -1305,7 +1419,27 @@ mod test {
     fn first_party_stack_disabled_rejects_host_containers() {
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
         let features = HashSet::from([ImageFeature::HostContainers]);
-        assert!(validate_image_features(&features, &layout).is_err());
+        assert!(validate_image_features(&features, &layout, None).is_err());
+    }
+
+    #[test]
+    fn first_party_stack_disabled_rejects_xfs_data_partition() {
+        // `first-party-stack = false` skips building the BOTTLEROCKET-DATA
+        // partition, so opting into `xfs-data-partition` on top of it would
+        // silently do nothing. Reject the combination at build time.
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features = HashSet::from([ImageFeature::XfsDataPartition]);
+        let err = validate_image_features(&features, &layout, None)
+            .expect_err("first-party-stack=false + xfs-data-partition must fail validation");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("xfs-data-partition"),
+            "missing 'xfs-data-partition' in: {msg}",
+        );
+        assert!(
+            msg.contains("first-party-stack = false"),
+            "message should reference first-party-stack=false: {msg}",
+        );
     }
 
     #[test]
@@ -1318,8 +1452,9 @@ mod test {
             ImageFeature::EncryptedStorage,
             ImageFeature::InPlaceUpdates,
             ImageFeature::HostContainers,
+            ImageFeature::XfsDataPartition,
         ]);
-        let err = validate_image_features(&features, &layout)
+        let err = validate_image_features(&features, &layout, None)
             .expect_err("multi-conflict combination should fail validation");
         let msg = format!("{err}");
         assert!(
@@ -1337,6 +1472,10 @@ mod test {
         assert!(
             msg.contains("host-containers"),
             "missing host-containers in: {msg}"
+        );
+        assert!(
+            msg.contains("xfs-data-partition"),
+            "missing xfs-data-partition in: {msg}"
         );
         assert!(
             msg.contains("partition-plan=split"),
@@ -1395,7 +1534,7 @@ name = "test-variant"
         assert!(features.contains(&ImageFeature::HostContainers));
         // Validator should reject this combination.
         let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
-        assert!(validate_image_features(&features, &layout).is_err());
+        assert!(validate_image_features(&features, &layout, None).is_err());
     }
 
     #[test]
@@ -1450,8 +1589,268 @@ name = "test-variant"
             .image_features()
             .expect("variant has build-variant section");
         let raw_layout = ImageLayout::default();
-        let layout = resolved_image_layout(&raw_layout, &features);
+        let layout = resolved_image_layout(&raw_layout, &features, None);
         assert_eq!(layout.os_image_size_gib().0, 2);
-        validate_image_features(&features, &layout).expect("default image should pass validation");
+        validate_image_features(&features, &layout, None)
+            .expect("default image should pass validation");
+    }
+
+    /// Verify that a variant declaring `image-format = "eif"` parses and
+    /// surfaces `ImageFormat::Eif` from `image_format()`.
+    #[test]
+    fn test_image_format_eif_variant_hello_eif() {
+        let manifest_path = cargo_manifest("hello-eif");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        assert!(matches!(
+            manifest.info().image_format(),
+            Some(ImageFormat::Eif)
+        ));
+    }
+
+    /// Sanity check: the existing non-EIF variant has no `image-format` set and
+    /// therefore returns `None`. This guards the default-`raw` path used by
+    /// `builder.rs`.
+    #[test]
+    fn test_image_format_default_variant_hello_ootb() {
+        let manifest_path = cargo_manifest("hello-ootb");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        assert!(manifest.info().image_format().is_none());
+    }
+
+    // ---------------------------------------------------------------------
+    // `image-format = "eif"` validation and layout-resolution tests.
+    //
+    // These mirror the `first_party_stack_disabled_*` tests but with the EIF
+    // image format as the trigger instead of an explicit
+    // `first-party-stack = false`. EIF is inherently a stripped-down,
+    // single-bank image; the validator must reject conflicting features so
+    // that misconfiguration surfaces at build time rather than silently
+    // producing a broken artifact via `rpm2eif`'s reduced pipeline.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn eif_format_default_os_size_is_one_gib() {
+        // Same rationale as `first_party_stack_disabled_default_os_size_is_one_gib`:
+        // a stripped-down layout doesn't need 2 GiB of slack.
+        let layout = ImageLayout::default();
+        let features = HashSet::from([ImageFeature::ExternalKmodDevelopment]);
+        let resolved = resolved_image_layout(&layout, &features, Some(&ImageFormat::Eif));
+        assert_eq!(resolved.os_image_size_gib().0, 1);
+    }
+
+    #[test]
+    fn eif_format_respects_explicit_os_size() {
+        // If a variant explicitly sets `os-image-size-gib`, the EIF path
+        // must honor it (rpm2eif will pad the disk image to that size).
+        let layout = ImageLayout {
+            os_image_size_gib: Some(ImageSize(3)),
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::ExternalKmodDevelopment]);
+        let resolved = resolved_image_layout(&layout, &features, Some(&ImageFormat::Eif));
+        assert_eq!(resolved.os_image_size_gib().0, 3);
+    }
+
+    #[test]
+    fn eif_format_alone_passes_validation() {
+        // The minimal EIF feature set (just ExternalKmodDevelopment, the
+        // only default not stripped) with `partition-plan = unified` should
+        // validate successfully.
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::ExternalKmodDevelopment]);
+        validate_image_features(&features, &layout, Some(&ImageFormat::Eif))
+            .expect("EIF + minimal features + unified should validate");
+    }
+
+    #[test]
+    fn eif_format_rejects_secure_boot() {
+        // `uefi-secure-boot` is meaningless in the EIF pipeline: `rpm2eif`
+        // does not sign shim/grub/vmlinuz.
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::UefiSecureBoot]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Eif))
+            .expect_err("EIF + uefi-secure-boot must fail validation");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("image-format = \"eif\""),
+            "wrong prefix: {msg}"
+        );
+        assert!(
+            msg.contains("uefi-secure-boot"),
+            "missing feature name: {msg}"
+        );
+    }
+
+    #[test]
+    fn eif_format_rejects_encrypted_storage() {
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::EncryptedStorage]);
+        assert!(validate_image_features(&features, &layout, Some(&ImageFormat::Eif)).is_err());
+    }
+
+    #[test]
+    fn eif_format_rejects_in_place_updates() {
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::InPlaceUpdates]);
+        assert!(validate_image_features(&features, &layout, Some(&ImageFormat::Eif)).is_err());
+    }
+
+    #[test]
+    fn eif_format_rejects_host_containers() {
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::HostContainers]);
+        assert!(validate_image_features(&features, &layout, Some(&ImageFormat::Eif)).is_err());
+    }
+
+    #[test]
+    fn eif_format_rejects_first_party_stack_alone() {
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::FirstPartyStack]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Eif))
+            .expect_err("EIF + first-party-stack must fail validation");
+        assert!(format!("{err}").contains("first-party-stack"));
+    }
+
+    #[test]
+    fn eif_format_rejects_xfs_data_partition() {
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::XfsDataPartition]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Eif))
+            .expect_err("EIF + xfs-data-partition must fail validation");
+        assert!(format!("{err}").contains("xfs-data-partition"));
+    }
+
+    #[test]
+    fn eif_format_rejects_split_partition_plan() {
+        // EIF images are inherently unified single-disk images; the split
+        // plan has no meaning.
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Split,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::ExternalKmodDevelopment]);
+        assert!(validate_image_features(&features, &layout, Some(&ImageFormat::Eif)).is_err());
+    }
+
+    #[test]
+    fn eif_format_rejects_first_party_stack_true() {
+        // Even if the user explicitly enables `first-party-stack = true`,
+        // `image-format = "eif"` must still reject the conflicting features.
+        // Without this the EIF path could silently ignore, e.g.,
+        // `in-place-updates = true` and produce an image the author did not
+        // ask for.
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Unified,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::FirstPartyStack, ImageFeature::InPlaceUpdates]);
+        assert!(
+            validate_image_features(&features, &layout, Some(&ImageFormat::Eif)).is_err(),
+            "EIF must reject conflicts even when first-party-stack is explicitly enabled"
+        );
+    }
+
+    #[test]
+    fn eif_format_reports_all_conflicts_at_once() {
+        // Same "don't play whack-a-mole" guarantee as the first-party-stack
+        // validator: reject everything in one build cycle.
+        let layout = ImageLayout {
+            partition_plan: PartitionPlan::Split,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([
+            ImageFeature::FirstPartyStack,
+            ImageFeature::XfsDataPartition,
+            ImageFeature::UefiSecureBoot,
+            ImageFeature::EncryptedStorage,
+            ImageFeature::InPlaceUpdates,
+            ImageFeature::HostContainers,
+        ]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Eif))
+            .expect_err("multi-conflict EIF should fail validation");
+        let msg = format!("{err}");
+        for keyword in [
+            "first-party-stack",
+            "xfs-data-partition",
+            "uefi-secure-boot",
+            "encrypted-storage",
+            "in-place-updates",
+            "host-containers",
+            "partition-plan=split",
+        ] {
+            assert!(msg.contains(keyword), "missing '{keyword}' in: {msg}");
+        }
+    }
+
+    #[test]
+    fn eif_format_seeds_stripped_defaults() {
+        // A variant with `image-format = "eif"` and no `[image-features]`
+        // section must NOT get the silent first-party-stack / IPU /
+        // host-containers defaults. Otherwise the EIF validator would
+        // immediately reject an otherwise-valid manifest.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+"#;
+        let info = manifest_info_from_toml(toml);
+        let features = info
+            .image_features()
+            .expect("variant has build-variant section");
+        assert!(!features.contains(&ImageFeature::FirstPartyStack));
+        assert!(!features.contains(&ImageFeature::InPlaceUpdates));
+        assert!(!features.contains(&ImageFeature::HostContainers));
+        assert!(features.contains(&ImageFeature::ExternalKmodDevelopment));
+        // And the resolved layout picks up the 1 GiB EIF default *and* the
+        // unified partition plan (overriding the historical `split` default).
+        let raw_layout = ImageLayout::default();
+        let layout = resolved_image_layout(&raw_layout, &features, Some(&ImageFormat::Eif));
+        assert_eq!(layout.os_image_size_gib().0, 1);
+        assert!(matches!(layout.partition_plan, PartitionPlan::Unified));
+        validate_image_features(&features, &layout, Some(&ImageFormat::Eif))
+            .expect("default EIF variant should pass validation");
+    }
+
+    #[test]
+    fn eif_format_forces_unified_partition_plan() {
+        // Even if a user explicitly writes `partition-plan = "split"`, the
+        // resolver must override it. The alternative — letting the split
+        // survive and having the validator reject it — is worse UX: the
+        // user gets a build failure for a knob that `rpm2eif` was going to
+        // ignore anyway.
+        let raw_layout = ImageLayout {
+            partition_plan: PartitionPlan::Split,
+            ..ImageLayout::default()
+        };
+        let features = HashSet::from([ImageFeature::ExternalKmodDevelopment]);
+        let resolved = resolved_image_layout(&raw_layout, &features, Some(&ImageFormat::Eif));
+        assert!(matches!(resolved.partition_plan, PartitionPlan::Unified));
     }
 }

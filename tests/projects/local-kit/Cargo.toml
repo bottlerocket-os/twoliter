@@ -13,6 +13,7 @@ members = [
     "packages/pkg-f",
     "packages/pkg-g",
     "variants/hello-ootb",
+    "variants/hello-eif",
 ]
 
 [profile.dev]

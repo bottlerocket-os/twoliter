@@ -23,9 +23,20 @@ members = [
     "tools/unplug",
     "tools/update-metadata",
     "tools/advisory-checker",
+    "tools/eif-builder",
 
     "twoliter",
-    "twoliter/src/tool-crates/*",
+    "twoliter/src/tool-crates/advisory-checker",
+    "twoliter/src/tool-crates/buildsys",
+    "twoliter/src/tool-crates/embedded-bundle",
+    "twoliter/src/tool-crates/pcrsys",
+    "twoliter/src/tool-crates/pipesys",
+    "twoliter/src/tool-crates/pubsys",
+    "twoliter/src/tool-crates/pubsys-setup",
+    "twoliter/src/tool-crates/testsys",
+    "twoliter/src/tool-crates/tuftool",
+    "twoliter/src/tool-crates/unplug",
+    "twoliter/src/tool-crates/eif-builder",
 
     "tests/integration-tests",
 ]
@@ -62,6 +73,7 @@ bottlerocket-types = { version = "0.0.16", git = "https://github.com/bottlerocke
 bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
 buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys" ] }
 buildsys-config = { version = "0.1", path = "tools/buildsys-config" }
+eif-builder = { version = "0.1", path = "tools/eif-builder", artifact = [ "bin:eif-builder" ] }
 error-utils = { version = "0.1", path = "tools/error-utils" }
 include-env-compressed = { version = "0.1", path = "tools/include-env-compressed" }
 include-env-compressed-macro = { version = "0.1", path = "tools/include-env-compressed/include-env-compressed-macro" }
@@ -84,6 +96,7 @@ testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/
 twoliter = { version = "0.21.0", path = "twoliter", artifact = [ "bin:twoliter" ] }
 twoliter-tool-advisory-checker = { version = "0.1", path = "twoliter/src/tool-crates/advisory-checker" }
 twoliter-tool-buildsys = { version = "0.1", path = "twoliter/src/tool-crates/buildsys" }
+twoliter-tool-eif-builder = { version = "0.1", path = "twoliter/src/tool-crates/eif-builder" }
 twoliter-tool-embedded-bundle = { version = "0.1", path = "twoliter/src/tool-crates/embedded-bundle" }
 twoliter-tool-pcrsys = { version = "0.1", path = "twoliter/src/tool-crates/pcrsys" }
 twoliter-tool-pipesys = { version = "0.1", path = "twoliter/src/tool-crates/pipesys" }

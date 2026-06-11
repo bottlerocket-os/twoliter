@@ -1640,6 +1640,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "eif-builder"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "crc32fast",
+ "flate2",
+ "serde_json",
+ "snafu 0.8.9",
+ "tempfile",
+ "zstd",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5683,6 +5696,7 @@ dependencies = [
  "tracing",
  "twoliter-tool-advisory-checker",
  "twoliter-tool-buildsys",
+ "twoliter-tool-eif-builder",
  "twoliter-tool-embedded-bundle",
  "twoliter-tool-pcrsys",
  "twoliter-tool-pipesys",
@@ -5709,6 +5723,14 @@ name = "twoliter-tool-buildsys"
 version = "0.1.0"
 dependencies = [
  "buildsys",
+ "include-env-compressed",
+]
+
+[[package]]
+name = "twoliter-tool-eif-builder"
+version = "0.1.0"
+dependencies = [
+ "eif-builder",
  "include-env-compressed",
 ]
 
