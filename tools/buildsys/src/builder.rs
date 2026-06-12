@@ -9,8 +9,8 @@ pub(crate) mod error;
 use crate::args::{BuildKitArgs, BuildPackageArgs, BuildVariantArgs, RepackVariantArgs};
 use bottlerocket_variant::Variant;
 use buildsys::manifest::{
-    ExternalKitMetadataView, ImageFeature, ImageFormat, ImageLayout, Manifest, PartitionPlan,
-    SupportedArch,
+    resolved_image_layout, validate_image_features, ExternalKitMetadataView, ImageFeature,
+    ImageFormat, Manifest, PartitionPlan, SupportedArch,
 };
 use buildsys::BuildType;
 use buildsys_config::EXTERNAL_KIT_METADATA;
@@ -266,7 +266,16 @@ impl VariantBuildArgs {
         args.build_arg("VERSION_ID", &self.version_image);
 
         for image_feature in self.image_features.iter() {
-            args.build_arg(format!("{image_feature}"), "1");
+            // `first-party-stack` is the inverted, default-true feature: pass
+            // `yes` to bash so the Dockerfile can pipe the value through to
+            // `--with-first-party-stack=`. All other features stay on the
+            // simple `1`-presence convention.
+            let value = if matches!(image_feature, ImageFeature::FirstPartyStack) {
+                "yes"
+            } else {
+                "1"
+            };
+            args.build_arg(format!("{image_feature}"), value);
         }
 
         args
@@ -311,7 +320,12 @@ impl RepackVariantBuildArgs {
         args.build_arg("VERSION_ID", &self.version_image);
 
         for image_feature in self.image_features.iter() {
-            args.build_arg(format!("{image_feature}"), "1");
+            let value = if matches!(image_feature, ImageFeature::FirstPartyStack) {
+                "yes"
+            } else {
+                "1"
+            };
+            args.build_arg(format!("{image_feature}"), value);
         }
 
         args
@@ -435,13 +449,16 @@ impl DockerBuild {
 
     /// Create a new `DockerBuild` that can build a variant image.
     pub(crate) fn new_variant(args: BuildVariantArgs, manifest: &Manifest) -> Result<Self> {
-        let image_layout = manifest.info().image_layout().cloned().unwrap_or_default();
-        let ImageLayout {
-            os_image_size_gib,
-            data_image_size_gib,
-            partition_plan,
-            ..
-        } = image_layout;
+        let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
+        let features = manifest.info().image_features().unwrap_or_default();
+        let image_layout = resolved_image_layout(&raw_layout, &features);
+        // Defense in depth: re-run the image feature validator here so that
+        // any future code path that constructs a `DockerBuild` cannot bypass
+        // the gate that `main.rs::validate_first_party_stack_or_warn` provides.
+        validate_image_features(&features, &image_layout).context(error::GraphSnafu)?;
+        let os_image_size_gib = image_layout.os_image_size_gib();
+        let data_image_size_gib = image_layout.data_image_size_gib;
+        let partition_plan = image_layout.partition_plan;
 
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();
@@ -533,13 +550,16 @@ impl DockerBuild {
 
     /// Create a new `DockerBuild` that can repackage a variant image.
     pub(crate) fn repack_variant(args: RepackVariantArgs, manifest: &Manifest) -> Result<Self> {
-        let image_layout = manifest.info().image_layout().cloned().unwrap_or_default();
-        let ImageLayout {
-            os_image_size_gib,
-            data_image_size_gib,
-            partition_plan,
-            ..
-        } = image_layout;
+        let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
+        let features = manifest.info().image_features().unwrap_or_default();
+        let image_layout = resolved_image_layout(&raw_layout, &features);
+        // Defense in depth: re-run the image feature validator here so that
+        // any future code path that constructs a `DockerBuild` cannot bypass
+        // the gate that `main.rs::validate_first_party_stack_or_warn` provides.
+        validate_image_features(&features, &image_layout).context(error::GraphSnafu)?;
+        let os_image_size_gib = image_layout.os_image_size_gib();
+        let data_image_size_gib = image_layout.data_image_size_gib;
+        let partition_plan = image_layout.partition_plan;
 
         let (os_image_publish_size_gib, data_image_publish_size_gib) =
             image_layout.publish_image_sizes_gib();

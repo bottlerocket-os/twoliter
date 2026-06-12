@@ -19,7 +19,10 @@ use crate::args::{
     BuildKitArgs, BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs,
 };
 use crate::builder::DockerBuild;
-use buildsys::manifest::{BundleModule, Manifest, ManifestInfo, SupportedArch};
+use buildsys::manifest::{
+    resolved_image_layout, validate_image_features, BundleModule, ImageFeature, Manifest,
+    ManifestInfo, SupportedArch,
+};
 use buildsys_config::EXTERNAL_KIT_METADATA;
 use cache::LookasideCache;
 use clap::Parser;
@@ -40,6 +43,9 @@ mod error {
     pub(super) enum Error {
         #[snafu(display("{source}"))]
         ManifestParse { source: buildsys::manifest::Error },
+
+        #[snafu(display("invalid image-feature combination: {source}"))]
+        ImageFeatures { source: buildsys::manifest::Error },
 
         #[snafu(display("{source}"))]
         SpecParse { source: super::spec::error::Error },
@@ -246,6 +252,7 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     .context(error::ManifestParseSnafu)?;
 
     check_arch_support(manifest.info(), args.common.arch);
+    validate_first_party_stack_or_warn(manifest.info())?;
 
     if args.common.cicd_hack {
         return Ok(());
@@ -267,6 +274,7 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
     .context(error::ManifestParseSnafu)?;
 
     check_arch_support(manifest.info(), args.common.arch);
+    validate_first_party_stack_or_warn(manifest.info())?;
 
     if args.common.cicd_hack {
         return Ok(());
@@ -290,6 +298,34 @@ fn check_arch_support(manifest: &ManifestInfo, arch: SupportedArch) {
             std::process::exit(0);
         }
     }
+}
+
+/// Re-validate image features against the resolved image layout, and emit a
+/// multi-line warning when `first-party-stack = false` so that build logs
+/// make the implications obvious.
+fn validate_first_party_stack_or_warn(manifest: &ManifestInfo) -> Result<()> {
+    let features = manifest.image_features().unwrap_or_default();
+    let raw_layout = manifest.image_layout().cloned().unwrap_or_default();
+    let layout = resolved_image_layout(&raw_layout, &features);
+    validate_image_features(&features, &layout).context(error::ImageFeaturesSnafu)?;
+
+    if !features.contains(&ImageFeature::FirstPartyStack) {
+        // `cargo:warning` is line-oriented, so emit one line per call.
+        for line in [
+            "WARNING: image feature `first-party-stack` is disabled.",
+            "With `first-party-stack = false`, the resulting image will NOT contain the",
+            "Bottlerocket datastore, settings subsystem, host-containers, or any",
+            "first-party Bottlerocket management software. You are responsible for",
+            "owning all system configuration yourself. The image will not have a",
+            "BOTTLEROCKET-PRIVATE partition or a BOTTLEROCKET-DATA partition. If your",
+            "variant ships components that expect persistent storage at",
+            "partlabel=BOTTLEROCKET-DATA, you may optionally attach such a volume",
+            "at runtime; otherwise no extra volume is required.",
+        ] {
+            println!("cargo:warning={line}");
+        }
+    }
+    Ok(())
 }
 
 /// Prior to the release of Kits as a build feature, packages could, and did, declare themselves
