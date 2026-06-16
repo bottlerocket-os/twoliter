@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use snafu::Snafu;
 
 #[derive(Debug, Snafu)]
-#[snafu(visibility(pub(super)))]
+#[snafu(visibility(pub(crate)))]
 pub(crate) enum Error {
     #[snafu(display("Failed to start command: {}", source))]
     CommandStart { source: std::io::Error },
 
-    #[snafu(display("Failed to execute docker-go script. 'args: {}'", args))]
-    DockerExecution { args: String },
+    #[snafu(display("Failed to execute {} script. 'args: {}'", tool, args))]
+    DockerExecution { tool: String, args: String },
 
     #[snafu(display("Input url is required"))]
     InputFile,
@@ -60,4 +60,4 @@ pub(crate) enum Error {
     },
 }
 
-pub(super) type Result<T> = std::result::Result<T, Error>;
+pub(crate) type Result<T> = std::result::Result<T, Error>;

@@ -13,7 +13,9 @@ mod builder;
 mod cache;
 mod gomod;
 mod project;
+mod rustmod;
 mod spec;
+mod vendormod;
 
 use crate::args::{
     BuildKitArgs, BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs,
@@ -26,6 +28,7 @@ use clap::Parser;
 use filetime::FileTime;
 use gomod::GoMod;
 use project::ProjectInfo;
+use rustmod::RustMod;
 use snafu::{ensure, ResultExt};
 use spec::SpecInfo;
 use std::path::{Path, PathBuf};
@@ -55,6 +58,11 @@ mod error {
 
         #[snafu(display("{source}"))]
         GoMod { source: super::gomod::error::Error },
+
+        #[snafu(display("{source}"))]
+        RustMod {
+            source: super::rustmod::error::Error,
+        },
 
         #[snafu(display("{source}"))]
         ProjectCrawl {
@@ -165,6 +173,14 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
                         mtime,
                     )
                     .context(error::GoModSnafu)?,
+                    BundleModule::Rust => RustMod::vendor(
+                        &args.common.root_dir,
+                        &args.common.cargo_manifest_dir,
+                        f,
+                        &args.common.sdk_image,
+                        mtime,
+                    )
+                    .context(error::RustModSnafu)?,
                 }
             }
         }

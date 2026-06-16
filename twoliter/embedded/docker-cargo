@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+# Helper script for running commands in a Rust build/runtime environment for testing/vendoring/building a Rust crate
+
+set -e -o pipefail
+
+usage() {
+   cat >&2 <<EOF
+$(basename "${0}")
+                --module-path <path to Rust project>
+                --sdk-image <SDK image>
+                --cargo-home <path to CARGO_HOME>
+                --command "<command to run>"
+
+Required:
+    --module-path               The path of the Rust project to mount into the container
+    --sdk-image                 Name of the SDK image to use
+    --cargo-home                The Cargo home path to mount into the container
+    --command                   The command to run in the SDK container
+EOF
+}
+
+required_arg() {
+   local arg="${1:?}"
+   local value="${2}"
+   if [ -z "${value}" ]; then
+      echo "ERROR: ${arg} is required" >&2
+      exit 2
+   fi
+}
+
+parse_args() {
+  while [ ${#} -gt 0 ] ; do
+    case "${1}" in
+        --help ) usage; exit 0 ;;
+        --module-path ) shift; MODULE_PATH="${1}" ;;
+        --sdk-image ) shift; SDK_IMAGE="${1}" ;;
+        --cargo-home ) shift; CARGO_HOME="${1}" ;;
+        --command ) shift; COMMAND="${@:1}" ;;
+        *) ;;
+    esac
+    shift
+  done
+
+  required_arg "--module-path" "${MODULE_PATH}"
+  required_arg "--sdk-image" "${SDK_IMAGE}"
+  required_arg "--cargo-home" "${CARGO_HOME}"
+  required_arg "--command" "${COMMAND}"
+}
+
+DOCKER_RUN_ARGS="--network=host"
+
+parse_args "${@}"
+
+proxy_env=( )
+for i in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY ; do
+  if [ -n "${!i}" ]; then
+    proxy_env[${#proxy_env[@]}]="--env=$i=${!i}"
+  fi
+done
+
+docker run --rm \
+  -e CARGO_HOME="${CARGO_HOME}" \
+  -e CARGO_TARGET_DIR='/tmp/.cache' \
+  "${proxy_env[@]}" \
+  --user "$(id -u):$(id -g)" \
+  --security-opt="label=disable" \
+  ${DOCKER_RUN_ARGS} \
+  -v "${CARGO_HOME}":"${CARGO_HOME}" \
+  -v "${MODULE_PATH}":"${MODULE_PATH}" \
+  -w "${MODULE_PATH}" \
+  "${SDK_IMAGE}" \
+    bash -c "${COMMAND}"

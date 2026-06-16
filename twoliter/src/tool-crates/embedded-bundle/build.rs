@@ -27,6 +27,7 @@ fn main() {
     paths.copy_file("Makefile.toml");
     paths.copy_file("build.Dockerfile");
     paths.copy_file("build.Dockerfile.dockerignore");
+    paths.copy_file("docker-cargo");
     paths.copy_file("docker-go");
     paths.copy_file("img2img");
     paths.copy_file("imghelper");
