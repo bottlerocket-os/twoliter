@@ -20,7 +20,7 @@ lazy_static.workspace = true
 pipesys.workspace = true
 rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 regex.workspace = true
-reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
+reqwest = { workspace = true, features = ["blocking", "rustls"] }
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_plain.workspace = true

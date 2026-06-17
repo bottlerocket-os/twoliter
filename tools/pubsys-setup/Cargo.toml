@@ -11,7 +11,7 @@ clap = { workspace = true, features = ["derive"] }
 hex.workspace = true
 log.workspace = true
 pubsys-config.workspace = true
-reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
+reqwest = { workspace = true, features = ["blocking", "rustls"] }
 sha2.workspace = true
 shell-words.workspace = true
 simplelog.workspace = true

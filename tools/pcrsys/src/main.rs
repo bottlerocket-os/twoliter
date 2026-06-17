@@ -125,7 +125,7 @@ async fn run_ami(ami_id: &str, region: Option<&String>, profile: Option<&String>
 
     let downloader = SnapshotDownloader::new(ebs_client);
     downloader
-        .download_to_file(&snapshot_id, temp_file.path(), None)
+        .download_to_file(&snapshot_id, temp_file.path(), None, None, None)
         .await
         .whatever_context("failed to download snapshot")?;
 
