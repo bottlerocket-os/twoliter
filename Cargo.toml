@@ -81,7 +81,7 @@ testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" 
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
 
-twoliter = { version = "0.20.0", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter = { version = "0.21.0-rc1", path = "twoliter", artifact = [ "bin:twoliter" ] }
 twoliter-tool-advisory-checker = { version = "0.1", path = "twoliter/src/tool-crates/advisory-checker" }
 twoliter-tool-buildsys = { version = "0.1", path = "twoliter/src/tool-crates/buildsys" }
 twoliter-tool-embedded-bundle = { version = "0.1", path = "twoliter/src/tool-crates/embedded-bundle" }
@@ -132,7 +132,7 @@ filetime = "0.2"
 flate2 = "1"
 futures = "0.3"
 governor = "0.10"
-gptman = "2"
+gptman = "3"
 guppy = "0.17"
 handlebars = "6"
 hex = "0.4"
@@ -146,7 +146,7 @@ log = "0.4"
 lzma-rs = "0.3"
 maplit = "1"
 mockall = "0.13"
-nix = "0.30"
+nix = "0.31"
 nonzero_ext = "0.3"
 num_cpus = "1"
 num-traits = "0.2"

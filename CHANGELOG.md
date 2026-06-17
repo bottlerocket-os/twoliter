@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...HEAD
 
+## [0.21.0-rc1] - 2026-06-17
+
+### Added
+* Support for vendoring dependencies of rust packages ([#674])
+
+### Build
+* Update coldsnap to 0.11 (#[675])
+* Update reqwest to 0.13 (#[675])
+* Update cargo dependencies (#[675])
+
+[#674]: https://github.com/bottlerocket-os/twoliter/pull/674
+[#675]: https://github.com/bottlerocket-os/twoliter/pull/675
+
+[0.21.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...v0.21.0-rc1
+
 ## [0.20.0] - 2026-05-27
 
 ### Added
