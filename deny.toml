@@ -13,14 +13,14 @@ allow = [
     # "CC0-1.0",
     "ISC",
     "MIT",
-    "OpenSSL",
+    #"OpenSSL",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
 ]
 
 exceptions = [
-    { name = "webpki-roots", allow = ["CDLA-Permissive-2.0"], version = "*" },
+    { name = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"], version = "*" }
 ]
 
 # https://github.com/hsivonen/encoding_rs The non-test code that isn't generated from the WHATWG data in this crate is
@@ -67,6 +67,13 @@ skip = [
     { name = "foldhash" },
     # tokio-retry uses rand 0.10 while other crates use rand 0.9
     { name = "rand" },
+    # bon uses darling 0.21 while gptman uses 0.23
+    { name = "darling" },
+    { name = "darling_core" },
+    { name = "darling_macro" },
+    # tough has not been bumped to reqwest 0.13 yet, we have a tough release in near future
+    # that will fix this.
+    { name = "reqwest" },
 ]
 
 skip-tree = [

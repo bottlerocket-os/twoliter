@@ -40,6 +40,7 @@ where
             progress_bar.clone(),
             Some(UploadZeroBlocks::Omit),
             None,
+            None,
         )
         .await
         .context(error::UploadSnapshotSnafu)

@@ -448,7 +448,7 @@ pub(crate) async fn validate_parameters(
         })
         .take(SSM_VALIDATION_NUM_RETRIES);
 
-    RetryIf::spawn(
+    RetryIf::start(
         retry_strategy,
         || async { validate_parameters_inner(expected_parameters, ssm_clients).await },
         |e: &'_ Error| {
