@@ -898,6 +898,7 @@ impl fmt::Display for ImageFeature {
 #[serde(rename_all = "lowercase")]
 pub enum BundleModule {
     Go,
+    Rust,
 }
 
 #[derive(Deserialize, Debug, Clone)]
