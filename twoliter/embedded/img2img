@@ -54,6 +54,29 @@ check_debugfs_errors() {
   fi
 }
 
+# Write a partition back to a disk image and verify via hash comparison.
+write_partition() {
+  local src="$1" dst="$2" seek_mib="$3"
+  local src_bytes
+  src_bytes="$(stat -c '%s' "${src}")"
+  local expected
+  expected="$(sha256sum < "${src}" | cut -d' ' -f1)"
+
+  dd if="${src}" of="${dst}" \
+    iflag=fullblock conv=notrunc,fsync bs=1M seek="${seek_mib}"
+
+  local skip_bytes=$(( seek_mib * (1 << 20) ))
+  local actual
+  actual="$(dd if="${dst}" iflag=skip_bytes,count_bytes,fullblock \
+    skip="${skip_bytes}" count="${src_bytes}" bs=1M 2>/dev/null |
+    sha256sum | cut -d' ' -f1)"
+
+  if [[ "${expected}" != "${actual}" ]]; then
+    echo "write verification failed at offset ${seek_mib}MiB (${src##*/})" >&2
+    exit 1
+  fi
+}
+
 # Import the partition helper functions.
 # shellcheck source=partyplanner
 . "${0%/*}/partyplanner"
@@ -195,8 +218,7 @@ fi
 
 # Validate and write root image back to the OS image.
 check_image_size "${ROOT_IMAGE}" "${partsize["ROOT-A"]}"
-dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" \
-  iflag=fullblock conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
+write_partition "${ROOT_IMAGE}" "${OS_IMAGE}" "${partoff["ROOT-A"]}"
 
 # Report ROOT partition usage
 if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
@@ -212,8 +234,7 @@ generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
 
 # Validate and write root verity back to the OS image. The image size check
 # isn't needed here as it's already done in `generate_verity_root`.
-dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" \
-  iflag=fullblock conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
+write_partition "${VERITY_IMAGE}" "${OS_IMAGE}" "${partoff["HASH-A"]}"
 
 ###############################################################################
 # Section 5: maybe secure boot
@@ -247,8 +268,7 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
 
   # Write the EFI image back to the OS image.
   check_image_size "${EFI_IMAGE}" "${partsize["EFI-A"]}"
-  dd if="${EFI_IMAGE}" of="${OS_IMAGE}" \
-    iflag=fullblock conv=notrunc bs=1M seek="${partoff["EFI-A"]}"
+  write_partition "${EFI_IMAGE}" "${OS_IMAGE}" "${partoff["EFI-A"]}"
 
   # Resign the kernel and write to boot image.
   sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
@@ -300,8 +320,7 @@ check_debugfs_errors "${GRUB_DEBUGFS_STDERR}"
 
 # Write the boot image back to the OS image.
 check_image_size "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
-dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" \
-  iflag=fullblock conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+write_partition "${BOOT_IMAGE}" "${OS_IMAGE}" "${partoff["BOOT-A"]}"
 
 # Report BOOT partition usage
 boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
