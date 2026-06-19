@@ -2,7 +2,7 @@
 pub mod vmware;
 
 use crate::vmware::VmwareConfig;
-use chrono::Duration;
+use jiff::SignedDuration;
 use log::info;
 use parse_datetime::parse_offset;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -232,11 +232,11 @@ pub struct RepoConfig {
 #[serde(deny_unknown_fields)]
 pub struct RepoExpirationPolicy {
     #[serde(deserialize_with = "deserialize_offset")]
-    pub snapshot_expiration: Duration,
+    pub snapshot_expiration: SignedDuration,
     #[serde(deserialize_with = "deserialize_offset")]
-    pub targets_expiration: Duration,
+    pub targets_expiration: SignedDuration,
     #[serde(deserialize_with = "deserialize_offset")]
-    pub timestamp_expiration: Duration,
+    pub timestamp_expiration: SignedDuration,
 }
 
 impl RepoExpirationPolicy {
@@ -252,7 +252,7 @@ impl RepoExpirationPolicy {
 }
 
 /// Deserializes a Duration in the form of "in X hours/days/weeks"
-fn deserialize_offset<'de, D>(deserializer: D) -> std::result::Result<Duration, D::Error>
+fn deserialize_offset<'de, D>(deserializer: D) -> std::result::Result<SignedDuration, D::Error>
 where
     D: Deserializer<'de>,
 {

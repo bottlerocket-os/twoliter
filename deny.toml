@@ -71,9 +71,6 @@ skip = [
     { name = "darling" },
     { name = "darling_core" },
     { name = "darling_macro" },
-    # tough has not been bumped to reqwest 0.13 yet, we have a tough release in near future
-    # that will fix this.
-    { name = "reqwest" },
 ]
 
 skip-tree = [

@@ -5,8 +5,8 @@ use crate::repo::{
     error as repo_error, get_signing_key_source, repo_urls, set_expirations, set_versions,
 };
 use crate::{repo, Args};
-use chrono::{DateTime, Utc};
 use clap::Parser;
+use jiff::Timestamp;
 use lazy_static::lazy_static;
 use log::{info, trace};
 use pubsys_config::{InfraConfig, RepoExpirationPolicy};
@@ -19,7 +19,7 @@ use tough::{ExpirationEnforcement, RepositoryLoader};
 use url::Url;
 
 lazy_static! {
-    static ref EXPIRATION_START_TIME: DateTime<Utc> = Utc::now();
+    static ref EXPIRATION_START_TIME: Timestamp = Timestamp::now();
 }
 
 /// Refreshes and re-sign TUF repositories' non-root metadata files with new expiration dates

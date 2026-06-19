@@ -21,7 +21,7 @@ aws-smithy-types.workspace = true
 aws-types.workspace = true
 buildsys.workspace = true
 bytes.workspace = true
-chrono = { workspace = true, features = ["clock", "std"] }
+jiff = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
 duct.workspace = true

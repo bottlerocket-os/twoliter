@@ -3,8 +3,8 @@
 
 use crate::repo::{error as repo_error, repo_urls};
 use crate::{repo, Args};
-use chrono::{DateTime, Utc};
 use clap::Parser;
+use jiff::Timestamp;
 use log::{error, info, trace, warn};
 use parse_datetime::parse_datetime;
 use pubsys_config::InfraConfig;
@@ -34,14 +34,14 @@ pub(crate) struct CheckExpirationsArgs {
 
     #[arg(long, value_parser = parse_datetime)]
     /// Finds metadata files expiring between now and a specified time; RFC3339 date or "in X hours/days/weeks"
-    expiration_limit: DateTime<Utc>,
+    expiration_limit: Timestamp,
 }
 
 /// Checks for upcoming role expirations, gathering them in a map of role to expiration datetime.
 fn find_upcoming_metadata_expiration(
     repo: &Repository,
-    end_date: DateTime<Utc>,
-) -> HashMap<tough::schema::RoleType, DateTime<Utc>> {
+    end_date: Timestamp,
+) -> HashMap<tough::schema::RoleType, Timestamp> {
     let mut expirations = HashMap::new();
     info!("Looking for metadata expirations happening from now to {end_date}");
     if repo.root().signed.expires <= end_date {
@@ -73,7 +73,7 @@ async fn check_expirations(
     root_role_path: &PathBuf,
     metadata_url: &Url,
     targets_url: &Url,
-    expiration_limit: DateTime<Utc>,
+    expiration_limit: Timestamp,
 ) -> Result<()> {
     // Load the repository
     let repo = RepositoryLoader::new(
@@ -97,16 +97,16 @@ async fn check_expirations(
     // Check for upcoming metadata expirations if a timeframe is specified
     let upcoming_expirations = find_upcoming_metadata_expiration(&repo, expiration_limit);
     if !upcoming_expirations.is_empty() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         for (role, expiration_date) in upcoming_expirations {
             if expiration_date < now {
                 error!("Repo '{metadata_url}': '{role}' expired on {expiration_date}")
             } else {
                 warn!(
-                    "Repo '{}': '{}' expiring in {} at {}",
+                    "Repo '{}': '{}' expiring in PT{}S at {}",
                     metadata_url,
                     role,
-                    expiration_date - now,
+                    expiration_date.duration_since(now).as_secs(),
                     expiration_date
                 )
             }
