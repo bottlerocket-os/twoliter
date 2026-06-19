@@ -9,5 +9,5 @@ publish = false
 exclude = ["README.md"]
 
 [dependencies]
-chrono = { workspace = true, features = ["clock", "std"] }
+jiff = { workspace = true }
 snafu = { workspace = true, features = ["backtraces-impl-backtrace-crate"] }

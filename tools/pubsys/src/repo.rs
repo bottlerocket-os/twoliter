@@ -9,9 +9,9 @@ mod env_key_source;
 
 use crate::{friendly_version, read_stream, Args};
 use aws_sdk_kms::{config::Region, Client as KmsClient};
-use chrono::{DateTime, Utc};
 use clap::Parser;
 use env_key_source::EnvKeySource;
+use jiff::Timestamp;
 use lazy_static::lazy_static;
 use log::{debug, info, trace, warn};
 use parse_datetime::parse_datetime;
@@ -38,7 +38,7 @@ use update_metadata::{Images, Manifest, Release, UpdateWaves};
 use url::Url;
 
 lazy_static! {
-    static ref DEFAULT_START_TIME: DateTime<Utc> = Utc::now();
+    static ref DEFAULT_START_TIME: Timestamp = Timestamp::now();
 }
 
 /// Builds Bottlerocket repos using latest build artifacts
@@ -98,7 +98,7 @@ pub(crate) struct RepoArgs {
 
     #[arg(long, value_parser = parse_datetime)]
     /// When the waves and expiration timer will start; RFC3339 date or "in X hours/days/weeks"
-    release_start_time: Option<DateTime<Utc>>,
+    release_start_time: Option<Timestamp>,
 
     #[arg(long)]
     /// Where to store the created repo
@@ -199,7 +199,7 @@ fn update_manifest(repo_args: &RepoArgs, manifest: &mut Manifest) -> Result<()> 
 fn set_expirations(
     editor: &mut RepositoryEditor,
     expiration_policy: &RepoExpirationPolicy,
-    expiration_start_time: DateTime<Utc>,
+    expiration_start_time: Timestamp,
 ) -> Result<()> {
     let snapshot_expiration = expiration_start_time + expiration_policy.snapshot_expiration;
     let targets_expiration = expiration_start_time + expiration_policy.targets_expiration;
@@ -220,7 +220,7 @@ fn set_expirations(
 
 /// Set versions of all role metadata; the version will be the UNIX timestamp of the current time.
 fn set_versions(editor: &mut RepositoryEditor) -> Result<()> {
-    let seconds = Utc::now().timestamp();
+    let seconds = Timestamp::now().as_second();
     let unsigned_seconds = seconds.try_into().expect("System clock before 1970??");
     let version = NonZeroU64::new(unsigned_seconds).expect("System clock exactly 1970??");
     debug!("Repo version: {version}");
@@ -292,7 +292,7 @@ where
 
     // Add version   =^..^=   =^..^=   =^..^=   =^..^=
 
-    let seconds = Utc::now().timestamp();
+    let seconds = Timestamp::now().as_second();
     let unsigned_seconds = seconds.try_into().expect("System clock before 1970??");
     let version = NonZeroU64::new(unsigned_seconds).expect("System clock exactly 1970??");
     debug!("Repo version: {version}");
@@ -644,7 +644,7 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
 }
 
 mod error {
-    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
     use snafu::Snafu;
     use std::io;
     use std::path::PathBuf;
@@ -790,7 +790,7 @@ mod error {
 
         #[snafu(display("Failed to set targets expiration to {}: {}", expiration, source))]
         SetTargetsExpiration {
-            expiration: DateTime<Utc>,
+            expiration: Timestamp,
             #[snafu(source(from(tough::error::Error, Box::new)))]
             source: Box<tough::error::Error>,
         },

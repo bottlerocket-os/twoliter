@@ -1,5 +1,5 @@
 use crate::error;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use regex::Regex;
 use semver::Version;
 use serde::{de::Error as _, Deserializer};
@@ -10,14 +10,14 @@ use std::fmt;
 /// Converts the bound key to an integer before insertion and catches duplicates
 pub(crate) fn deserialize_bound<'de, D>(
     deserializer: D,
-) -> Result<BTreeMap<u32, DateTime<Utc>>, D::Error>
+) -> Result<BTreeMap<u32, Timestamp>, D::Error>
 where
     D: Deserializer<'de>,
 {
     fn bound_to_int(
         key: String,
-        time: DateTime<Utc>,
-        map: &mut BTreeMap<u32, DateTime<Utc>>,
+        time: Timestamp,
+        map: &mut BTreeMap<u32, Timestamp>,
     ) -> Result<(), error::Error> {
         let bound = key
             .parse::<u32>()
@@ -33,7 +33,7 @@ where
     struct Visitor;
 
     impl<'de> serde::de::Visitor<'de> for Visitor {
-        type Value = BTreeMap<u32, DateTime<Utc>>;
+        type Value = BTreeMap<u32, Timestamp>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
             formatter.write_str("a map")

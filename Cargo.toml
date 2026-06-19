@@ -81,7 +81,7 @@ testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" 
 testsys-config = { version = "0.1", path = "tools/testsys-config" }
 testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
 
-twoliter = { version = "0.21.0-rc1", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter = { version = "0.21.0", path = "twoliter", artifact = [ "bin:twoliter" ] }
 twoliter-tool-advisory-checker = { version = "0.1", path = "twoliter/src/tool-crates/advisory-checker" }
 twoliter-tool-buildsys = { version = "0.1", path = "twoliter/src/tool-crates/buildsys" }
 twoliter-tool-embedded-bundle = { version = "0.1", path = "twoliter/src/tool-crates/embedded-bundle" }
@@ -117,7 +117,6 @@ bit_field = "0.10"
 bon = "3"
 bounded-integer = "0.5"
 bytes = "1"
-chrono = { version = "0.4", default-features = false }
 clap = "4"
 coldsnap = { version = "0.11", default-features = false }
 crc32fast = "1"
@@ -140,6 +139,7 @@ hex-literal = "1"
 home = "0.5"
 indicatif = "0.18"
 inotify = "0.11"
+jiff = { version = "0.2", features = ["serde"] }
 lazy_static = "1"
 libc = "0.2"
 log = "0.4"
@@ -183,11 +183,11 @@ tokio = "1"
 tokio-stream = "0.1"
 tokio-retry = "0.3"
 toml = "0.9"
-tough = "0.22"
-tough-kms = "0.14"
-tough-ssm = "0.17"
+tough = "0.23"
+tough-kms = "0.15"
+tough-ssm = "0.18"
 tracing = "0.1"
-tuftool = { version = "0.15", artifact = [ "bin:tuftool" ] }
+tuftool = { version = "0.16", artifact = [ "bin:tuftool" ] }
 uds = "0.4"
 unescape = "0.1"
 url = "2"

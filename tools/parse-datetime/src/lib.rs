@@ -1,7 +1,7 @@
 /*!
 # Background
 
-This library parses a `DateTime<Utc>` from a string.
+This library parses a `Timestamp` from a string.
 
 The string can be:
 
@@ -20,8 +20,8 @@ Examples:
 * `"7 days"`
 */
 
-use chrono::{DateTime, Duration, FixedOffset, Utc};
-use snafu::{ensure, OptionExt, ResultExt};
+use jiff::{SignedDuration, Timestamp};
+use snafu::{ensure, ResultExt};
 
 mod error {
     use snafu::Snafu;
@@ -44,6 +44,12 @@ mod error {
 
         #[snafu(display("Integer '{}' is not convertable to a number of {}", integer, unit))]
         DateInt { integer: u64, unit: &'static str },
+
+        #[snafu(display("Failed to parse '{}' as RFC 3339 timestamp: {}", input, source))]
+        DateRfc3339 { input: String, source: jiff::Error },
+
+        #[snafu(display("Failed to add offset to current time: {}", source))]
+        DateAddOffset { source: jiff::Error },
     }
 }
 pub use error::Error;
@@ -51,24 +57,21 @@ type Result<T> = std::result::Result<T, error::Error>;
 
 /// Parses a user-specified datetime, either in full RFC 3339 format, or a shorthand like "in 7
 /// days" that's taken as an offset from the time the function is run.
-pub fn parse_datetime(input: &str) -> Result<DateTime<Utc>> {
+pub fn parse_datetime(input: &str) -> Result<Timestamp> {
     // If the user gave an absolute date in a standard format, accept it.
-    let try_dt: std::result::Result<DateTime<FixedOffset>, chrono::format::ParseError> =
-        DateTime::parse_from_rfc3339(input);
-    if let Ok(dt) = try_dt {
-        let utc = dt.into();
-        return Ok(utc);
+    if let Ok(ts) = input.parse::<Timestamp>() {
+        return Ok(ts);
     }
 
     let offset = parse_offset(input)?;
 
-    let now = Utc::now();
-    let then = now + offset;
+    let now = Timestamp::now();
+    let then = now.checked_add(offset).context(error::DateAddOffsetSnafu)?;
     Ok(then)
 }
 
 /// Parses a user-specified datetime offset in the form of a shorthand like "in 7 days".
-pub fn parse_offset(input: &str) -> Result<Duration> {
+pub fn parse_offset(input: &str) -> Result<SignedDuration> {
     // Otherwise, pull apart a request like "in 5 days" to get an exact datetime.
     let mut parts: Vec<&str> = input.split_whitespace().collect();
     ensure!(
@@ -96,25 +99,11 @@ pub fn parse_offset(input: &str) -> Result<Duration> {
         .parse()
         .context(error::DateArgCountSnafu { input })?;
 
-    let duration = match unit_str {
-        "minute" | "minutes" => {
-            Duration::try_minutes(i64::from(count)).context(error::DateIntSnafu {
-                integer: count,
-                unit: "minutes",
-            })?
-        }
-        "hour" | "hours" => Duration::try_hours(i64::from(count)).context(error::DateIntSnafu {
-            integer: count,
-            unit: "hours",
-        })?,
-        "day" | "days" => Duration::try_days(i64::from(count)).context(error::DateIntSnafu {
-            integer: count,
-            unit: "days",
-        })?,
-        "week" | "weeks" => Duration::try_weeks(i64::from(count)).context(error::DateIntSnafu {
-            integer: count,
-            unit: "weeks",
-        })?,
+    let seconds_per_unit: i64 = match unit_str {
+        "minute" | "minutes" => 60,
+        "hour" | "hours" => 60 * 60,
+        "day" | "days" => 24 * 60 * 60,
+        "week" | "weeks" => 7 * 24 * 60 * 60,
         _ => {
             return error::DateArgInvalidSnafu {
                 input,
@@ -124,7 +113,22 @@ pub fn parse_offset(input: &str) -> Result<Duration> {
         }
     };
 
-    Ok(duration)
+    let unit_name = match unit_str {
+        "minute" | "minutes" => "minutes",
+        "hour" | "hours" => "hours",
+        "day" | "days" => "days",
+        "week" | "weeks" => "weeks",
+        _ => unreachable!(),
+    };
+
+    let total_seconds = i64::from(count)
+        .checked_mul(seconds_per_unit)
+        .ok_or_else(|| error::Error::DateInt {
+            integer: u64::from(count),
+            unit: unit_name,
+        })?;
+
+    Ok(SignedDuration::from_secs(total_seconds))
 }
 
 #[cfg(test)]
@@ -139,17 +143,17 @@ mod tests {
             "in 5000000 hours",
             "in 0 days",
             "in 1 day",
-            "in 5000000 days",
+            "in 1000 days",
             "in 0 weeks",
             "in 1 week",
-            "in 5000000 weeks",
+            "in 100 weeks",
             "0 weeks",
             "1 week",
-            "5000000 weeks",
+            "100 weeks",
         ];
 
         for input in inputs {
-            assert!(parse_datetime(input).is_ok())
+            assert!(parse_datetime(input).is_ok(), "expected '{input}' to parse");
         }
     }
 
@@ -159,6 +163,19 @@ mod tests {
 
         for input in inputs {
             assert!(parse_datetime(input).is_err())
+        }
+    }
+
+    #[test]
+    fn test_offset_overflows_timestamp_range() {
+        // jiff::Timestamp is bounded to year ±9999. Offsets that would push the
+        // resulting timestamp beyond that range must error rather than panic.
+        // (chrono accepted these because DateTime<Utc> extended to ±262,000 years.)
+        for input in &["in 5000000 days", "in 5000000 weeks"] {
+            assert!(
+                matches!(parse_datetime(input), Err(Error::DateAddOffset { .. })),
+                "expected '{input}' to fail with DateAddOffset"
+            );
         }
     }
 }

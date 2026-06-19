@@ -9,7 +9,7 @@ publish = false
 exclude = ["README.md"]
 
 [dependencies]
-chrono = { workspace = true, features = ["clock", "serde", "std"] }
+jiff = { workspace = true }
 parse-datetime.workspace = true
 regex.workspace = true
 semver = { workspace = true, features = ["serde"] }
