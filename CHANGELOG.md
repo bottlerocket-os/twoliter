@@ -9,18 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...HEAD
 
-## [0.21.0-rc1] - 2026-06-17
+## [0.21.0] - 2026-06-19
 
 ### Added
 * Support for vendoring dependencies of rust packages ([#674])
+
+### Changed
+* pubsys/update-metadata: migrate from `chrono` to `jiff` for date/time handling ([#676])
+  * **Behavioral change:** RFC 3339 date strings now require zero-padded month and day (e.g. `2019-08-06T15:00:00Z`, not `2019-8-06T15:00:00Z`). Affects manifest deserialization in `update-metadata` and `--expiration-limit` / `--release-start-time` arguments to `pubsys`.
+  * **Behavioral change:** absolute timestamps and computed expirations are now bounded to the year ±9999 range supported by `jiff::Timestamp`. Offsets that would push past this bound (e.g. `"in 5000000 weeks"`) now return an error instead of being accepted. Production expiration policies (weeks/days) are unaffected.
 
 ### Build
 * Update coldsnap to 0.11 (#[675])
 * Update reqwest to 0.13 (#[675])
 * Update cargo dependencies (#[675])
+* Update `tough` to 0.23, `tough-kms` to 0.15, `tough-ssm` to 0.18, `tuftool` to 0.16 ([#676])
 
 [#674]: https://github.com/bottlerocket-os/twoliter/pull/674
 [#675]: https://github.com/bottlerocket-os/twoliter/pull/675
+[#676]: https://github.com/bottlerocket-os/twoliter/pull/676
 
 [0.21.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...v0.21.0-rc1
 
