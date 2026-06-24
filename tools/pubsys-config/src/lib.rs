@@ -138,11 +138,61 @@ pub struct AwsConfig {
     pub s3: Option<HashMap<String, S3Config>>,
 }
 
-/// AWS region-specific configuration
+/// A region's role configuration: either a single role or a list of roles, but not both. These
+/// are mutually exclusive by construction (a flattened, untagged enum), so an `Infra.toml` that
+/// specifies both `role` and `roles` for the same region fails to parse.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub enum RoleConfig {
+    /// A single role to assume for this region. Assumed after the "global" `aws.role`, if that is
+    /// also specified. Serializes to/from the `role` key in Infra.toml.
+    Role(String),
+
+    /// Multiple roles to assume for this region, one per target account. Each role is assumed
+    /// independently (after the "global" `aws.role`), producing a separate set of AMIs / SSM
+    /// parameters per account. Serializes to/from the `roles` key in Infra.toml.
+    Roles(Vec<String>),
+}
+
+/// AWS region-specific configuration
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct AwsRegionConfig {
-    pub role: Option<String>,
+    #[serde(flatten)]
+    pub role_config: Option<RoleConfig>,
+}
+
+impl AwsRegionConfig {
+    /// Returns the roles configured for this region as an ordered, de-duplicated list, or `None`
+    /// if no roles are configured (meaning "use the base/global credentials without assuming a
+    /// region-specific role").
+    pub fn all_roles(&self) -> Option<Vec<String>> {
+        let roles: Vec<&String> = match &self.role_config {
+            None => return None,
+            Some(RoleConfig::Role(role)) => vec![role],
+            Some(RoleConfig::Roles(roles)) => roles.iter().collect(),
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        Some(
+            roles
+                .into_iter()
+                .filter(|role| seen.insert((*role).clone()))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Returns the configured role whose ARN targets the given account, by matching the account ID
+    /// embedded in a role ARN (`arn:aws:iam::<account>:role/...`). Returns `None` if no configured
+    /// role matches; for example when the AMI was published using the base/global credentials.
+    pub fn role_for_account(&self, account_id: &str) -> Option<String> {
+        let needle = format!(":{account_id}:");
+        self.all_roles()
+            .into_iter()
+            .flatten()
+            .find(|role| role.contains(&needle))
+    }
 }
 
 /// Location of signing keys
@@ -302,4 +352,130 @@ fn repo_expiration_deserialization_test() {
         .join("repo-expiration")
         .join("2w-2w-1w.toml");
     let _ = RepoExpirationPolicy::from_path(path).unwrap();
+}
+
+#[cfg(test)]
+mod aws_region_config_test {
+    use super::{AwsRegionConfig, RoleConfig};
+
+    fn arn(account: &str) -> String {
+        format!("arn:aws:iam::{account}:role/BottlerocketSourceRole")
+    }
+
+    #[test]
+    fn all_roles_empty_returns_none() {
+        let config = AwsRegionConfig { role_config: None };
+        assert_eq!(config.all_roles(), None);
+    }
+
+    #[test]
+    fn all_roles_single_role() {
+        let config = AwsRegionConfig {
+            role_config: Some(RoleConfig::Role(arn("111111111111"))),
+        };
+        assert_eq!(config.all_roles(), Some(vec![arn("111111111111")]));
+    }
+
+    #[test]
+    fn all_roles_lists_roles_in_order() {
+        let config = AwsRegionConfig {
+            role_config: Some(RoleConfig::Roles(vec![
+                arn("111111111111"),
+                arn("222222222222"),
+                arn("333333333333"),
+            ])),
+        };
+        assert_eq!(
+            config.all_roles(),
+            Some(vec![
+                arn("111111111111"),
+                arn("222222222222"),
+                arn("333333333333"),
+            ])
+        );
+    }
+
+    #[test]
+    fn all_roles_dedups_preserving_order() {
+        let config = AwsRegionConfig {
+            role_config: Some(RoleConfig::Roles(vec![
+                arn("111111111111"),
+                arn("111111111111"),
+                arn("222222222222"),
+            ])),
+        };
+        assert_eq!(
+            config.all_roles(),
+            Some(vec![arn("111111111111"), arn("222222222222")])
+        );
+    }
+
+    #[test]
+    fn role_for_account_matches_embedded_account_id() {
+        let config = AwsRegionConfig {
+            role_config: Some(RoleConfig::Roles(vec![
+                arn("111111111111"),
+                arn("222222222222"),
+            ])),
+        };
+        assert_eq!(
+            config.role_for_account("222222222222"),
+            Some(arn("222222222222"))
+        );
+        assert_eq!(
+            config.role_for_account("111111111111"),
+            Some(arn("111111111111"))
+        );
+        assert_eq!(config.role_for_account("999999999999"), None);
+    }
+
+    #[test]
+    fn region_config_deserializes_single_role() {
+        let toml_str = r#"role = "arn:aws:iam::111111111111:role/BottlerocketSourceRole""#;
+        let config: AwsRegionConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.role_config,
+            Some(RoleConfig::Role(arn("111111111111")))
+        );
+        assert_eq!(config.all_roles(), Some(vec![arn("111111111111")]));
+    }
+
+    #[test]
+    fn region_config_deserializes_roles_list() {
+        let toml_str = r#"
+            roles = [
+                "arn:aws:iam::222222222222:role/BottlerocketSourceRole",
+                "arn:aws:iam::333333333333:role/BottlerocketSourceRole",
+            ]
+        "#;
+        let config: AwsRegionConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.role_config,
+            Some(RoleConfig::Roles(vec![
+                arn("222222222222"),
+                arn("333333333333")
+            ]))
+        );
+        assert_eq!(
+            config.all_roles(),
+            Some(vec![arn("222222222222"), arn("333333333333")])
+        );
+    }
+
+    #[test]
+    fn region_config_empty_is_none() {
+        let config: AwsRegionConfig = toml::from_str("").unwrap();
+        assert_eq!(config.role_config, None);
+        assert_eq!(config.all_roles(), None);
+    }
+
+    #[test]
+    fn region_config_role_and_roles_are_mutually_exclusive() {
+        // Specifying both `role` and `roles` for the same region must fail to parse.
+        let toml_str = r#"
+            role = "arn:aws:iam::111111111111:role/BottlerocketSourceRole"
+            roles = ["arn:aws:iam::222222222222:role/BottlerocketSourceRole"]
+        "#;
+        assert!(toml::from_str::<AwsRegionConfig>(toml_str).is_err());
+    }
 }

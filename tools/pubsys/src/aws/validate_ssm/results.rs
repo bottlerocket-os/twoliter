@@ -1,5 +1,6 @@
 //! The results module owns the reporting of SSM validation results.
 
+use crate::aws::ami::RegionAccount;
 use crate::aws::validate_ssm::Result;
 use aws_sdk_ssm::config::Region;
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,9 @@ pub struct SsmValidationResult {
     #[serde(serialize_with = "serialize_region")]
     pub(crate) region: Region,
 
+    /// The account the parameter resides in
+    pub(crate) account_id: String,
+
     /// The validation status of the parameter
     pub(crate) status: SsmValidationResultStatus,
 }
@@ -63,6 +67,7 @@ impl SsmValidationResult {
         expected_value: Option<String>,
         actual_value: Result<Option<String>>,
         region: Region,
+        account_id: String,
     ) -> SsmValidationResult {
         // Determine the validation status based on equality, presence, and absence of expected and
         // actual parameter values
@@ -80,6 +85,7 @@ impl SsmValidationResult {
             expected_value,
             actual_value: actual_value.unwrap_or_default(),
             region,
+            account_id,
             status,
         }
     }
@@ -119,7 +125,7 @@ impl From<&HashSet<SsmValidationResult>> for SsmValidationRegionSummary {
 /// Represents all SSM validation results
 #[derive(Debug)]
 pub struct SsmValidationResults {
-    pub(crate) results: HashMap<Region, HashSet<SsmValidationResult>>,
+    pub(crate) results: HashMap<RegionAccount, HashSet<SsmValidationResult>>,
 }
 
 impl Default for SsmValidationResults {
@@ -130,15 +136,16 @@ impl Default for SsmValidationResults {
 
 impl Display for SsmValidationResults {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Create a summary for each region, counting the number of parameters per status
-        let region_validations: HashMap<Region, SsmValidationRegionSummary> =
+        // Create a summary for each (region, account), counting the number of parameters per
+        // status
+        let validations: HashMap<RegionAccount, SsmValidationRegionSummary> =
             self.get_results_summary();
 
         // Represent the HashMap of summaries as a `Table`
         let table = Table::new(
-            region_validations
+            validations
                 .iter()
-                .map(|(region, results)| (region.to_string(), results))
+                .map(|(key, results)| (format!("{} ({})", key.region, key.account_id), results))
                 .collect::<Vec<(String, &SsmValidationRegionSummary)>>(),
         )
         .to_string();
@@ -147,7 +154,7 @@ impl Display for SsmValidationResults {
 }
 
 impl SsmValidationResults {
-    pub fn new(results: HashMap<Region, HashSet<SsmValidationResult>>) -> Self {
+    pub fn new(results: HashMap<RegionAccount, HashSet<SsmValidationResult>>) -> Self {
         SsmValidationResults { results }
     }
 
@@ -178,14 +185,11 @@ impl SsmValidationResults {
         results
     }
 
-    fn get_results_summary(&self) -> HashMap<Region, SsmValidationRegionSummary> {
+    fn get_results_summary(&self) -> HashMap<RegionAccount, SsmValidationRegionSummary> {
         self.results
             .iter()
-            .map(|(region, region_result)| {
-                (
-                    region.clone(),
-                    SsmValidationRegionSummary::from(region_result),
-                )
+            .map(|(key, region_result)| {
+                (key.clone(), SsmValidationRegionSummary::from(region_result))
             })
             .collect()
     }
@@ -194,7 +198,7 @@ impl SsmValidationResults {
         serde_json::json!(self
             .get_results_summary()
             .into_iter()
-            .map(|(region, results)| (region.to_string(), results))
+            .map(|(key, results)| (format!("{} ({})", key.region, key.account_id), results))
             .collect::<HashMap<String, SsmValidationRegionSummary>>())
     }
 }
@@ -203,6 +207,7 @@ impl SsmValidationResults {
 mod test {
     use std::collections::{HashMap, HashSet};
 
+    use crate::aws::ami::RegionAccount;
     use crate::aws::validate_ssm::results::{
         SsmValidationResult, SsmValidationResultStatus, SsmValidationResults,
     };
@@ -214,8 +219,20 @@ mod test {
     #[test]
     fn get_results_for_status_empty() {
         let results = SsmValidationResults::new(HashMap::from([
-            (Region::new("us-west-2"), HashSet::from([])),
-            (Region::new("us-east-1"), HashSet::from([])),
+            (
+                RegionAccount {
+                    region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
+                },
+                HashSet::from([]),
+            ),
+            (
+                RegionAccount {
+                    region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
+                },
+                HashSet::from([]),
+            ),
         ]));
         let results_filtered = results.get_results_for_status(&[
             SsmValidationResultStatus::Correct,
@@ -232,60 +249,74 @@ mod test {
     fn get_results_for_status_correct() {
         let results = SsmValidationResults::new(HashMap::from([
             (
-                Region::new("us-west-2"),
+                RegionAccount {
+                    region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test3-parameter-name".to_string(),
                         Some("test3-parameter-value".to_string()),
                         Ok(None),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
             (
-                Region::new("us-east-1"),
+                RegionAccount {
+                    region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test3-parameter-name".to_string(),
                         Some("test3-parameter-value".to_string()),
                         Ok(None),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
@@ -301,12 +332,14 @@ mod test {
                     Some("test1-parameter-value".to_string()),
                     Ok(Some("test1-parameter-value".to_string())),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test1-parameter-name".to_string(),
                     Some("test1-parameter-value".to_string()),
                     Ok(Some("test1-parameter-value".to_string())),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 )
             ])
         );
@@ -317,60 +350,74 @@ mod test {
     fn get_results_for_status_correct_incorrect() {
         let results = SsmValidationResults::new(HashMap::from([
             (
-                Region::new("us-west-2"),
+                RegionAccount {
+                    region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test3-parameter-name".to_string(),
                         Some("test3-parameter-value".to_string()),
                         Ok(None),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
             (
-                Region::new("us-east-1"),
+                RegionAccount {
+                    region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test3-parameter-name".to_string(),
                         Some("test3-parameter-value".to_string()),
                         Ok(None),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
@@ -388,24 +435,28 @@ mod test {
                     Some("test1-parameter-value".to_string()),
                     Ok(Some("test1-parameter-value".to_string())),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test1-parameter-name".to_string(),
                     Some("test1-parameter-value".to_string()),
                     Ok(Some("test1-parameter-value".to_string())),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test2-parameter-name".to_string(),
                     Some("test2-parameter-value".to_string()),
                     Ok(Some("test2-parameter-value-wrong".to_string())),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test2-parameter-name".to_string(),
                     Some("test2-parameter-value".to_string()),
                     Ok(Some("test2-parameter-value-wrong".to_string())),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 )
             ])
         );
@@ -416,65 +467,82 @@ mod test {
     fn get_results_for_status_all() {
         let results = SsmValidationResults::new(HashMap::from([
             (
-                Region::new("us-west-2"),
+                RegionAccount {
+                    region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test3-parameter-name".to_string(),
                         Some("test3-parameter-value".to_string()),
                         Ok(None),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
             (
-                Region::new("us-east-1"),
+                RegionAccount {
+                    region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test3-parameter-name".to_string(),
                         Some("test3-parameter-value".to_string()),
                         Ok(None),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
             (
-                Region::new("us-east-2"),
+                RegionAccount {
+                    region: Region::new("us-east-2"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([SsmValidationResult::new(
                     "test3-parameter-name".to_string(),
                     Some("test3-parameter-value".to_string()),
@@ -482,6 +550,7 @@ mod test {
                         region: "us-east-2".to_string(),
                     }),
                     Region::new("us-east-2"),
+                    "1234567890".to_string(),
                 )]),
             ),
         ]));
@@ -501,48 +570,56 @@ mod test {
                     Some("test1-parameter-value".to_string()),
                     Ok(Some("test1-parameter-value".to_string())),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test1-parameter-name".to_string(),
                     Some("test1-parameter-value".to_string()),
                     Ok(Some("test1-parameter-value".to_string())),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test2-parameter-name".to_string(),
                     Some("test2-parameter-value".to_string()),
                     Ok(Some("test2-parameter-value-wrong".to_string())),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test2-parameter-name".to_string(),
                     Some("test2-parameter-value".to_string()),
                     Ok(Some("test2-parameter-value-wrong".to_string())),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test3-parameter-name".to_string(),
                     Some("test3-parameter-value".to_string()),
                     Ok(None),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test4-parameter-name".to_string(),
                     None,
                     Ok(Some("test4-parameter-value".to_string())),
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test3-parameter-name".to_string(),
                     Some("test3-parameter-value".to_string()),
                     Ok(None),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test4-parameter-name".to_string(),
                     None,
                     Ok(Some("test4-parameter-value".to_string())),
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                 ),
                 &SsmValidationResult::new(
                     "test3-parameter-name".to_string(),
@@ -551,6 +628,7 @@ mod test {
                         region: "us-east-2".to_string()
                     }),
                     Region::new("us-east-2"),
+                    "1234567890".to_string(),
                 ),
             ])
         );
@@ -561,48 +639,60 @@ mod test {
     fn get_results_for_status_missing_none() {
         let results = SsmValidationResults::new(HashMap::from([
             (
-                Region::new("us-west-2"),
+                RegionAccount {
+                    region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-west-2"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),
             (
-                Region::new("us-east-1"),
+                RegionAccount {
+                    region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
+                },
                 HashSet::from([
                     SsmValidationResult::new(
                         "test1-parameter-name".to_string(),
                         Some("test1-parameter-value".to_string()),
                         Ok(Some("test1-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test2-parameter-name".to_string(),
                         Some("test2-parameter-value".to_string()),
                         Ok(Some("test2-parameter-value-wrong".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                     SsmValidationResult::new(
                         "test4-parameter-name".to_string(),
                         None,
                         Ok(Some("test4-parameter-value".to_string())),
                         Region::new("us-east-1"),
+                        "1234567890".to_string(),
                     ),
                 ]),
             ),

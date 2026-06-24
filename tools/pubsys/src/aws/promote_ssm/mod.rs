@@ -1,6 +1,7 @@
 //! The promote_ssm module owns the 'promote-ssm' subcommand and controls the process of copying
 //! SSM parameters from one version to another
 
+use crate::aws::ami::{region_account_id, RegionAccount};
 use crate::aws::client::build_client_config;
 use crate::aws::ssm::template::RenderedParametersMap;
 use crate::aws::ssm::{key_difference, ssm, template, BuildContext, SsmKey};
@@ -93,11 +94,29 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     );
     let base_region = &regions[0];
 
+    // Resolve the single account each region targets (from its role ARN, or STS for a region with
+    // no role), so SSM keys and clients can be scoped per (region, account).
+    let mut region_accounts = HashMap::with_capacity(regions.len());
+    for region in &regions {
+        let account_id = region_account_id(region, &aws, base_region).await.context(
+            error::ResolveAccountSnafu {
+                region: region.as_ref().to_string(),
+            },
+        )?;
+        region_accounts.insert(region.clone(), account_id);
+    }
+
     let mut ssm_clients = HashMap::with_capacity(regions.len());
     for region in &regions {
         let client_config = build_client_config(region, base_region, &aws).await;
         let ssm_client = SsmClient::new(&client_config);
-        ssm_clients.insert(region.clone(), ssm_client);
+        ssm_clients.insert(
+            RegionAccount {
+                region: region.clone(),
+                account_id: region_accounts[region].clone(),
+            },
+            ssm_client,
+        );
     }
 
     // Template setup   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
@@ -149,17 +168,19 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     let source_keys: Vec<SsmKey> = regions
         .iter()
         .flat_map(|region| {
+            let account_id = region_accounts[region].clone();
             source_parameter_map
                 .values()
-                .map(move |name| SsmKey::new(region.clone(), name.clone()))
+                .map(move |name| SsmKey::new(region.clone(), account_id.clone(), name.clone()))
         })
         .collect();
     let target_keys: Vec<SsmKey> = regions
         .iter()
         .flat_map(|region| {
+            let account_id = region_accounts[region].clone();
             target_parameter_map
                 .values()
-                .map(move |name| SsmKey::new(region.clone(), name.clone()))
+                .map(move |name| SsmKey::new(region.clone(), account_id.clone(), name.clone()))
         })
         .collect();
 
@@ -190,12 +211,16 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
         .map(|(k, v)| (v, &target_parameter_map[k]))
         .collect();
 
-    // Create full set of target parameters
+    // Create full set of target parameters, preserving each key's region and account.
     let full_target_parameters = current_source_parameters
         .into_iter()
         .map(|(key, value)| {
             (
-                SsmKey::new(key.region, source_target_map[&key.name].to_string()),
+                SsmKey::new(
+                    key.region,
+                    key.account_id,
+                    source_target_map[&key.name].to_string(),
+                ),
                 value.clone(),
             )
         })
@@ -214,7 +239,13 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
     // write the newly promoted parameters to `ssm_parameter_output` along with the original
     // parameters
     if let Some(ssm_parameter_output) = &promote_args.ssm_parameter_output {
-        append_rendered_parameters(ssm_parameter_output, &full_target_parameters).await?;
+        append_rendered_parameters(
+            ssm_parameter_output,
+            &full_target_parameters,
+            &aws,
+            base_region,
+        )
+        .await?;
     }
 
     // Exit early if `--dry-run` is enabled
@@ -244,9 +275,11 @@ pub(crate) async fn run(args: &Args, promote_args: &PromoteArgs) -> Result<()> {
 async fn append_rendered_parameters(
     ssm_parameters_output: &PathBuf,
     set_parameters: &HashMap<SsmKey, String>,
+    aws: &pubsys_config::AwsConfig,
+    base_region: &Region,
 ) -> Result<()> {
     // If the file doesn't exist, assume that there are no existing parameters
-    let parsed_parameters = parse_parameters(&ssm_parameters_output.to_owned())
+    let parsed_parameters = parse_parameters(&ssm_parameters_output.to_owned(), aws, base_region)
         .await
         .or_else({
             |e| match e {
@@ -333,6 +366,12 @@ mod error {
         #[snafu(display("Failed to render templates: {}", source))]
         RenderTemplates { source: template::Error },
 
+        #[snafu(display("Failed to resolve the account for region {}: {}", region, source))]
+        ResolveAccount {
+            region: String,
+            source: crate::aws::ami::AmiInputError,
+        },
+
         #[snafu(display("Failed to set SSM parameters: {}", source))]
         SetSsm { source: ssm::Error },
 
@@ -372,20 +411,33 @@ mod test {
     fn combined_parameters() {
         let existing_parameters = HashMap::from([
             (
-                SsmKey::new(Region::new("us-west-2"), "test1-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-west-2"),
+                    "1234567890".to_string(),
+                    "test1-parameter-name".to_string(),
+                ),
                 "test1-parameter-value".to_string(),
             ),
             (
-                SsmKey::new(Region::new("us-west-2"), "test2-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-west-2"),
+                    "1234567890".to_string(),
+                    "test2-parameter-name".to_string(),
+                ),
                 "test2-parameter-value".to_string(),
             ),
             (
-                SsmKey::new(Region::new("us-east-1"), "test3-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-east-1"),
+                    "1234567890".to_string(),
+                    "test3-parameter-name".to_string(),
+                ),
                 "test3-parameter-value".to_string(),
             ),
             (
                 SsmKey::new(
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                     "test4-unpromoted-parameter-name".to_string(),
                 ),
                 "test4-unpromoted-parameter-value".to_string(),
@@ -395,6 +447,7 @@ mod test {
             (
                 SsmKey::new(
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                     "test1-parameter-name-promoted".to_string(),
                 ),
                 "test1-parameter-value".to_string(),
@@ -402,6 +455,7 @@ mod test {
             (
                 SsmKey::new(
                     Region::new("us-west-2"),
+                    "1234567890".to_string(),
                     "test2-parameter-name-promoted".to_string(),
                 ),
                 "test2-parameter-value".to_string(),
@@ -409,6 +463,7 @@ mod test {
             (
                 SsmKey::new(
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                     "test3-parameter-name-promoted".to_string(),
                 ),
                 "test3-parameter-value".to_string(),
@@ -420,16 +475,25 @@ mod test {
                 Region::new("us-west-2"),
                 HashMap::from([
                     (
-                        SsmKey::new(Region::new("us-west-2"), "test1-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-west-2"),
+                            "1234567890".to_string(),
+                            "test1-parameter-name".to_string(),
+                        ),
                         "test1-parameter-value".to_string(),
                     ),
                     (
-                        SsmKey::new(Region::new("us-west-2"), "test2-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-west-2"),
+                            "1234567890".to_string(),
+                            "test2-parameter-name".to_string(),
+                        ),
                         "test2-parameter-value".to_string(),
                     ),
                     (
                         SsmKey::new(
                             Region::new("us-west-2"),
+                            "1234567890".to_string(),
                             "test1-parameter-name-promoted".to_string(),
                         ),
                         "test1-parameter-value".to_string(),
@@ -437,6 +501,7 @@ mod test {
                     (
                         SsmKey::new(
                             Region::new("us-west-2"),
+                            "1234567890".to_string(),
                             "test2-parameter-name-promoted".to_string(),
                         ),
                         "test2-parameter-value".to_string(),
@@ -447,12 +512,17 @@ mod test {
                 Region::new("us-east-1"),
                 HashMap::from([
                     (
-                        SsmKey::new(Region::new("us-east-1"), "test3-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-east-1"),
+                            "1234567890".to_string(),
+                            "test3-parameter-name".to_string(),
+                        ),
                         "test3-parameter-value".to_string(),
                     ),
                     (
                         SsmKey::new(
                             Region::new("us-east-1"),
+                            "1234567890".to_string(),
                             "test3-parameter-name-promoted".to_string(),
                         ),
                         "test3-parameter-value".to_string(),
@@ -460,6 +530,7 @@ mod test {
                     (
                         SsmKey::new(
                             Region::new("us-east-1"),
+                            "1234567890".to_string(),
                             "test4-unpromoted-parameter-name".to_string(),
                         ),
                         "test4-unpromoted-parameter-value".to_string(),
@@ -474,30 +545,51 @@ mod test {
     fn combined_parameters_overwrite() {
         let existing_parameters = HashMap::from([
             (
-                SsmKey::new(Region::new("us-west-2"), "test1-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-west-2"),
+                    "1234567890".to_string(),
+                    "test1-parameter-name".to_string(),
+                ),
                 "test1-parameter-value".to_string(),
             ),
             (
-                SsmKey::new(Region::new("us-west-2"), "test2-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-west-2"),
+                    "1234567890".to_string(),
+                    "test2-parameter-name".to_string(),
+                ),
                 "test2-parameter-value".to_string(),
             ),
             (
-                SsmKey::new(Region::new("us-east-1"), "test3-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-east-1"),
+                    "1234567890".to_string(),
+                    "test3-parameter-name".to_string(),
+                ),
                 "test3-parameter-value".to_string(),
             ),
         ]);
         let set_parameters = HashMap::from([
             (
-                SsmKey::new(Region::new("us-west-2"), "test1-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-west-2"),
+                    "1234567890".to_string(),
+                    "test1-parameter-name".to_string(),
+                ),
                 "test1-parameter-value-new".to_string(),
             ),
             (
-                SsmKey::new(Region::new("us-west-2"), "test2-parameter-name".to_string()),
+                SsmKey::new(
+                    Region::new("us-west-2"),
+                    "1234567890".to_string(),
+                    "test2-parameter-name".to_string(),
+                ),
                 "test2-parameter-value-new".to_string(),
             ),
             (
                 SsmKey::new(
                     Region::new("us-east-1"),
+                    "1234567890".to_string(),
                     "test3-parameter-name-promoted".to_string(),
                 ),
                 "test3-parameter-value".to_string(),
@@ -509,11 +601,19 @@ mod test {
                 Region::new("us-west-2"),
                 HashMap::from([
                     (
-                        SsmKey::new(Region::new("us-west-2"), "test1-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-west-2"),
+                            "1234567890".to_string(),
+                            "test1-parameter-name".to_string(),
+                        ),
                         "test1-parameter-value-new".to_string(),
                     ),
                     (
-                        SsmKey::new(Region::new("us-west-2"), "test2-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-west-2"),
+                            "1234567890".to_string(),
+                            "test2-parameter-name".to_string(),
+                        ),
                         "test2-parameter-value-new".to_string(),
                     ),
                 ]),
@@ -522,12 +622,17 @@ mod test {
                 Region::new("us-east-1"),
                 HashMap::from([
                     (
-                        SsmKey::new(Region::new("us-east-1"), "test3-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-east-1"),
+                            "1234567890".to_string(),
+                            "test3-parameter-name".to_string(),
+                        ),
                         "test3-parameter-value".to_string(),
                     ),
                     (
                         SsmKey::new(
                             Region::new("us-east-1"),
+                            "1234567890".to_string(),
                             "test3-parameter-name-promoted".to_string(),
                         ),
                         "test3-parameter-value".to_string(),

@@ -6,11 +6,13 @@ pub mod results;
 use self::results::{SsmValidationResult, SsmValidationResultStatus, SsmValidationResults};
 use super::ssm::ssm::get_parameters_by_prefix;
 use super::ssm::{SsmKey, SsmParameters};
+use crate::aws::ami::{region_account_id, RegionAccount};
 use crate::aws::client::build_client_config;
 use crate::Args;
 use aws_sdk_ssm::{config::Region, Client as SsmClient};
 use clap::Parser;
 use log::{error, info, trace};
+use pubsys_config::AwsConfig as PubsysAwsConfig;
 use pubsys_config::InfraConfig;
 use snafu::ResultExt;
 use std::collections::{HashMap, HashSet};
@@ -61,55 +63,91 @@ pub async fn validate(
 
     let ssm_prefix = aws.ssm_prefix.as_deref().unwrap_or("");
 
+    // Create a HashMap of SsmClients, one for each (region, account) where validation should
+    // happen.  The account is resolved per region (from its role ARN, or STS).
+    let base_region = Region::new(aws.regions[0].clone());
+
     // Parse the file holding expected parameters
     info!("Parsing expected parameters file");
-    let expected_parameters = parse_parameters(&validate_ssm_args.expected_parameters_path).await?;
+    let expected_parameters = parse_parameters(
+        &validate_ssm_args.expected_parameters_path,
+        &aws,
+        &base_region,
+    )
+    .await?;
 
     info!("Parsed expected parameters file");
 
-    // Create a HashMap of SsmClients, one for each region where validation should happen
-    let base_region = Region::new(aws.regions[0].clone());
     let mut ssm_clients = HashMap::with_capacity(expected_parameters.len());
-
-    for region in expected_parameters.keys() {
+    for (region, region_params) in &expected_parameters {
+        // Every SsmKey in a region carries the same account; grab it from any entry.
+        let account_id = match region_params.keys().next() {
+            Some(key) => key.account_id.clone(),
+            None => region_account_id(region, &aws, &base_region)
+                .await
+                .context(error::ResolveAccountSnafu {
+                    region: region.as_ref().to_string(),
+                })?,
+        };
         let client_config = build_client_config(region, &base_region, &aws).await;
         let ssm_client = SsmClient::new(&client_config);
-        ssm_clients.insert(region.clone(), ssm_client);
+        ssm_clients.insert(
+            RegionAccount {
+                region: region.clone(),
+                account_id,
+            },
+            ssm_client,
+        );
     }
 
-    // Retrieve the SSM parameters using the SsmClients
+    // Retrieve the SSM parameters using the SsmClients, keyed by (region, account) so that
+    // multiple accounts in the same region don't clobber each other's results.
     info!("Retrieving SSM parameters");
     let parameters = get_parameters_by_prefix(&ssm_clients, ssm_prefix)
         .await
         .into_iter()
-        .map(|(region, result)| {
+        .map(|(key, result)| {
+            let key = key.clone();
             (
-                region,
+                key.clone(),
                 result.map_err(|e| {
-                    error!("Failed to retrieve images in region {region}: {e}");
+                    error!(
+                        "Failed to retrieve images in region {} ({}): {e}",
+                        key.region, key.account_id
+                    );
                     error::Error::UnreachableRegion {
-                        region: region.to_string(),
+                        region: key.region.to_string(),
                     }
                 }),
             )
         })
-        .collect::<HashMap<&Region, Result<_>>>();
+        .collect::<HashMap<RegionAccount, Result<_>>>();
 
-    // Validate the retrieved SSM parameters per region
-    info!("Validating SSM parameters");
-    let results: HashMap<Region, HashSet<SsmValidationResult>> = parameters
+    // Re-key the expected parameters by (region, account) so we can line them up with what we
+    // retrieved.  Every SsmKey in a region carries the same account, so grab it from any entry.
+    let expected_by_key: HashMap<RegionAccount, HashMap<SsmKey, String>> = expected_parameters
         .into_iter()
-        .map(|(region, region_result)| {
-            (
-                region.clone(),
-                validate_parameters_in_region(
-                    expected_parameters.get(region).unwrap_or(&HashMap::new()),
-                    &region_result,
-                    validate_ssm_args.check_unexpected,
-                ),
-            )
+        .filter_map(|(region, params)| {
+            let account_id = params.keys().next()?.account_id.clone();
+            Some((region, account_id, params))
         })
-        .collect::<HashMap<Region, HashSet<SsmValidationResult>>>();
+        .map(|(region, account_id, params)| (RegionAccount { region, account_id }, params))
+        .collect();
+
+    // Validate the retrieved SSM parameters per (region, account)
+    info!("Validating SSM parameters");
+    let results: HashMap<RegionAccount, HashSet<SsmValidationResult>> = parameters
+        .into_iter()
+        .map(|(key, region_result)| {
+            let expected = expected_by_key.get(&key).cloned().unwrap_or_default();
+            let region_results = validate_parameters_in_region(
+                &expected,
+                &region_result,
+                validate_ssm_args.check_unexpected,
+            );
+            (key, region_results)
+        })
+        .collect::<HashMap<RegionAccount, HashSet<SsmValidationResult>>>();
 
     let validation_results = SsmValidationResults::new(results);
 
@@ -158,6 +196,7 @@ pub(crate) fn validate_parameters_in_region(
                     Some(ssm_value.clone()),
                     Ok(actual_parameters.get(ssm_key).map(|v| v.to_owned())),
                     ssm_key.region.clone(),
+                    ssm_key.account_id.clone(),
                 ));
                 actual_parameters.remove(ssm_key);
             }
@@ -171,6 +210,7 @@ pub(crate) fn validate_parameters_in_region(
                         None,
                         Ok(Some(ssm_value)),
                         ssm_key.region.clone(),
+                        ssm_key.account_id.clone(),
                     ));
                 }
             }
@@ -186,6 +226,7 @@ pub(crate) fn validate_parameters_in_region(
                         region: ssm_key.region.to_string(),
                     }),
                     ssm_key.region.clone(),
+                    ssm_key.account_id.clone(),
                 )
             })
             .collect(),
@@ -201,6 +242,8 @@ type ParameterValue = String;
 /// value as `String`.
 pub(crate) async fn parse_parameters(
     expected_parameters_file: &PathBuf,
+    aws: &PubsysAwsConfig,
+    base_region: &Region,
 ) -> Result<HashMap<Region, HashMap<SsmKey, String>>> {
     let file_bytes = fs::read(expected_parameters_file.clone()).await.context(
         error::ReadExpectedParameterFileSnafu {
@@ -212,25 +255,27 @@ pub(crate) async fn parse_parameters(
     let expected_parameters: HashMap<RegionName, HashMap<ParameterName, ParameterValue>> =
         serde_json::from_slice(&file_bytes).context(error::ParseExpectedParameterFileSnafu)?;
 
-    // Iterate over the parsed HashMap, converting the nested HashMap into a HashMap of Region
-    // mapped to a HashMap of SsmKey, String
-    let parameter_map = expected_parameters
-        .into_iter()
-        .map(|(region, parameters)| {
-            (
-                Region::new(region.clone()),
-                parameters
-                    .into_iter()
-                    .map(|(parameter_name, parameter_value)| {
-                        (
-                            SsmKey::new(Region::new(region.clone()), parameter_name),
-                            parameter_value,
-                        )
-                    })
-                    .collect::<HashMap<SsmKey, String>>(),
-            )
-        })
-        .collect();
+    // The expected-parameters file has no account dimension, so resolve the single account each
+    // region targets (from its role ARN, or STS) to key the SsmKeys.
+    let mut parameter_map = HashMap::with_capacity(expected_parameters.len());
+    for (region_name, parameters) in expected_parameters {
+        let region = Region::new(region_name.clone());
+        let account_id = region_account_id(&region, aws, base_region).await.context(
+            error::ResolveAccountSnafu {
+                region: region_name.clone(),
+            },
+        )?;
+        let region_params = parameters
+            .into_iter()
+            .map(|(parameter_name, parameter_value)| {
+                (
+                    SsmKey::new(region.clone(), account_id.clone(), parameter_name),
+                    parameter_value,
+                )
+            })
+            .collect::<HashMap<SsmKey, String>>();
+        parameter_map.insert(region, region_params);
+    }
 
     Ok(parameter_map)
 }
@@ -268,6 +313,12 @@ pub(crate) mod error {
         ReadExpectedParameterFile {
             source: std::io::Error,
             path: PathBuf,
+        },
+
+        #[snafu(display("Failed to resolve the account for region {}: {}", region, source))]
+        ResolveAccount {
+            region: String,
+            source: crate::aws::ami::AmiInputError,
         },
 
         #[snafu(display("Failed to serialize validation results to json: {}", source))]
@@ -308,6 +359,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -315,6 +367,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -322,6 +375,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -331,6 +385,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -338,6 +393,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -345,6 +401,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -356,18 +413,21 @@ mod test {
                 Some("test3-parameter-value".to_string()),
                 Ok(Some("test3-parameter-value".to_string())),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
                 Some("test1-parameter-value".to_string()),
                 Ok(Some("test1-parameter-value".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
                 Some("test2-parameter-value".to_string()),
                 Ok(Some("test2-parameter-value".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
         ]);
         let results =
@@ -383,6 +443,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -390,6 +451,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -397,6 +459,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -406,6 +469,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value-wrong".to_string(),
@@ -413,6 +477,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value-wrong".to_string(),
@@ -420,6 +485,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value-wrong".to_string(),
@@ -431,18 +497,21 @@ mod test {
                 Some("test3-parameter-value".to_string()),
                 Ok(Some("test3-parameter-value-wrong".to_string())),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
                 Some("test1-parameter-value".to_string()),
                 Ok(Some("test1-parameter-value-wrong".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
                 Some("test2-parameter-value".to_string()),
                 Ok(Some("test2-parameter-value-wrong".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
         ]);
         let results =
@@ -458,6 +527,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -465,6 +535,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -472,6 +543,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -484,18 +556,21 @@ mod test {
                 Some("test3-parameter-value".to_string()),
                 Ok(None),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
                 Some("test1-parameter-value".to_string()),
                 Ok(None),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
                 Some("test2-parameter-value".to_string()),
                 Ok(None),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
         ]);
         let results =
@@ -512,6 +587,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -519,6 +595,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -526,6 +603,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -537,18 +615,21 @@ mod test {
                 None,
                 Ok(Some("test3-parameter-value".to_string())),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
                 None,
                 Ok(Some("test1-parameter-value".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
                 None,
                 Ok(Some("test2-parameter-value".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
         ]);
         let results =
@@ -565,6 +646,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -572,6 +654,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -579,6 +662,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -588,6 +672,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -595,6 +680,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value-wrong".to_string(),
@@ -602,6 +688,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test4-parameter-name".to_string(),
                 },
                 "test4-parameter-value".to_string(),
@@ -613,24 +700,28 @@ mod test {
                 Some("test3-parameter-value".to_string()),
                 Ok(None),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
                 Some("test1-parameter-value".to_string()),
                 Ok(Some("test1-parameter-value".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
                 Some("test2-parameter-value".to_string()),
                 Ok(Some("test2-parameter-value-wrong".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test4-parameter-name".to_string(),
                 None,
                 Ok(Some("test4-parameter-value".to_string())),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
         ]);
         let results =
@@ -647,6 +738,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -654,6 +746,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -661,6 +754,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -670,6 +764,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -677,6 +772,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value-wrong".to_string(),
@@ -684,6 +780,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test4-parameter-name".to_string(),
                 },
                 "test4-parameter-value".to_string(),
@@ -695,18 +792,21 @@ mod test {
                 Some("test3-parameter-value".to_string()),
                 Ok(None),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
                 Some("test1-parameter-value".to_string()),
                 Ok(Some("test1-parameter-value".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
                 Some("test2-parameter-value".to_string()),
                 Ok(Some("test2-parameter-value-wrong".to_string())),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
         ]);
         let results =
@@ -722,6 +822,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 "test1-parameter-value".to_string(),
@@ -729,6 +830,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 "test2-parameter-value".to_string(),
@@ -736,6 +838,7 @@ mod test {
             (
                 SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 "test3-parameter-value".to_string(),
@@ -749,6 +852,7 @@ mod test {
                     region: "us-west-2".to_string(),
                 }),
                 Region::new("us-east-1"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test1-parameter-name".to_string(),
@@ -757,6 +861,7 @@ mod test {
                     region: "us-west-2".to_string(),
                 }),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
             SsmValidationResult::new(
                 "test2-parameter-name".to_string(),
@@ -765,6 +870,7 @@ mod test {
                     region: "us-west-2".to_string(),
                 }),
                 Region::new("us-west-2"),
+                "1234567890".to_string(),
             ),
         ]);
         let results = validate_parameters_in_region(

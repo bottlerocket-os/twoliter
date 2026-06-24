@@ -49,7 +49,20 @@ ssm_prefix = "/your/prefix/here"
 [aws.region.us-west-2]
 # If specified, we assume this role before making any API calls in this region.
 # (This is assumed after the "global" aws.role, if that is also specified.)
+# A region may specify *either* a single `role` (as here) or a `roles` list (see below), but not
+# both.
 role = "arn:aws:iam::012345678901:role/assume-regional"
+
+[aws.region.us-east-1]
+# To publish a single AMI into multiple accounts within the same region, list one role per target
+# account in `roles` instead of a single `role`.  We register the AMI once in the first account,
+# then copy it into each additional account, and publish a separate set of SSM parameters per
+# account.  Each role's ARN identifies the account it targets.  (Each role is assumed after the
+# "global" aws.role, if that is also specified.)
+roles = [
+    "arn:aws:iam::111111111111:role/assume-regional", # pre-prod
+    "arn:aws:iam::098765432109:role/assume-regional", # prod
+]
 
 [vmware]
 # A list of datacenter names to which you would like to upload an OVA.  These

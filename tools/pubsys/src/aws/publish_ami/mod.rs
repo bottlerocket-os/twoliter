@@ -3,8 +3,8 @@
 
 use crate::aws::ami::launch_permissions::{get_launch_permissions, LaunchPermissionDef};
 use crate::aws::ami::wait::{self, wait_for_ami};
-use crate::aws::ami::Image;
-use crate::aws::client::build_client_config;
+use crate::aws::ami::{read_ami_input, AmiInputFile, Image, RegionAccount, RegionAccountImageMap};
+use crate::aws::client::build_client_config_for_role;
 use crate::aws::region_from_string;
 use crate::Args;
 use aws_sdk_ec2::error::ProvideErrorMetadata;
@@ -22,6 +22,7 @@ use futures::future::{join, ready};
 use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 use log::{debug, error, info, trace};
+use pubsys_config::AwsConfig as PubsysAwsConfig;
 use pubsys_config::InfraConfig;
 use snafu::{ensure, OptionExt, ResultExt};
 use std::collections::{HashMap, HashSet};
@@ -92,21 +93,6 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
             path: &publish_args.ami_input,
         })?;
 
-    let mut ami_input: HashMap<String, Image> =
-        serde_json::from_slice(&ami_input_bytes).context(error::DeserializeSnafu {
-            path: &publish_args.ami_input,
-        })?;
-    trace!("Parsed AMI input: {ami_input:?}");
-
-    // pubsys will not create a file if it did not create AMIs, so we should only have an empty
-    // file if a user created one manually, and they shouldn't be creating an empty file.
-    ensure!(
-        !ami_input.is_empty(),
-        error::InputSnafu {
-            path: &publish_args.ami_input
-        }
-    );
-
     // If a lock file exists, use that, otherwise use Infra.toml or default
     let infra_config = InfraConfig::from_path_or_lock(&args.infra_config_path, true)
         .context(error::ConfigSnafu)?;
@@ -128,6 +114,24 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
     );
     let base_region = region_from_string(&regions[0]);
 
+    // Parse the AMI input, transparently lifting a legacy (v1) file into the per-account model
+    // (which needs the config + base region resolved above).
+    let mut ami_input: RegionAccountImageMap = read_ami_input(&ami_input_bytes, &aws, &base_region)
+        .await
+        .context(error::ParseAmiInputSnafu {
+            path: &publish_args.ami_input,
+        })?;
+    trace!("Parsed AMI input: {ami_input:?}");
+
+    // pubsys will not create a file if it did not create AMIs, so we should only have an empty
+    // file if a user created one manually, and they shouldn't be creating an empty file.
+    ensure!(
+        !ami_input.is_empty(),
+        error::InputSnafu {
+            path: &publish_args.ami_input
+        }
+    );
+
     // Check that the requested regions are a subset of the regions we *could* publish from the AMI
     // input JSON.
     let requested_regions = HashSet::from_iter(regions.iter());
@@ -142,26 +146,39 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
         }
     );
 
-    // Parse region names
-    let mut amis = HashMap::with_capacity(regions.len());
+    // Flatten the nested region -> account -> image input into a map keyed by (region, account),
+    // restricted to the requested regions.  Each entry is published independently, assuming the
+    // role configured for its account.
+    let mut amis = HashMap::new();
     for name in regions {
-        let image = ami_input
+        let account_images = ami_input
             .remove(&name)
             // This could only happen if someone removes the check above...
             .with_context(|| error::UnknownRegionsSnafu {
                 regions: vec![name.clone()],
             })?;
         let region = region_from_string(&name);
-        amis.insert(region, image);
+        for (account_id, image) in account_images {
+            amis.insert(
+                RegionAccount {
+                    region: region.clone(),
+                    account_id,
+                },
+                image,
+            );
+        }
     }
 
-    // We make a map storing our regional clients because they're used in a future and need to
-    // live until the future is resolved.
+    // We make a map storing our clients because they're used in a future and need to live until
+    // the future is resolved.  Each account in a region gets its own client, assuming the role
+    // that reaches that account.
     let mut ec2_clients = HashMap::with_capacity(amis.len());
-    for region in amis.keys() {
-        let client_config = build_client_config(region, &base_region, &aws).await;
+    for key in amis.keys() {
+        let role = role_for_account(&aws, &key.region, &key.account_id);
+        let client_config =
+            build_client_config_for_role(&key.region, &base_region, &aws, role.as_deref()).await;
         let ec2_client = Ec2Client::new(&client_config);
-        ec2_clients.insert(region.clone(), ec2_client);
+        ec2_clients.insert(key.clone(), ec2_client);
     }
 
     // If AMIs aren't in "available" state, we can get a DescribeImages response that includes
@@ -175,22 +192,33 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
         );
     }
     let mut wait_requests = Vec::with_capacity(amis.len());
-    for (region, image) in &amis {
-        let wait_future = wait_for_ami(&image.id, region, &base_region, "available", 1, &aws);
-        // Store the region and ID so we can include it in errors
-        let info_future = ready((region.clone(), image.id.clone()));
+    for (key, image) in &amis {
+        let role = role_for_account(&aws, &key.region, &key.account_id);
+        let wait_future = wait_for_ami(
+            &image.id,
+            &key.region,
+            &base_region,
+            "available",
+            1,
+            &aws,
+            role,
+        );
+        // Store the key and ID so we can include it in errors
+        let info_future = ready((key.clone(), image.id.clone()));
         wait_requests.push(join(info_future, wait_future));
     }
     // Send requests in parallel and wait for responses, collecting results into a list.
     let request_stream = stream::iter(wait_requests).buffer_unordered(4);
-    let wait_responses: Vec<((Region, String), std::result::Result<(), wait::Error>)> =
-        request_stream.collect().await;
+    let wait_responses: Vec<(
+        (RegionAccount, String),
+        std::result::Result<(), wait::Error>,
+    )> = request_stream.collect().await;
 
     // Make sure waits succeeded and AMIs are available.
-    for ((region, image_id), wait_response) in wait_responses {
+    for ((key, image_id), wait_response) in wait_responses {
         wait_response.context(error::WaitAmiSnafu {
             id: &image_id,
-            region: region.as_ref(),
+            region: key.region.as_ref(),
         })?;
     }
 
@@ -215,20 +243,37 @@ pub(crate) async fn run(args: &Args, publish_args: &Who) -> Result<()> {
     )
     .await?;
 
-    write_amis(
-        &publish_args.ami_input,
-        &amis
-            .into_iter()
-            .map(|(region, image)| (region.to_string(), image))
-            .collect::<HashMap<String, Image>>(),
-    )
-    .await?;
+    // Reassemble the nested region -> account -> image map for output.
+    let mut output: RegionAccountImageMap = HashMap::new();
+    for (key, image) in amis {
+        output
+            .entry(key.region.as_ref().to_string())
+            .or_default()
+            .insert(key.account_id, image);
+    }
+    write_amis(&publish_args.ami_input, &output).await?;
 
     Ok(())
 }
 
-pub(crate) async fn write_amis(path: &PathBuf, amis: &HashMap<String, Image>) -> Result<()> {
-    let json = serde_json::to_string_pretty(&amis).context(error::SerializeSnafu { path })?;
+/// Returns the role to assume in order to reach the given account in the given region.  Returns
+/// `None` if no configured role matches (for example, the AMI was published using the base/global
+/// credentials).
+fn role_for_account(
+    pubsys_aws_config: &PubsysAwsConfig,
+    region: &Region,
+    account_id: &str,
+) -> Option<String> {
+    pubsys_aws_config
+        .region
+        .get(region.as_ref())
+        .and_then(|region_config| region_config.role_for_account(account_id))
+}
+
+pub(crate) async fn write_amis(path: &PathBuf, amis: &RegionAccountImageMap) -> Result<()> {
+    // Wrap the map in a schema-versioned envelope so consumers can detect the format.
+    let envelope = AmiInputFile::new(amis.clone());
+    let json = serde_json::to_string_pretty(&envelope).context(error::SerializeSnafu { path })?;
     fs::write(path, &json).await.context(error::FileSnafu {
         op: "write AMIs to file",
         path,
@@ -309,32 +354,33 @@ pub(crate) async fn get_snapshots(
     Ok(snapshot_ids)
 }
 
-/// Returns a regional mapping of snapshot IDs associated with the given AMIs.
+/// Returns a mapping of (region, account) to the snapshot IDs associated with the given AMIs.
 async fn get_regional_snapshots(
-    amis: &HashMap<Region, Image>,
-    clients: &HashMap<Region, Ec2Client>,
-) -> Result<HashMap<Region, Vec<String>>> {
+    amis: &HashMap<RegionAccount, Image>,
+    clients: &HashMap<RegionAccount, Ec2Client>,
+) -> Result<HashMap<RegionAccount, Vec<String>>> {
     // Build requests for image information.
     let mut snapshots_requests = Vec::with_capacity(amis.len());
-    for (region, image) in amis {
-        let ec2_client = &clients[region];
+    for (key, image) in amis {
+        let ec2_client = &clients[key];
 
-        let snapshots_future = get_snapshots(&image.id, region, ec2_client);
+        let snapshots_future = get_snapshots(&image.id, &key.region, ec2_client);
 
-        // Store the region so we can include it in errors
-        let info_future = ready(region.clone());
+        // Store the key so we can include it in errors
+        let info_future = ready(key.clone());
         snapshots_requests.push(join(info_future, snapshots_future));
     }
 
     // Send requests in parallel and wait for responses, collecting results into a list.
     let request_stream = stream::iter(snapshots_requests).buffer_unordered(4);
-    let snapshots_responses: Vec<(Region, Result<Vec<String>>)> = request_stream.collect().await;
+    let snapshots_responses: Vec<(RegionAccount, Result<Vec<String>>)> =
+        request_stream.collect().await;
 
     // For each described image, get the snapshot IDs from the block device mappings.
     let mut snapshots = HashMap::with_capacity(amis.len());
-    for (region, snapshot_ids) in snapshots_responses {
+    for (key, snapshot_ids) in snapshots_responses {
         let snapshot_ids = snapshot_ids?;
-        snapshots.insert(region, snapshot_ids);
+        snapshots.insert(key, snapshot_ids);
     }
 
     Ok(snapshots)
@@ -390,22 +436,28 @@ pub(crate) async fn modify_snapshots(
 }
 
 /// Modify createVolumePermission for the given users/groups, across all of the snapshots in the
-/// given regional mapping.  The `operation` should be "add" or "remove" to allow/deny permission.
+/// given (region, account) mapping.  The `operation` should be "add" or "remove" to allow/deny
+/// permission.
 pub(crate) async fn modify_regional_snapshots(
     modify_opts: &ModifyOptions,
     operation: &OperationType,
-    snapshots: &HashMap<Region, Vec<String>>,
-    clients: &HashMap<Region, Ec2Client>,
+    snapshots: &HashMap<RegionAccount, Vec<String>>,
+    clients: &HashMap<RegionAccount, Ec2Client>,
 ) -> Result<()> {
     // Build requests to modify snapshot attributes.
     let mut requests = Vec::new();
-    for (region, snapshot_ids) in snapshots {
-        let ec2_client = &clients[region];
-        let modify_snapshot_future =
-            modify_snapshots(modify_opts, operation, snapshot_ids, ec2_client, region);
+    for (key, snapshot_ids) in snapshots {
+        let ec2_client = &clients[key];
+        let modify_snapshot_future = modify_snapshots(
+            modify_opts,
+            operation,
+            snapshot_ids,
+            ec2_client,
+            &key.region,
+        );
 
-        // Store the region and snapshot ID so we can include it in errors
-        let info_future = ready((region.clone(), snapshot_ids.clone()));
+        // Store the key and snapshot ID so we can include it in errors
+        let info_future = ready((key.clone(), snapshot_ids.clone()));
         requests.push(join(info_future, modify_snapshot_future));
     }
 
@@ -413,18 +465,19 @@ pub(crate) async fn modify_regional_snapshots(
     let request_stream = stream::iter(requests).buffer_unordered(4);
 
     #[allow(clippy::type_complexity)]
-    let responses: Vec<((Region, Vec<String>), Result<()>)> = request_stream.collect().await;
+    let responses: Vec<((RegionAccount, Vec<String>), Result<()>)> = request_stream.collect().await;
 
     // Count up successes and failures so we can give a clear total in the final error message.
     let mut error_count = 0u16;
     let mut success_count = 0u16;
-    for ((region, snapshot_ids), response) in responses {
+    for ((key, snapshot_ids), response) in responses {
         match response {
             Ok(()) => {
                 success_count += 1;
                 debug!(
-                    "Modified permissions in {} for snapshots [{}]",
-                    region.as_ref(),
+                    "Modified permissions in {} ({}) for snapshots [{}]",
+                    key.region.as_ref(),
+                    key.account_id,
                     snapshot_ids.join(", "),
                 );
             }
@@ -432,8 +485,9 @@ pub(crate) async fn modify_regional_snapshots(
                 error_count += 1;
                 if let Error::ModifyImageAttribute { source: err, .. } = e {
                     error!(
-                        "Failed to modify permissions in {} for snapshots [{}]: {:?}",
-                        region.as_ref(),
+                        "Failed to modify permissions in {} ({}) for snapshots [{}]: {:?}",
+                        key.region.as_ref(),
+                        key.account_id,
                         snapshot_ids.join(", "),
                         err.as_service_error()
                             .and_then(|e| e.code())
@@ -488,22 +542,23 @@ pub(crate) async fn modify_image(
 }
 
 /// Modify launchPermission for the given users/groups, across all of the images in the given
-/// regional mapping.  The `operation` should be "add" or "remove" to allow/deny permission.
+/// (region, account) mapping.  The `operation` should be "add" or "remove" to allow/deny
+/// permission.
 pub(crate) async fn modify_regional_images(
     modify_opts: &ModifyOptions,
     operation: &OperationType,
-    images: &mut HashMap<Region, Image>,
-    clients: &HashMap<Region, Ec2Client>,
+    images: &mut HashMap<RegionAccount, Image>,
+    clients: &HashMap<RegionAccount, Ec2Client>,
 ) -> Result<()> {
     let mut requests = Vec::new();
-    for (region, image) in &mut *images {
+    for (key, image) in &mut *images {
         let image_id = &image.id;
-        let ec2_client = &clients[region];
+        let ec2_client = &clients[key];
 
         let modify_image_future = modify_image(modify_opts, operation, image_id, ec2_client);
 
-        // Store the region and image ID so we can include it in errors
-        let info_future = ready((region.as_ref().to_string(), image_id.clone()));
+        // Store the key and image ID so we can include it in errors
+        let info_future = ready((key.clone(), image_id.clone()));
         requests.push(join(info_future, modify_image_future));
     }
 
@@ -511,35 +566,37 @@ pub(crate) async fn modify_regional_images(
     let request_stream = stream::iter(requests).buffer_unordered(4);
     #[allow(clippy::type_complexity)]
     let responses: Vec<(
-        (String, String),
+        (RegionAccount, String),
         std::result::Result<ModifyImageAttributeOutput, AwsSdkError<ModifyImageAttributeError>>,
     )> = request_stream.collect().await;
 
     // Count up successes and failures so we can give a clear total in the final error message.
     let mut error_count = 0u16;
     let mut success_count = 0u16;
-    for ((region, image_id), modify_image_response) in responses {
+    for ((key, image_id), modify_image_response) in responses {
         match modify_image_response {
             Ok(_) => {
                 success_count += 1;
-                info!("Modified permissions of image {image_id} in {region}");
+                info!(
+                    "Modified permissions of image {image_id} in {} ({})",
+                    key.region.as_ref(),
+                    key.account_id
+                );
 
                 // Set the `public` and `launch_permissions` fields for the Image object
-                let image = images.get_mut(&Region::new(region.clone())).ok_or(
-                    error::Error::MissingRegion {
-                        region: region.clone(),
-                    },
-                )?;
-                let launch_permissions: Vec<LaunchPermissionDef> = get_launch_permissions(
-                    &clients[&Region::new(region.clone())],
-                    region.as_ref(),
-                    &image_id,
-                )
-                .await
-                .context(error::DescribeImageAttributeSnafu {
-                    image_id: image_id.clone(),
-                    region: region.to_string(),
-                })?;
+                let launch_permissions: Vec<LaunchPermissionDef> =
+                    get_launch_permissions(&clients[&key], key.region.as_ref(), &image_id)
+                        .await
+                        .context(error::DescribeImageAttributeSnafu {
+                            image_id: image_id.clone(),
+                            region: key.region.to_string(),
+                        })?;
+
+                let image = images
+                    .get_mut(&key)
+                    .ok_or_else(|| error::Error::MissingRegion {
+                        region: key.region.as_ref().to_string(),
+                    })?;
 
                 // If the launch permissions contain the group `all` after the modification,
                 // the image is public
@@ -552,9 +609,10 @@ pub(crate) async fn modify_regional_images(
             Err(e) => {
                 error_count += 1;
                 error!(
-                    "Modifying permissions of {} in {} failed: {}",
+                    "Modifying permissions of {} in {} ({}) failed: {}",
                     image_id,
-                    region,
+                    key.region.as_ref(),
+                    key.account_id,
                     e.as_service_error()
                         .and_then(|err| err.code())
                         .unwrap_or("unknown"),
@@ -609,10 +667,10 @@ mod error {
             source: AwsSdkError<DescribeImagesError>,
         },
 
-        #[snafu(display("Failed to deserialize input from '{}': {}", path.display(), source))]
-        Deserialize {
+        #[snafu(display("Failed to parse AMI input from '{}': {}", path.display(), source))]
+        ParseAmiInput {
             path: PathBuf,
-            source: serde_json::Error,
+            source: crate::aws::ami::AmiInputError,
         },
 
         #[snafu(display("Failed to {} '{}': {}", op, path.display(), source))]
@@ -703,7 +761,7 @@ mod error {
                 Error::Config { .. }
                 | Error::DescribeImageAttribute { .. }
                 | Error::DescribeImages { .. }
-                | Error::Deserialize { .. }
+                | Error::ParseAmiInput { .. }
                 | Error::File { .. }
                 | Error::Input { .. }
                 | Error::MissingConfig { .. }

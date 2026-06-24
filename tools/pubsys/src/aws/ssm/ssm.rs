@@ -1,6 +1,7 @@
 //! The ssm module owns the getting and setting of parameters in SSM.
 
 use super::{SsmKey, SsmParameters};
+use crate::aws::ami::RegionAccount;
 use async_stream::stream;
 use aws_sdk_ssm::error::ProvideErrorMetadata;
 use aws_sdk_ssm::operation::{
@@ -70,34 +71,44 @@ pub async fn rate_limit_ssm_get_parameters(region: &Region) {
     }
 }
 
-/// Fetches the values of the given SSM keys using the given clients
+/// Fetches the values of the given SSM keys using the given clients.
+///
+/// Clients are keyed by `(region, account)` so that parameters destined for different accounts -
+/// even within the same region - are fetched with the correct account's client, in parallel.
 pub(crate) async fn get_parameters<K>(
     requested: &[K],
-    clients: &HashMap<Region, SsmClient>,
+    clients: &HashMap<RegionAccount, SsmClient>,
 ) -> Result<SsmParameters>
 where
     K: AsRef<SsmKey>,
 {
-    // Build requests for parameters; we have to request with a regional client so we split them by
-    // region
+    // Build requests for parameters; each request uses a client for a specific (region, account),
+    // so we split the requested names by that key.
     let mut requests = Vec::with_capacity(requested.len());
-    let mut regional_names: HashMap<Region, Vec<String>> = HashMap::new();
+    let mut grouped_names: HashMap<RegionAccount, Vec<String>> = HashMap::new();
     for key in requested {
-        let SsmKey { region, name } = key.as_ref();
-        regional_names
-            .entry(region.clone())
+        let SsmKey {
+            region,
+            account_id,
+            name,
+        } = key.as_ref();
+        grouped_names
+            .entry(RegionAccount {
+                region: region.clone(),
+                account_id: account_id.clone(),
+            })
             .or_default()
             .push(name.clone());
     }
-    for (region, names) in regional_names {
+    for (key, names) in grouped_names {
         // At most 10 parameters can be requested at a time.
         for names_chunk in names.chunks(10) {
-            let ssm_client = &clients[&region];
+            let ssm_client = &clients[&key];
             let len = names_chunk.len();
 
             let get_future = {
                 let names_chunk = names_chunk.to_vec();
-                let region = region.clone();
+                let region = key.region.clone();
                 async move {
                     rate_limit_ssm_get_parameters(&region).await;
                     trace!("Requesting {names_chunk:?} in {region}");
@@ -110,8 +121,8 @@ where
                 }
             };
 
-            // Store the region so we can include it in errors and the output map
-            let info_future = ready((region.clone(), len));
+            // Store the key so we can include it in errors and the output map
+            let info_future = ready((key.clone(), len));
             requests.push(join(info_future, get_future));
         }
     }
@@ -120,32 +131,32 @@ where
     let request_stream = stream::iter(requests).buffer_unordered(4);
     #[allow(clippy::type_complexity)]
     let responses: Vec<(
-        (Region, usize),
+        (RegionAccount, usize),
         std::result::Result<GetParametersOutput, AwsSdkError<GetParametersError>>,
     )> = request_stream.collect().await;
 
-    // If you're checking parameters in a region you haven't pushed to before, you can get an
-    // error here about the parameter's namespace being new.  We want to treat these as new
-    // parameters rather than failing.  Unfortunately, we don't know which parameter in the region
-    // was considered new, but we expect that most people are publishing all of their parameters
-    // under the same namespace, so treating the whole region as new is OK.  We use this just to
-    // warn the user.
-    let mut new_regions = HashSet::new();
+    // If you're checking parameters in a region/account you haven't pushed to before, you can get
+    // an error here about the parameter's namespace being new.  We want to treat these as new
+    // parameters rather than failing.  Unfortunately, we don't know which parameter was considered
+    // new, but we expect that most people are publishing all of their parameters under the same
+    // namespace, so treating the whole (region, account) as new is OK.  We use this just to warn
+    // the user.
+    let mut new_region_accounts = HashSet::new();
 
     // For each existing parameter in the response, get the name and value for our output map.
     let mut parameters = HashMap::with_capacity(requested.len());
-    for ((region, expected_len), response) in responses {
+    for ((key, expected_len), response) in responses {
         // Get the image description, ensuring we only have one.
         let response = match response {
             Ok(response) => response,
             Err(e) => {
                 // Note: there's no structured error type for this so we have to string match.
                 if e.to_string().contains("is not a valid namespace") {
-                    new_regions.insert(region.clone());
+                    new_region_accounts.insert(key.clone());
                     continue;
                 } else {
                     return Err(e).context(error::GetParametersSnafu {
-                        region: region.as_ref(),
+                        region: key.region.as_ref(),
                     });
                 }
             }
@@ -160,7 +171,7 @@ where
         ensure!(
             total_count == expected_len,
             error::MissingInResponseSnafu {
-                region: region.as_ref(),
+                region: key.region.as_ref(),
                 request_type: "GetParameters",
                 missing: format!("parameters - got {total_count}, expected {expected_len}"),
             }
@@ -171,42 +182,52 @@ where
             if !valid_parameters.is_empty() {
                 for parameter in valid_parameters {
                     let name = parameter.name.context(error::MissingInResponseSnafu {
-                        region: region.as_ref(),
+                        region: key.region.as_ref(),
                         request_type: "GetParameters",
                         missing: "parameter name",
                     })?;
                     let value = parameter.value.context(error::MissingInResponseSnafu {
-                        region: region.as_ref(),
+                        region: key.region.as_ref(),
                         request_type: "GetParameters",
                         missing: format!("value for parameter {name}"),
                     })?;
-                    parameters.insert(SsmKey::new(region.clone(), name), value);
+                    parameters.insert(
+                        SsmKey::new(key.region.clone(), key.account_id.clone(), name),
+                        value,
+                    );
                 }
             }
         }
     }
 
-    for region in new_regions {
-        warn!("Invalid namespace in {region}, this is OK for the first publish in a region");
+    for key in new_region_accounts {
+        warn!(
+            "Invalid namespace in {} ({}), this is OK for the first publish in a region/account",
+            key.region, key.account_id
+        );
     }
 
     Ok(parameters)
 }
 
-/// Fetches all SSM parameters under a given prefix using the given clients
+/// Fetches all SSM parameters under a given prefix using the given clients, keyed by
+/// `(region, account)`.
 pub(crate) async fn get_parameters_by_prefix<'a>(
-    clients: &'a HashMap<Region, SsmClient>,
+    clients: &'a HashMap<RegionAccount, SsmClient>,
     ssm_prefix: &str,
-) -> HashMap<&'a Region, Result<SsmParameters>> {
-    // Build requests for parameters; we have to request with a regional client so we split them by
-    // region
+) -> HashMap<&'a RegionAccount, Result<SsmParameters>> {
+    // Build requests for parameters; each request uses a client for a specific (region, account).
     let mut requests = Vec::with_capacity(clients.len());
-    for region in clients.keys() {
-        trace!("Requesting parameters in {region}");
-        let ssm_client: &SsmClient = &clients[region];
-        let get_future = get_parameters_by_prefix_in_region(region, ssm_client, ssm_prefix);
+    for key in clients.keys() {
+        trace!(
+            "Requesting parameters in {} ({})",
+            key.region,
+            key.account_id
+        );
+        let ssm_client: &SsmClient = &clients[key];
+        let get_future = get_parameters_by_prefix_in_region(key, ssm_client, ssm_prefix);
 
-        requests.push(join(ready(region), get_future));
+        requests.push(join(ready(key), get_future));
     }
 
     // Send requests in parallel and wait for responses, collecting results into a list.
@@ -217,13 +238,14 @@ pub(crate) async fn get_parameters_by_prefix<'a>(
         .await
 }
 
-/// Fetches all SSM parameters under a given prefix in a single region
+/// Fetches all SSM parameters under a given prefix in a single region/account
 pub(crate) async fn get_parameters_by_prefix_in_region(
-    region: &Region,
+    key: &RegionAccount,
     client: &SsmClient,
     ssm_prefix: &str,
 ) -> Result<SsmParameters> {
-    info!("Retrieving SSM parameters in {region}");
+    let region = &key.region;
+    info!("Retrieving SSM parameters in {region} ({})", key.account_id);
     let mut parameters = HashMap::new();
 
     let paginated_response_stream = stream! {
@@ -252,11 +274,12 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
             .parameters()
             .to_owned();
         for parameter in retrieved_parameters {
-            // Insert a new key-value pair into the map, with the key containing region and parameter name
-            // and the value containing the parameter value
+            // Insert a new key-value pair into the map, with the key containing region, account,
+            // and parameter name, and the value containing the parameter value
             parameters.insert(
                 SsmKey::new(
                     region.to_owned(),
+                    key.account_id.clone(),
                     parameter
                         .name()
                         .ok_or(error::Error::MissingField {
@@ -275,14 +298,17 @@ pub(crate) async fn get_parameters_by_prefix_in_region(
             );
         }
     }
-    info!("SSM parameters in {region} have been retrieved");
+    info!(
+        "SSM parameters in {region} ({}) have been retrieved",
+        key.account_id
+    );
     Ok(parameters)
 }
 
-/// Sets the values of the given SSM keys using the given clients
+/// Sets the values of the given SSM keys using the given clients, keyed by `(region, account)`.
 pub(crate) async fn set_parameters(
     parameters_to_set: &SsmParameters,
-    ssm_clients: &HashMap<Region, SsmClient>,
+    ssm_clients: &HashMap<RegionAccount, SsmClient>,
 ) -> Result<()> {
     // Start with a small delay between requests, and increase if we get throttled.
     let mut request_interval = Duration::from_millis(100);
@@ -292,12 +318,12 @@ pub(crate) async fn set_parameters(
 
     // We run all requests in a batch, and any failed requests are added to the next batch for
     // retry
-    let mut failed_parameters: HashMap<Region, Vec<(String, String)>> = HashMap::new();
+    let mut failed_parameters: HashMap<RegionAccount, Vec<(String, String)>> = HashMap::new();
     let max_failures = 5;
 
     /// Stores the values we need to be able to retry requests
     struct RequestContext<'a> {
-        region: &'a Region,
+        key: RegionAccount,
         name: &'a str,
         value: &'a str,
         failures: u8,
@@ -305,9 +331,20 @@ pub(crate) async fn set_parameters(
 
     // Create the initial request contexts
     let mut contexts = Vec::new();
-    for (SsmKey { region, name }, value) in parameters_to_set {
-        contexts.push(RequestContext {
+    for (
+        SsmKey {
             region,
+            account_id,
+            name,
+        },
+        value,
+    ) in parameters_to_set
+    {
+        contexts.push(RequestContext {
+            key: RegionAccount {
+                region: region.clone(),
+                account_id: account_id.clone(),
+            },
             name,
             value,
             failures: 0,
@@ -331,14 +368,14 @@ pub(crate) async fn set_parameters(
             error::ThrottledSnafu { max_interval }
         );
 
-        // Build requests for parameters.  We need to group them by region so we can run each
-        // region in parallel.  Each region's stream will be throttled to run one request per
-        // request_interval.
-        let mut regional_requests = HashMap::new();
+        // Build requests for parameters.  We need to group them by (region, account) so we can
+        // run each group in parallel.  Each group's stream will be throttled to run one request
+        // per request_interval.
+        let mut grouped_requests = HashMap::new();
         // Remove contexts from the list with drain; they get added back in if we retry the
         // request.
         for context in contexts.drain(..) {
-            let ssm_client = &ssm_clients[context.region];
+            let ssm_client = &ssm_clients[&context.key];
 
             let put_future = ssm_client
                 .put_parameter()
@@ -349,18 +386,17 @@ pub(crate) async fn set_parameters(
                 .send()
                 .map_err(AwsSdkError::from);
 
-            let regional_list = regional_requests
-                .entry(context.region)
+            let group_list = grouped_requests
+                .entry(context.key.clone())
                 .or_insert_with(Vec::new);
             // Store the context so we can retry as needed
-            regional_list.push(join(ready(context), put_future));
+            group_list.push(join(ready(context), put_future));
         }
 
-        // Create a throttled stream per region; throttling applies per region.  (Request futures
-        // are already regional, by virtue of being created with a regional client, so we don't
-        // need the region again here.)
+        // Create a throttled stream per (region, account); throttling applies per group.  (Request
+        // futures are already bound to a specific client, so we don't need the key again here.)
         let mut throttled_streams = Vec::new();
-        for (_region, request_list) in regional_requests {
+        for (_key, request_list) in grouped_requests {
             throttled_streams.push(Box::pin(tokio_stream::StreamExt::throttle(
                 stream::iter(request_list),
                 request_interval,
@@ -395,7 +431,7 @@ pub(crate) async fn set_parameters(
                 } else if context.failures >= max_failures - 1 {
                     // Past max failures, store the failure for reporting, don't retry.
                     failed_parameters
-                        .entry(context.region.clone())
+                        .entry(context.key.clone())
                         .or_default()
                         .push((context.name.to_string(), error_type));
                 } else {
@@ -405,8 +441,12 @@ pub(crate) async fn set_parameters(
                         ..context
                     };
                     debug!(
-                        "Request attempt {} of {} failed in {}: {}",
-                        context.failures, max_failures, context.region, error_type
+                        "Request attempt {} of {} failed in {} ({}): {}",
+                        context.failures,
+                        max_failures,
+                        context.key.region,
+                        context.key.account_id,
+                        error_type
                     );
                     contexts.push(context);
                 }
@@ -415,9 +455,12 @@ pub(crate) async fn set_parameters(
     }
 
     if !failed_parameters.is_empty() {
-        for (region, failures) in &failed_parameters {
+        for (key, failures) in &failed_parameters {
             for (parameter, error) in failures {
-                error!("Failed to set {parameter} in {region}: {error}");
+                error!(
+                    "Failed to set {parameter} in {} ({}): {error}",
+                    key.region, key.account_id
+                );
             }
         }
         return error::SetParametersSnafu {
@@ -435,7 +478,7 @@ pub(crate) async fn set_parameters(
 /// Retries validation up to 3 times on any failure, using exponential backoff.
 pub(crate) async fn validate_parameters(
     expected_parameters: &SsmParameters,
-    ssm_clients: &HashMap<Region, SsmClient>,
+    ssm_clients: &HashMap<RegionAccount, SsmClient>,
 ) -> Result<()> {
     let retry_strategy = ExponentialBackoff::from_millis(SSM_VALIDATION_RETRY_EXP_BASE_MILLIS)
         .map(jitter)
@@ -462,7 +505,7 @@ pub(crate) async fn validate_parameters(
 /// Fetch the given parameters, and ensure the live values match the given values
 async fn validate_parameters_inner(
     expected_parameters: &SsmParameters,
-    ssm_clients: &HashMap<Region, SsmClient>,
+    ssm_clients: &HashMap<RegionAccount, SsmClient>,
 ) -> Result<()> {
     // Fetch the given parameter names
     let expected_parameter_names: Vec<&SsmKey> = expected_parameters.keys().collect();
@@ -473,17 +516,18 @@ async fn validate_parameters_inner(
     for (expected_key, expected_value) in expected_parameters {
         let SsmKey {
             region: expected_region,
+            account_id: expected_account,
             name: expected_name,
         } = expected_key;
         // All parameters should have a value, and it should match the given value, otherwise the
         // parameter wasn't updated / created.
         if let Some(updated_value) = updated_parameters.get(expected_key) {
             if updated_value != expected_value {
-                error!("Failed to set {expected_name} in {expected_region}");
+                error!("Failed to set {expected_name} in {expected_region} ({expected_account})");
                 success = false;
             }
         } else {
-            error!("{expected_name} in {expected_region} still doesn't exist");
+            error!("{expected_name} in {expected_region} ({expected_account}) still doesn't exist");
             success = false;
         }
     }

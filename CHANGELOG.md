@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+* pubsys: support publishing a single AMI into multiple accounts within the same region via a new `roles` list on `[aws.region.*]`. `role` and `roles` are mutually exclusive per region. ([#4858])
+
+### Changed
+* pubsys: the `--ami-input` JSON produced by `pubsys ami` and consumed by `pubsys ssm` / `pubsys publish-ami` is now a versioned envelope, `{"schema_version": 2, "amis": {region: {account_id: {…ami…}}}}`, replacing the previous bare `{region: {…ami…}}` map (now "v1"). A missing `schema_version` is treated as implied v1; any versioned file must carry the field, and an unrecognized version is rejected. Legacy v1 files are read transparently — each region's AMI is lifted into the per-account model by resolving the account from the region's role ARN (or via STS for a region with no configured role) — so existing inputs keep working. `pubsys ami` always writes v2 output. ([#4858])
+
+[#4858]: https://github.com/bottlerocket-os/bottlerocket/issues/4858
+
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...HEAD
 
 ## [0.21.0] - 2026-06-19

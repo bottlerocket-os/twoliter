@@ -1,4 +1,4 @@
-use crate::aws::client::build_client_config;
+use crate::aws::client::build_client_config_for_role;
 use aws_sdk_ec2::{config::Region, types::ImageState, Client as Ec2Client};
 use log::info;
 use pubsys_config::AwsConfig as PubsysAwsConfig;
@@ -15,6 +15,7 @@ pub(crate) async fn wait_for_ami(
     state: &str,
     successes_required: u8,
     pubsys_aws_config: &PubsysAwsConfig,
+    maybe_role: Option<String>,
 ) -> Result<()> {
     let mut successes = 0;
     let max_attempts = 90;
@@ -35,7 +36,13 @@ pub(crate) async fn wait_for_ami(
 
         // Use a new client each time so we have more confidence that different endpoints can see
         // the new AMI.
-        let client_config = build_client_config(region, sts_region, pubsys_aws_config).await;
+        let client_config = build_client_config_for_role(
+            region,
+            sts_region,
+            pubsys_aws_config,
+            maybe_role.as_deref(),
+        )
+        .await;
         let ec2_client = Ec2Client::new(&client_config);
         let describe_response = ec2_client
             .describe_images()

@@ -2,7 +2,7 @@
 //! SSM parameter names and values.
 
 use super::{BuildContext, SsmKey, SsmParameters};
-use crate::aws::ami::Image;
+use crate::aws::ami::{Image, RegionAccount};
 use aws_sdk_ssm::config::Region;
 use log::trace;
 use serde::{Deserialize, Serialize};
@@ -93,7 +93,7 @@ impl RenderedParameter {
 /// Render the given template parameters using the data from the given AMIs
 pub(crate) fn render_parameters(
     template_parameters: TemplateParameters,
-    amis: &HashMap<Region, Image>,
+    amis: &HashMap<RegionAccount, Image>,
     ssm_prefix: &str,
     build_context: &BuildContext<'_>,
 ) -> Result<Vec<RenderedParameter>> {
@@ -108,7 +108,8 @@ pub(crate) fn render_parameters(
         region: &'a str,
     }
     let mut new_parameters = Vec::new();
-    for (region, image) in amis {
+    for (key, image) in amis {
+        let region = &key.region;
         let context = TemplateContext {
             variant: build_context.variant,
             arch: build_context.arch,
@@ -137,7 +138,11 @@ pub(crate) fn render_parameters(
 
             new_parameters.push(RenderedParameter {
                 ami: image.clone(),
-                ssm_key: SsmKey::new(region.clone(), join_name(ssm_prefix, &name_suffix)),
+                ssm_key: SsmKey::new(
+                    region.clone(),
+                    key.account_id.clone(),
+                    join_name(ssm_prefix, &name_suffix),
+                ),
                 value,
             });
         }
@@ -292,6 +297,7 @@ mod test {
                 },
                 ssm_key: SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test1-parameter-name".to_string(),
                 },
                 value: "test1-parameter-value".to_string(),
@@ -305,6 +311,7 @@ mod test {
                 },
                 ssm_key: SsmKey {
                     region: Region::new("us-west-2"),
+                    account_id: "1234567890".to_string(),
                     name: "test2-parameter-name".to_string(),
                 },
                 value: "test2-parameter-value".to_string(),
@@ -318,6 +325,7 @@ mod test {
                 },
                 ssm_key: SsmKey {
                     region: Region::new("us-east-1"),
+                    account_id: "1234567890".to_string(),
                     name: "test3-parameter-name".to_string(),
                 },
                 value: "test3-parameter-value".to_string(),
@@ -364,11 +372,19 @@ mod test {
                 Region::new("us-west-2"),
                 HashMap::from([
                     (
-                        SsmKey::new(Region::new("us-west-2"), "test1-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-west-2"),
+                            "1234567890".to_string(),
+                            "test1-parameter-name".to_string(),
+                        ),
                         "test1-parameter-value".to_string(),
                     ),
                     (
-                        SsmKey::new(Region::new("us-west-2"), "test2-parameter-name".to_string()),
+                        SsmKey::new(
+                            Region::new("us-west-2"),
+                            "1234567890".to_string(),
+                            "test2-parameter-name".to_string(),
+                        ),
                         "test2-parameter-value".to_string(),
                     ),
                 ]),
@@ -376,7 +392,11 @@ mod test {
             (
                 Region::new("us-east-1"),
                 HashMap::from([(
-                    SsmKey::new(Region::new("us-east-1"), "test3-parameter-name".to_string()),
+                    SsmKey::new(
+                        Region::new("us-east-1"),
+                        "1234567890".to_string(),
+                        "test3-parameter-name".to_string(),
+                    ),
                     "test3-parameter-value".to_string(),
                 )]),
             ),
