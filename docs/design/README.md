@@ -540,6 +540,40 @@ After installing packages, the result of `dnf list installed` will be output to 
 This will allow maintainers to audit which kit each package was taken from.
 The rest of the variant image creation steps proceed the same way that they do now.
 
+## Twoliter Repack
+
+In the event that a maintainer wants to replace specific artifacts on an already-built variant image, such as the CA certificate bundle, TUF `root.json`, or Secure Boot keys, they can use the `repack-variant` target rather than rebuilding from source.
+
+The `repack-variant` target operates on whatever images exist in the local build artifacts.
+There are two ways to get them there:
+
+- `build-variant`: builds images from source.
+  Use this when the images haven't been published yet or you have local source changes.
+- `fetch-variant`: downloads previously published images from a TUF repository.
+  Use this when repacking a released set of images without rebuilding all packages.
+
+```sh
+# Repack published images:
+twoliter make fetch-variant
+twoliter make repack-variant
+
+# Or repack locally built images:
+twoliter make build-variant
+twoliter make repack-variant
+```
+
+The `repack-variant` target takes the input image, replaces the configured artifacts, re-signs where necessary, regenerates dm-verity, and produces the final image.
+
+For example, a maintainer behind a corporate proxy can add their internal CA to an existing image by pointing `BUILDSYS_CACERTS_BUNDLE_OVERRIDE` at a custom bundle:
+
+```sh
+twoliter make \
+  -e BUILDSYS_CACERTS_BUNDLE_OVERRIDE=/path/to/corporate-ca-bundle.crt \
+  repack-variant
+```
+
+Because `repack-variant` skips package builds entirely, it is significantly faster than a full `build-variant`.
+
 ## Publishing
 
 Common publishing steps such as `cargo make repo` and `cargo make ami` will be hoisted to Twoliter.
