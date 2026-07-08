@@ -41,15 +41,61 @@ cleanup() {
 }
 trap 'cleanup' EXIT
 
-# Since debugfs doesn't pass return codes, extrapolate failures from STDERR.
-check_debugfs_errors() {
-  local stderr
-  stderr="$1"
+# Replace a file in an ext4 image and verify the result.
+# Usage: debugfs_replace <image> <source> <target>
+debugfs_replace() {
+  local image="$1" source="$2" target="$3"
+  local errlog
+  errlog="$(mktemp -p "${WORKDIR}" debugfs-err.XXXXXXXXXX)"
 
-  # debugfs prints it's version info to STDERR, so we need to filter it out.
-  # shellcheck disable=SC2312  # grep returns an error code if no match.
-  if [[ "$(grep -vc '^debugfs ' "${stderr}")" -ne 0 ]]; then
-    grep -v '^debugfs ' "${stderr}" >&2
+  cat <<EOF | debugfs -w -f - "${image}" 2>"${errlog}"
+rm ${target}
+write ${source} ${target}
+ea_set ${target} security.selinux system_u:object_r:os_t:s0
+EOF
+
+  local unexpected
+  unexpected="$(grep -Ev '^debugfs [0-9]+\.[0-9]+\.[0-9]+ \([^)]+\)$' "${errlog}" || true)"
+  if [[ -n "${unexpected}" ]]; then
+    echo "debugfs produced unexpected output:" >&2
+    echo "${unexpected}" >&2
+    rm -f "${errlog}"
+    exit 1
+  fi
+  rm -f "${errlog}"
+
+  if ! debugfs -R "stat ${target}" "${image}" 2>/dev/null | grep -q 'Size:'
+  then
+    echo "debugfs verify failed: '${target}' missing after write" >&2
+    exit 1
+  fi
+
+  if ! debugfs -R "ea_get ${target} security.selinux" "${image}" 2>/dev/null |
+  grep -q 'system_u:object_r:os_t:s0'; then
+    echo "debugfs verify failed: '${target}' selinux label not set" >&2
+    exit 1
+  fi
+}
+
+# Write a partition back to a disk image and verify via hash comparison.
+write_partition() {
+  local src="$1" dst="$2" seek_mib="$3"
+  local src_bytes
+  src_bytes="$(stat -c '%s' "${src}")"
+  local expected
+  expected="$(sha256sum < "${src}" | cut -d' ' -f1)"
+
+  dd if="${src}" of="${dst}" \
+    iflag=fullblock conv=notrunc,fsync bs=1M seek="${seek_mib}"
+
+  local skip_bytes=$(( seek_mib * (1 << 20) ))
+  local actual
+  actual="$(dd if="${dst}" iflag=skip_bytes,count_bytes,fullblock \
+    skip="${skip_bytes}" count="${src_bytes}" bs=1M 2>/dev/null |
+    sha256sum | cut -d' ' -f1)"
+
+  if [[ "${expected}" != "${actual}" ]]; then
+    echo "write verification failed at offset ${seek_mib}MiB (${src##*/})" >&2
     exit 1
   fi
 }
@@ -180,23 +226,16 @@ else
     echo "no new root artifacts found" >&2
     exit 1
   else
-    # Write files from the root mount to the root image.
-    ROOT_DEBUGFS_STDERR="${WORKDIR}/root.err"
     for artifact in "${new_root_artifacts[@]}"; do
-      cat <<EOF | debugfs -w -f - "${ROOT_IMAGE}" 2>>"${ROOT_DEBUGFS_STDERR}"
-rm ${artifact#"${ROOT_MOUNT}"}
-write ${artifact} ${artifact#"${ROOT_MOUNT}"}
-ea_set ${artifact#"${ROOT_MOUNT}"} security.selinux system_u:object_r:os_t:s0
-EOF
+      debugfs_replace "${ROOT_IMAGE}" \
+        "${artifact}" "${artifact#"${ROOT_MOUNT}"}"
     done
-    check_debugfs_errors "${ROOT_DEBUGFS_STDERR}"
   fi
 fi
 
 # Validate and write root image back to the OS image.
 check_image_size "${ROOT_IMAGE}" "${partsize["ROOT-A"]}"
-dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" \
-  iflag=fullblock conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
+write_partition "${ROOT_IMAGE}" "${OS_IMAGE}" "${partoff["ROOT-A"]}"
 
 # Report ROOT partition usage
 if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
@@ -212,8 +251,7 @@ generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
 
 # Validate and write root verity back to the OS image. The image size check
 # isn't needed here as it's already done in `generate_verity_root`.
-dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" \
-  iflag=fullblock conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
+write_partition "${VERITY_IMAGE}" "${OS_IMAGE}" "${partoff["HASH-A"]}"
 
 ###############################################################################
 # Section 5: maybe secure boot
@@ -247,26 +285,15 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
 
   # Write the EFI image back to the OS image.
   check_image_size "${EFI_IMAGE}" "${partsize["EFI-A"]}"
-  dd if="${EFI_IMAGE}" of="${OS_IMAGE}" \
-    iflag=fullblock conv=notrunc bs=1M seek="${partoff["EFI-A"]}"
+  write_partition "${EFI_IMAGE}" "${OS_IMAGE}" "${partoff["EFI-A"]}"
 
   # Resign the kernel and write to boot image.
   sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
-  KERNEL_DEBUGFS_STDERR="${WORKDIR}/vmlinuz.err"
-  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${KERNEL_DEBUGFS_STDERR}"
-rm vmlinuz
-write ${BOOT_MOUNT}/vmlinuz vmlinuz
-ea_set vmlinuz security.selinux system_u:object_r:os_t:s0
-EOF
+  debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" vmlinuz
 
   # Generate a new HMAC for the kernel after signing and write to boot image.
   generate_hmac "${BOOT_MOUNT}/vmlinuz"
-  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${KERNEL_DEBUGFS_STDERR}"
-rm .vmlinuz.hmac
-write ${BOOT_MOUNT}/.vmlinuz.hmac .vmlinuz.hmac
-ea_set .vmlinuz.hmac security.selinux system_u:object_r:os_t:s0
-EOF
-  check_debugfs_errors "${KERNEL_DEBUGFS_STDERR}"
+  debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" .vmlinuz.hmac
 fi
 
 ###############################################################################
@@ -280,28 +307,17 @@ sed -i \
   "${GRUB_CONFIG}"
 
 # Replace grub.cfg on the boot image.
-GRUB_DEBUGFS_STDERR="${WORKDIR}/grub.err"
-cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${GRUB_DEBUGFS_STDERR}"
-rm /grub/grub.cfg
-write ${GRUB_CONFIG} /grub/grub.cfg
-ea_set /grub/grub.cfg security.selinux system_u:object_r:os_t:s0
-EOF
+debugfs_replace "${BOOT_IMAGE}" "${GRUB_CONFIG}" /grub/grub.cfg
 
 # Sign the grub.cfg and replace the signature on the boot image, if needed.
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   sign_grubcfg "${GRUB_CONFIG}"
-  cat <<EOF | debugfs -w -f - "${BOOT_IMAGE}" 2>>"${GRUB_DEBUGFS_STDERR}"
-rm /grub/grub.cfg.sig
-write ${GRUB_CONFIG}.sig /grub/grub.cfg.sig
-ea_set /grub/grub.cfg.sig security.selinux system_u:object_r:os_t:s0
-EOF
+  debugfs_replace "${BOOT_IMAGE}" "${GRUB_CONFIG}.sig" /grub/grub.cfg.sig
 fi
-check_debugfs_errors "${GRUB_DEBUGFS_STDERR}"
 
 # Write the boot image back to the OS image.
 check_image_size "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
-dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" \
-  iflag=fullblock conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+write_partition "${BOOT_IMAGE}" "${OS_IMAGE}" "${partoff["BOOT-A"]}"
 
 # Report BOOT partition usage
 boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
