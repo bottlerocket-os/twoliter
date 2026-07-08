@@ -8,8 +8,10 @@ pub(crate) mod template;
 use self::template::RenderedParameter;
 use crate::aws::ssm::template::RenderedParametersMap;
 use crate::aws::{
-    ami::public::ami_is_public, ami::Image, client::build_client_config, parse_arch,
-    region_from_string,
+    ami::public::ami_is_public,
+    ami::{read_ami_input, Image, RegionAccount, RegionAccountImageMap},
+    client::build_client_config_for_role,
+    parse_arch, region_from_string,
 };
 use crate::Args;
 use aws_config::SdkConfig;
@@ -20,6 +22,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 use governor::{prelude::*, Quota, RateLimiter};
 use log::{error, info, trace};
 use nonzero_ext::nonzero;
+use pubsys_config::AwsConfig as PubsysAwsConfig;
 use pubsys_config::InfraConfig;
 use serde::Serialize;
 use snafu::{ensure, OptionExt, ResultExt};
@@ -38,7 +41,8 @@ use std::{
         .requires("ssm_parameter_output")
 ))]
 pub(crate) struct SsmArgs {
-    // This is JSON output from `pubsys ami` like `{"us-west-2": "ami-123"}`
+    // This is JSON output from `pubsys ami`, nested by account, like
+    // `{"us-west-2": {"012345678901": {"id": "ami-123", ...}}}`
     /// Path to the JSON file containing regional AMI IDs to modify
     #[arg(long)]
     ami_input: PathBuf,
@@ -112,7 +116,7 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
     );
     let base_region = region_from_string(&regions[0]);
 
-    let amis = parse_ami_input(&regions, ssm_args)?;
+    let amis = parse_ami_input(&regions, ssm_args, &aws, &base_region).await?;
 
     // Template setup   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
@@ -158,28 +162,36 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Generate AWS Clients to use for the updates.
+    // Generate AWS Clients to use for the updates.  A single region can host multiple target
+    // accounts, and each account has its own independent SSM parameter store, so we key clients by
+    // (region, account) - assuming the role that reaches each account.  The `ssm::*` functions
+    // fan out over these keys internally, preserving parallelism across both regions and accounts.
     let mut param_update_ops: Vec<SsmParamUpdateOp> = Vec::with_capacity(new_parameters.len());
-    let mut aws_sdk_configs: HashMap<Region, SdkConfig> = HashMap::with_capacity(regions.len());
-    let mut ssm_clients = HashMap::with_capacity(amis.len());
+    let mut aws_sdk_configs: HashMap<RegionAccount, SdkConfig> = HashMap::new();
+    let mut ssm_clients: HashMap<RegionAccount, SsmClient> = HashMap::new();
 
     for parameter in new_parameters.iter() {
-        let region = &parameter.ssm_key.region;
+        let key = RegionAccount {
+            region: parameter.ssm_key.region.clone(),
+            account_id: parameter.ssm_key.account_id.clone(),
+        };
         // Store client configs so that we only have to create them once.
         // The HashMap `entry` API doesn't play well with `async`, so we use a match here instead.
-        let client_config = match aws_sdk_configs.get(region) {
+        let client_config = match aws_sdk_configs.get(&key) {
             Some(client_config) => client_config.clone(),
             None => {
-                let client_config = build_client_config(region, &base_region, &aws).await;
-                aws_sdk_configs.insert(region.clone(), client_config.clone());
+                let role = role_for_account(&aws, &key.region, &key.account_id);
+                let client_config =
+                    build_client_config_for_role(&key.region, &base_region, &aws, role.as_deref())
+                        .await;
+                aws_sdk_configs.insert(key.clone(), client_config.clone());
                 client_config
             }
         };
 
-        let ssm_client = SsmClient::new(&client_config);
-        if !ssm_clients.contains_key(region) {
-            ssm_clients.insert(region.clone(), ssm_client);
-        }
+        ssm_clients
+            .entry(key.clone())
+            .or_insert_with(|| SsmClient::new(&client_config));
 
         let ec2_client = Ec2Client::new(&client_config);
         param_update_ops.push(SsmParamUpdateOp {
@@ -204,9 +216,9 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
         new_parameters.iter().map(|param| &param.ssm_key).collect();
     let result = ssm::get_parameters(&new_parameter_names, &ssm_clients).await;
 
-    // Typically if a user calls GetParameters for a nonexistent parameter, the call will succeed
-    // and simply report the parameter as invalid. However, SSM has a special case error in
-    // GetParameters for keys under the `/aws/` namespace if the service prefix (e.g
+    // Typically if a user calls GetParameters for a nonexistent parameter, the call will
+    // succeed and simply report the parameter as invalid. However, SSM has a special case
+    // error in GetParameters for keys under the `/aws/` namespace if the service prefix (e.g
     // `/aws/service/bottlerocket`) does not contain any keys. This is an expected state when
     // publishing parameters in a new region for the first time. We can assume when we see this
     // error that there are no parameters under the prefix.
@@ -250,6 +262,20 @@ pub(crate) async fn run(args: &Args, ssm_args: &SsmArgs) -> Result<()> {
 
     info!("All parameters match requested values.");
     Ok(())
+}
+
+/// Returns the role to assume in order to reach the given account in the given region.  Returns
+/// `None` if no configured role matches (for example, the AMI was published using the base/global
+/// credentials).
+fn role_for_account(
+    pubsys_aws_config: &PubsysAwsConfig,
+    region: &Region,
+    account_id: &str,
+) -> Option<String> {
+    pubsys_aws_config
+        .region
+        .get(region.as_ref())
+        .and_then(|region_config| region_config.role_for_account(account_id))
 }
 
 fn is_aws_service_access_denied_error(result: &ssm::Result<HashMap<SsmKey, String>>) -> bool {
@@ -337,16 +363,23 @@ async fn check_public_namespace_amis_are_public(
         .all(|is_public| is_public))
 }
 
-/// The key to a unique SSM parameter
+/// The key to a unique SSM parameter. Parameters live in a specific account's parameter store in a
+/// specific region, so the account is part of the key: the same region+name in two different
+/// accounts are distinct parameters.
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub(crate) struct SsmKey {
     pub(crate) region: Region,
+    pub(crate) account_id: String,
     pub(crate) name: String,
 }
 
 impl SsmKey {
-    pub(crate) fn new(region: Region, name: String) -> Self {
-        Self { region, name }
+    pub(crate) fn new(region: Region, account_id: String, name: String) -> Self {
+        Self {
+            region,
+            account_id,
+            name,
+        }
     }
 
     pub(crate) fn is_in_public_namespace(&self) -> bool {
@@ -372,14 +405,20 @@ pub(crate) struct BuildContext<'a> {
 pub(crate) type SsmParameters = HashMap<SsmKey, String>;
 
 /// Parse the AMI input file
-fn parse_ami_input(regions: &[String], ssm_args: &SsmArgs) -> Result<HashMap<Region, Image>> {
+async fn parse_ami_input(
+    regions: &[String],
+    ssm_args: &SsmArgs,
+    aws: &PubsysAwsConfig,
+    base_region: &Region,
+) -> Result<HashMap<RegionAccount, Image>> {
     info!("Using AMI data from path: {}", ssm_args.ami_input.display());
-    let file = File::open(&ssm_args.ami_input).context(error::FileSnafu {
+    let ami_input_bytes = std::fs::read(&ssm_args.ami_input).context(error::FileSnafu {
         op: "open",
         path: &ssm_args.ami_input,
     })?;
-    let mut ami_input: HashMap<String, Image> =
-        serde_json::from_reader(file).context(error::DeserializeSnafu {
+    let mut ami_input: RegionAccountImageMap = read_ami_input(&ami_input_bytes, aws, base_region)
+        .await
+        .context(error::ParseAmiInputSnafu {
             path: &ssm_args.ami_input,
         })?;
     trace!("Parsed AMI input: {ami_input:#?}");
@@ -407,17 +446,26 @@ fn parse_ami_input(regions: &[String], ssm_args: &SsmArgs) -> Result<HashMap<Reg
         }
     );
 
-    // Parse region names
+    // Flatten the nested region -> account -> image input into a map keyed by (region, account),
+    // restricted to the requested regions.
     let mut amis = HashMap::with_capacity(regions.len());
     for name in regions {
-        let image = ami_input
+        let account_images = ami_input
             .remove(name)
             // This could only happen if someone removes the check above...
             .with_context(|| error::UnknownRegionsSnafu {
                 regions: vec![name.clone()],
             })?;
         let region = region_from_string(name);
-        amis.insert(region.clone(), image);
+        for (account_id, image) in account_images {
+            amis.insert(
+                RegionAccount {
+                    region: region.clone(),
+                    account_id,
+                },
+                image,
+            );
+        }
     }
 
     Ok(amis)
@@ -435,11 +483,11 @@ pub(crate) fn key_difference(wanted: &SsmParameters, current: &SsmParameters) ->
     for key in wanted_keys.difference(&current_keys) {
         let new_value = &wanted[key];
         println!(
-            "{} - {} - new parameter:\n   new value: {}",
-            key.name, key.region, new_value,
+            "{} - {} ({}) - new parameter:\n   new value: {}",
+            key.name, key.region, key.account_id, new_value,
         );
         parameters_to_set.insert(
-            SsmKey::new(key.region.clone(), key.name.clone()),
+            SsmKey::new(key.region.clone(), key.account_id.clone(), key.name.clone()),
             new_value.clone(),
         );
     }
@@ -449,14 +497,17 @@ pub(crate) fn key_difference(wanted: &SsmParameters, current: &SsmParameters) ->
         let new_value = &wanted[key];
 
         if current_value == new_value {
-            println!("{} - {} - no change", key.name, key.region);
+            println!(
+                "{} - {} ({}) - no change",
+                key.name, key.region, key.account_id
+            );
         } else {
             println!(
-                "{} - {} - changing value:\n   old value: {}\n   new value: {}",
-                key.name, key.region, current_value, new_value
+                "{} - {} ({}) - changing value:\n   old value: {}\n   new value: {}",
+                key.name, key.region, key.account_id, current_value, new_value
             );
             parameters_to_set.insert(
-                SsmKey::new(key.region.clone(), key.name.clone()),
+                SsmKey::new(key.region.clone(), key.account_id.clone(), key.name.clone()),
                 new_value.clone(),
             );
         }
@@ -491,10 +542,10 @@ mod error {
             source: crate::aws::ami::public::Error,
         },
 
-        #[snafu(display("Failed to deserialize input from '{}': {}", path.display(), source))]
-        Deserialize {
+        #[snafu(display("Failed to parse AMI input from '{}': {}", path.display(), source))]
+        ParseAmiInput {
             path: PathBuf,
-            source: serde_json::Error,
+            source: crate::aws::ami::AmiInputError,
         },
 
         #[snafu(display("Failed to fetch parameters from SSM: {}", source))]
