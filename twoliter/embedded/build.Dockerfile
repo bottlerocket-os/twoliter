@@ -229,6 +229,7 @@ ARG HOST_CONTAINERS
 ARG FIPS
 ARG EXTERNAL_KMOD_DEVELOPMENT
 ARG ENCRYPTED_STORAGE
+ARG FIRST_PARTY_STACK
 
 USER builder
 WORKDIR /home/builder
@@ -252,7 +253,8 @@ RUN \
    && echo -e -n "${IN_PLACE_UPDATES:+%bcond_without in_place_updates\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${EXTERNAL_KMOD_DEVELOPMENT:+%bcond_without external_kmod_development\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${ENCRYPTED_STORAGE:+%bcond_without encrypted_storage\n}" >> "${RPM_BCONDS}"
+   && echo -e -n "${ENCRYPTED_STORAGE:+%bcond_without encrypted_storage\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${FIRST_PARTY_STACK:+%bcond_without first_party_stack\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Creates an RPM repository from packages created in Section 1 and kits from Section 2.
@@ -364,6 +366,7 @@ ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
 ARG ENCRYPTED_STORAGE
+ARG FIRST_PARTY_STACK
 ARG PROJECT_VENDOR
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
@@ -407,7 +410,8 @@ RUN --mount=target=/host \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
       ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
-      ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} && \
+      ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
+      --with-first-party-stack="${FIRST_PARTY_STACK:-no}" && \
     rm -rf /local/rpms && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
@@ -527,6 +531,7 @@ ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG UEFI_SECURE_BOOT
 ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
+ARG FIRST_PARTY_STACK
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
@@ -564,7 +569,8 @@ RUN --mount=target=/host \
       --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
-      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} && \
+      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
+      --with-first-party-stack="${FIRST_PARTY_STACK:-no}" && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
     rm /bypass && \

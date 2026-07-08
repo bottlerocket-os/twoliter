@@ -254,6 +254,34 @@ only be enabled for variants that can guarantee that a TPM 2.0 device will be pr
 encrypted-storage = true
 ```
 
+`first-party-stack` controls whether the Bottlerocket-provided software stack — the
+orchestrator integration (kubelet, containerd, host-containers, admin-containers), the
+settings system (apiserver, datastore, settings rendering, migrations), in-place updates, and
+the BOTTLEROCKET-PRIVATE / BOTTLEROCKET-DATA partitions — is built into the image. The
+default is `true`.
+
+When `first-party-stack = false`, the image is reduced to the kernel, base userspace,
+dm-verity-protected rootfs, and the update mechanism. The OS image has a single bank of OS
+partitions (BIOS-BOOT, EFI-SYSTEM, BOOT-A, ROOT-A, HASH-A) with no `RESERVED-A` partition;
+ROOT-A absorbs the slack. The default OS image size becomes 1 GiB unless `os-image-size-gib`
+is explicitly set. The variant author owns all system configuration; if Bottlerocket
+components that expect persistent storage at `partlabel=BOTTLEROCKET-DATA` are shipped, such
+a volume may optionally be attached at runtime.
+
+`first-party-stack = false` requires `partition-plan = "unified"`, and is incompatible with
+`uefi-secure-boot`, `encrypted-storage`, `in-place-updates`, and `host-containers`; the build
+will fail fast in those cases. Setting `first-party-stack = false` also turns off the silent
+defaults for `in-place-updates` and `host-containers` so that, once `partition-plan = "unified"`
+is set, toggling `first-party-stack = false` is sufficient to produce a stripped-down image.
+
+```ignore
+[package.metadata.build-variant.image-features]
+first-party-stack = false
+
+[package.metadata.build-variant.image-layout]
+partition-plan = "unified"
+```
+
 */
 
 mod error;
@@ -507,11 +535,27 @@ impl ManifestInfo {
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         let variant = self.build_variant()?;
-        let mut features = HashSet::from([
-            ImageFeature::InPlaceUpdates,
-            ImageFeature::HostContainers,
-            ImageFeature::ExternalKmodDevelopment,
-        ]);
+        // If the user explicitly disabled `first-party-stack`, drop the silent
+        // defaults for `in-place-updates` and `host-containers` (and
+        // `first-party-stack` itself). An explicit `in-place-updates = true`
+        // is still rejected later by the validator.
+        let first_party_stack_explicitly_disabled = variant
+            .image_features
+            .as_ref()
+            .and_then(|m| m.get(&ImageFeature::FirstPartyStack))
+            .copied()
+            .map(|enabled| !enabled)
+            .unwrap_or(false);
+        let mut features = if first_party_stack_explicitly_disabled {
+            HashSet::from([ImageFeature::ExternalKmodDevelopment])
+        } else {
+            HashSet::from([
+                ImageFeature::FirstPartyStack,
+                ImageFeature::InPlaceUpdates,
+                ImageFeature::HostContainers,
+                ImageFeature::ExternalKmodDevelopment,
+            ])
+        };
         if let Some(image_features) = &variant.image_features {
             for (feature, enabled) in image_features.iter() {
                 if *enabled {
@@ -738,9 +782,18 @@ impl Display for ImageSize {
 
 #[derive(Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "kebab-case")]
+/// Image layout settings as deserialized from a variant manifest.
+///
+/// Note: callers should always run the layout through
+/// [`resolved_image_layout`] before using it to drive a build. Other fields
+/// (`data_image_size_gib`, `partition_plan`) remain `pub` for direct access
+/// since they have no feature-dependent default.
 pub struct ImageLayout {
-    #[serde(default = "ImageLayout::default_os_image_size_gib")]
-    pub os_image_size_gib: ImageSize,
+    /// Raw value as it appeared (or did not appear) in the manifest. Use
+    /// [`ImageLayout::os_image_size_gib`] to read the resolved value, which
+    /// substitutes the appropriate default when this is `None`.
+    #[serde(default, rename = "os-image-size-gib")]
+    os_image_size_gib: Option<ImageSize>,
     #[serde(default = "ImageLayout::default_data_image_size_gib")]
     pub data_image_size_gib: ImageSize,
     #[serde(default = "ImageLayout::default_publish_image_size_hint_gib")]
@@ -752,15 +805,14 @@ pub struct ImageLayout {
 /// These are the historical defaults for all variants, before we added support
 /// for customizing these properties.
 static DEFAULT_OS_IMAGE_SIZE_GIB: ImageSize = ImageSize(2);
+/// Default OS image size when `first-party-stack = false` and the manifest
+/// does not specify `os-image-size-gib`.
+static DEFAULT_NO_FIRST_PARTY_OS_IMAGE_SIZE_GIB: ImageSize = ImageSize(1);
 static DEFAULT_DATA_IMAGE_SIZE_GIB: ImageSize = ImageSize(1);
 static DEFAULT_PUBLISH_IMAGE_SIZE_HINT_GIB: ImageSize = ImageSize(22);
 static DEFAULT_PARTITION_PLAN: PartitionPlan = PartitionPlan::Split;
 
 impl ImageLayout {
-    fn default_os_image_size_gib() -> ImageSize {
-        DEFAULT_OS_IMAGE_SIZE_GIB
-    }
-
     fn default_data_image_size_gib() -> ImageSize {
         DEFAULT_DATA_IMAGE_SIZE_GIB
     }
@@ -773,11 +825,22 @@ impl ImageLayout {
         DEFAULT_PARTITION_PLAN
     }
 
+    /// Returns the resolved OS image size. If the manifest did not specify
+    /// `os-image-size-gib`, the historical 2 GiB default is used.
+    pub fn os_image_size_gib(&self) -> ImageSize {
+        self.os_image_size_gib.unwrap_or(DEFAULT_OS_IMAGE_SIZE_GIB)
+    }
+
+    /// Returns whether `os-image-size-gib` was explicitly set in the manifest.
+    pub fn os_image_size_gib_was_set(&self) -> bool {
+        self.os_image_size_gib.is_some()
+    }
+
     // At publish time we will need specific sizes for the OS image and the (optional) data image.
     // The sizes returned by this function depend on the image layout, and whether the publish
     // image hint is larger than the required minimum size.
     pub fn publish_image_sizes_gib(&self) -> (i32, i32) {
-        let os_image_base_size_gib = self.os_image_size_gib.0;
+        let os_image_base_size_gib = self.os_image_size_gib().0;
         let data_image_base_size_gib = self.data_image_size_gib.0;
         let publish_image_size_hint_gib = self.publish_image_size_hint_gib.0;
 
@@ -801,7 +864,7 @@ impl ImageLayout {
 impl Default for ImageLayout {
     fn default() -> Self {
         Self {
-            os_image_size_gib: Self::default_os_image_size_gib(),
+            os_image_size_gib: None,
             data_image_size_gib: Self::default_data_image_size_gib(),
             publish_image_size_hint_gib: Self::default_publish_image_size_hint_gib(),
             partition_plan: Self::default_partition_plan(),
@@ -849,6 +912,7 @@ pub enum ImageFeature {
     HostContainers,
     ExternalKmodDevelopment,
     EncryptedStorage,
+    FirstPartyStack,
 }
 
 const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[&ImageFeature::EncryptedStorage];
@@ -857,6 +921,98 @@ const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::GrubSetPrivateVar,
     &ImageFeature::SystemdNetworkd,
 ];
+
+/// Returns an [`ImageLayout`] with the OS image size adjusted for the given
+/// feature set. If `first-party-stack` is disabled and the manifest did not
+/// explicitly set `os-image-size-gib`, the default OS image size is reduced
+/// from 2 GiB to 1 GiB. All other fields are passed through unchanged.
+pub fn resolved_image_layout(
+    layout: &ImageLayout,
+    features: &HashSet<ImageFeature>,
+) -> ImageLayout {
+    let mut resolved = *layout;
+    if !features.contains(&ImageFeature::FirstPartyStack) && !layout.os_image_size_gib_was_set() {
+        resolved.os_image_size_gib = Some(DEFAULT_NO_FIRST_PARTY_OS_IMAGE_SIZE_GIB);
+    }
+    resolved
+}
+
+/// Validate that the requested image features and layout are compatible.
+///
+/// Currently this enforces that disabling `first-party-stack` is not combined
+/// with any of `uefi-secure-boot`, `encrypted-storage`, `in-place-updates`,
+/// `host-containers`, or with a `split` partition plan.
+///
+/// All discovered conflicts are reported in a single error so that users see
+/// the complete list in one build cycle. The conflict list is iterated in a
+/// fixed order, so the resulting error message is deterministic.
+///
+/// # Internal contract
+///
+/// Callers that pass `features` from [`ManifestInfo::image_features`] and
+/// `layout` from [`resolved_image_layout`] should invoke this function before
+/// constructing any `DockerBuild` or otherwise using those values to drive a
+/// build. Both `DockerBuild::new_variant` and `DockerBuild::repack_variant`
+/// call this internally as defense-in-depth so that adding a new entry point
+/// cannot silently bypass validation.
+pub fn validate_image_features(
+    features: &HashSet<ImageFeature>,
+    layout: &ImageLayout,
+) -> Result<()> {
+    if features.contains(&ImageFeature::FirstPartyStack) {
+        return Ok(());
+    }
+    let conflicts: &[(ImageFeature, &str, &str)] = &[
+        (
+            ImageFeature::UefiSecureBoot,
+            "uefi-secure-boot",
+            "secure boot relies on signed first-party artifacts that are not present when `first-party-stack = false`",
+        ),
+        (
+            ImageFeature::EncryptedStorage,
+            "encrypted-storage",
+            "encrypted storage requires the BOTTLEROCKET-PRIVATE/DATA partitions, which are not built when `first-party-stack = false`",
+        ),
+        (
+            ImageFeature::InPlaceUpdates,
+            "in-place-updates",
+            "in-place updates require two banks of OS partitions, which are not built when `first-party-stack = false`",
+        ),
+        (
+            ImageFeature::HostContainers,
+            "host-containers",
+            "host-containers require the BOTTLEROCKET-DATA partition, which is not built when `first-party-stack = false`",
+        ),
+    ];
+
+    // Collect all conflicts in a deterministic order so the user sees the
+    // complete list in a single build cycle, rather than playing whack-a-mole.
+    // Use the kebab-case manifest key in messages to match the TOML the user
+    // wrote and the error messages produced by the shell-side validators.
+    let mut conflict_messages: Vec<String> = conflicts
+        .iter()
+        .filter(|(feature, _, _)| features.contains(feature))
+        .map(|(_, name, reason)| format!("`{name}`: {reason}"))
+        .collect();
+
+    if matches!(layout.partition_plan, PartitionPlan::Split) {
+        conflict_messages.push(
+            "`partition-plan=split`: when `first-party-stack = false`, the image uses a \
+             single unified disk with no separate data image"
+                .to_string(),
+        );
+    }
+
+    if !conflict_messages.is_empty() {
+        // Render one conflict per line, indented, so the resulting error
+        // message remains readable when several conflicts are reported at
+        // once.
+        let reason = format!("\n  - {}", conflict_messages.join("\n  - "));
+        return error::IncompatibleImageFeaturesSnafu { reason }.fail()?;
+    }
+
+    Ok(())
+}
 
 impl TryFrom<String> for ImageFeature {
     type Error = Error;
@@ -872,11 +1028,35 @@ impl TryFrom<String> for ImageFeature {
             "host-containers" => Ok(ImageFeature::HostContainers),
             "external-kmod-development" => Ok(ImageFeature::ExternalKmodDevelopment),
             "encrypted-storage" => Ok(ImageFeature::EncryptedStorage),
+            "first-party-stack" => Ok(ImageFeature::FirstPartyStack),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
 }
 
+/// String representations of image-feature flags across the toolchain.
+///
+/// A single feature has multiple string representations as it flows through
+/// the build pipeline. Keep these in mind when adding or modifying features:
+///
+/// | Layer                              | Representation       | Example          |
+/// |------------------------------------|----------------------|------------------|
+/// | Rust enum variant                  | UpperCamelCase       | `FirstPartyStack` |
+/// | Manifest TOML key (TryFrom impl)   | kebab-case           | `first-party-stack` |
+/// | Display impl (env var name)        | UPPER_SNAKE_CASE     | `FIRST_PARTY_STACK` |
+/// | Dockerfile `--build-arg` value     | `1` (truthy) or `yes` | `FIRST_PARTY_STACK=yes` |
+/// | Shell script `--with-X=` value     | `yes` / `no`         | `--with-first-party-stack=no` |
+/// | Runtime `image-features.env` value | `true` / `false`     | `FIRST_PARTY_STACK=true` |
+///
+/// Each layer's representation is intentional: the Dockerfile uses `1` so
+/// that bash's `${VAR:+...}` expansion can convert presence to a flag, the
+/// shell scripts use `yes`/`no` to be readable in build logs, and the
+/// runtime env file uses `true`/`false` to be parseable by configuration
+/// loaders. `FirstPartyStack` is the exception: since it is default-true
+/// and inverted, its build-arg is `yes` so the Dockerfile can pipe the
+/// value directly to `--with-first-party-stack=`. See
+/// `tools/buildsys/src/builder.rs`, `twoliter/embedded/build.Dockerfile`,
+/// and `twoliter/embedded/rpm2img` for the conversions between layers.
 impl fmt::Display for ImageFeature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -890,6 +1070,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::HostContainers => write!(f, "HOST_CONTAINERS"),
             ImageFeature::ExternalKmodDevelopment => write!(f, "EXTERNAL_KMOD_DEVELOPMENT"),
             ImageFeature::EncryptedStorage => write!(f, "ENCRYPTED_STORAGE"),
+            ImageFeature::FirstPartyStack => write!(f, "FIRST_PARTY_STACK"),
         }
     }
 }
@@ -1033,5 +1214,244 @@ mod test {
             "extra-3-kit".to_string(),
         ];
         assert_eq!(kit_list, expected);
+    }
+
+    fn first_party_stack_disabled_layout(os_size: Option<u16>, plan: PartitionPlan) -> ImageLayout {
+        ImageLayout {
+            os_image_size_gib: os_size.map(ImageSize),
+            data_image_size_gib: DEFAULT_DATA_IMAGE_SIZE_GIB,
+            publish_image_size_hint_gib: DEFAULT_PUBLISH_IMAGE_SIZE_HINT_GIB,
+            partition_plan: plan,
+        }
+    }
+
+    #[test]
+    fn first_party_stack_disabled_default_os_size_is_one_gib() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        // No FirstPartyStack in the set → stripped image, default 1 GiB.
+        let features: HashSet<ImageFeature> = HashSet::new();
+        let resolved = resolved_image_layout(&layout, &features);
+        assert_eq!(resolved.os_image_size_gib().0, 1);
+    }
+
+    #[test]
+    fn first_party_stack_disabled_respects_explicit_os_size() {
+        let layout = first_party_stack_disabled_layout(Some(4), PartitionPlan::Unified);
+        let features: HashSet<ImageFeature> = HashSet::new();
+        let resolved = resolved_image_layout(&layout, &features);
+        assert_eq!(resolved.os_image_size_gib().0, 4);
+    }
+
+    #[test]
+    fn first_party_stack_default_os_size_is_two_gib() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features = HashSet::from([ImageFeature::FirstPartyStack]);
+        let resolved = resolved_image_layout(&layout, &features);
+        assert_eq!(resolved.os_image_size_gib().0, 2);
+    }
+
+    #[test]
+    fn first_party_stack_disabled_alone_passes_validation() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features: HashSet<ImageFeature> = HashSet::new();
+        validate_image_features(&features, &layout)
+            .expect("first-party-stack=false + unified should validate");
+    }
+
+    #[test]
+    fn first_party_stack_disabled_rejects_secure_boot() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features = HashSet::from([ImageFeature::UefiSecureBoot]);
+        assert!(validate_image_features(&features, &layout).is_err());
+    }
+
+    #[test]
+    fn first_party_stack_disabled_rejects_encrypted_storage() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features = HashSet::from([ImageFeature::EncryptedStorage]);
+        assert!(validate_image_features(&features, &layout).is_err());
+    }
+
+    #[test]
+    fn first_party_stack_disabled_rejects_in_place_updates() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features = HashSet::from([ImageFeature::InPlaceUpdates]);
+        assert!(validate_image_features(&features, &layout).is_err());
+    }
+
+    #[test]
+    fn first_party_stack_disabled_rejects_split_partition_plan() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Split);
+        let features: HashSet<ImageFeature> = HashSet::new();
+        assert!(validate_image_features(&features, &layout).is_err());
+    }
+
+    #[test]
+    fn validation_is_noop_when_first_party_stack_enabled() {
+        // With `first-party-stack` enabled, the validator should accept any
+        // combination.
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Split);
+        let features = HashSet::from([
+            ImageFeature::FirstPartyStack,
+            ImageFeature::UefiSecureBoot,
+            ImageFeature::EncryptedStorage,
+            ImageFeature::InPlaceUpdates,
+        ]);
+        validate_image_features(&features, &layout)
+            .expect("validation should be no-op with first-party-stack enabled");
+    }
+
+    #[test]
+    fn first_party_stack_disabled_rejects_host_containers() {
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        let features = HashSet::from([ImageFeature::HostContainers]);
+        assert!(validate_image_features(&features, &layout).is_err());
+    }
+
+    #[test]
+    fn first_party_stack_disabled_reports_all_conflicts_at_once() {
+        // The validator should report every conflict in a single error so the
+        // user does not have to fix them one at a time across multiple builds.
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Split);
+        let features = HashSet::from([
+            ImageFeature::UefiSecureBoot,
+            ImageFeature::EncryptedStorage,
+            ImageFeature::InPlaceUpdates,
+            ImageFeature::HostContainers,
+        ]);
+        let err = validate_image_features(&features, &layout)
+            .expect_err("multi-conflict combination should fail validation");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("uefi-secure-boot"),
+            "missing uefi-secure-boot in: {msg}"
+        );
+        assert!(
+            msg.contains("encrypted-storage"),
+            "missing encrypted-storage in: {msg}"
+        );
+        assert!(
+            msg.contains("in-place-updates"),
+            "missing in-place-updates in: {msg}"
+        );
+        assert!(
+            msg.contains("host-containers"),
+            "missing host-containers in: {msg}"
+        );
+        assert!(
+            msg.contains("partition-plan=split"),
+            "missing partition-plan in: {msg}"
+        );
+    }
+
+    /// Build a `ManifestInfo` from a TOML manifest fragment string.
+    fn manifest_info_from_toml(toml_str: &str) -> ManifestInfo {
+        toml::from_str(toml_str).expect("failed to parse test manifest")
+    }
+
+    /// Build a `[package.metadata.build-variant]` manifest with the given
+    /// inline `image-features` map.
+    fn variant_manifest_with_image_features(image_features_block: &str) -> String {
+        format!(
+            r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+{image_features_block}
+"#
+        )
+    }
+
+    #[test]
+    fn image_features_first_party_stack_disabled_drops_silent_defaults() {
+        // `first-party-stack = false` alone should drop the silent
+        // `in-place-updates` and `host-containers` defaults (and remove
+        // `first-party-stack` itself from the seed).
+        let toml = variant_manifest_with_image_features(
+            "[package.metadata.build-variant.image-features]\nfirst-party-stack = false",
+        );
+        let info = manifest_info_from_toml(&toml);
+        let features = info.image_features().expect("variant has image-features");
+        assert!(!features.contains(&ImageFeature::FirstPartyStack));
+        assert!(features.contains(&ImageFeature::ExternalKmodDevelopment));
+        assert!(!features.contains(&ImageFeature::InPlaceUpdates));
+        assert!(!features.contains(&ImageFeature::HostContainers));
+    }
+
+    #[test]
+    fn image_features_first_party_stack_disabled_with_host_containers_keeps_both() {
+        // The seed-set logic adds host-containers back if it's explicitly set
+        // to `true`, so that the validator can later reject the combination
+        // with a clear error rather than silently producing a confused image.
+        let toml = variant_manifest_with_image_features(
+            "[package.metadata.build-variant.image-features]\n\
+             first-party-stack = false\n\
+             host-containers = true",
+        );
+        let info = manifest_info_from_toml(&toml);
+        let features = info.image_features().expect("variant has image-features");
+        assert!(!features.contains(&ImageFeature::FirstPartyStack));
+        assert!(features.contains(&ImageFeature::HostContainers));
+        // Validator should reject this combination.
+        let layout = first_party_stack_disabled_layout(None, PartitionPlan::Unified);
+        assert!(validate_image_features(&features, &layout).is_err());
+    }
+
+    #[test]
+    fn image_features_default_seed_includes_first_party_stack() {
+        // No `image-features` at all → the default seed includes
+        // `first-party-stack` along with the historical silent defaults.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+"#;
+        let info = manifest_info_from_toml(toml);
+        let features = info
+            .image_features()
+            .expect("variant has build-variant section");
+        assert!(features.contains(&ImageFeature::FirstPartyStack));
+        assert!(features.contains(&ImageFeature::InPlaceUpdates));
+        assert!(features.contains(&ImageFeature::HostContainers));
+        assert!(features.contains(&ImageFeature::ExternalKmodDevelopment));
+    }
+
+    #[test]
+    fn image_features_explicit_first_party_stack_true_preserves_defaults() {
+        // Explicit `first-party-stack = true` is a no-op vs. the default; the
+        // historical silent defaults remain.
+        let toml = variant_manifest_with_image_features(
+            "[package.metadata.build-variant.image-features]\nfirst-party-stack = true",
+        );
+        let info = manifest_info_from_toml(&toml);
+        let features = info.image_features().expect("variant has image-features");
+        assert!(features.contains(&ImageFeature::FirstPartyStack));
+        assert!(features.contains(&ImageFeature::InPlaceUpdates));
+        assert!(features.contains(&ImageFeature::HostContainers));
+        assert!(features.contains(&ImageFeature::ExternalKmodDevelopment));
+    }
+
+    #[test]
+    fn image_features_omitted_uses_default_image() {
+        // A variant that omits the `[image-features]` section entirely
+        // produces the standard Bottlerocket image: `first-party-stack` is in
+        // the silent default seed, and the resolved layout uses the historical
+        // 2 GiB OS size.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+"#;
+        let info = manifest_info_from_toml(toml);
+        let features = info
+            .image_features()
+            .expect("variant has build-variant section");
+        let raw_layout = ImageLayout::default();
+        let layout = resolved_image_layout(&raw_layout, &features);
+        assert_eq!(layout.os_image_size_gib().0, 2);
+        validate_image_features(&features, &layout).expect("default image should pass validation");
     }
 }

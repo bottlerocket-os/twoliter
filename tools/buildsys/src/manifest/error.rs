@@ -46,4 +46,7 @@ pub(super) enum Error {
         "The cargo package we are building, '{name}', could not be found in the graph"
     ))]
     RootDependencyMissing { name: String },
+
+    #[snafu(display("`first-party-stack = false` is incompatible with: {reason}"))]
+    IncompatibleImageFeatures { reason: String },
 }

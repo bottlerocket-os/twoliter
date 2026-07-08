@@ -11,6 +11,7 @@ EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
+FIRST_PARTY_STACK="yes"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -30,6 +31,7 @@ for opt in "$@"; do
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
+  --with-first-party-stack=*) FIRST_PARTY_STACK="${optarg}" ;;
   --sbom-package-dir=*) SBOM_PACKAGE_DIR="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
@@ -48,6 +50,28 @@ done
 
 sanity_checks \
   "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}" "${SBOM_PACKAGE_DIR}"
+
+# Re-validate flag combinations: img2img/rpm2img can be invoked directly via
+# repack-variant, so we cannot rely on buildsys to have already enforced these.
+# Keep this list in sync with `img2img` and with `validate_image_features` in
+# `tools/buildsys/src/manifest.rs`.
+if [[ "${FIRST_PARTY_STACK}" == "no" ]]; then
+  declare -A first_party_stack_conflicts=(
+    [UEFI_SECURE_BOOT]="uefi-secure-boot"
+    [IN_PLACE_UPDATES]="in-place-updates"
+    [ENCRYPTED_STORAGE]="encrypted-storage"
+  )
+  for f in "${!first_party_stack_conflicts[@]}"; do
+    if [[ "${!f}" == "yes" ]]; then
+      echo "\`first-party-stack = false\` is incompatible with '${first_party_stack_conflicts[${f}]}'" >&2
+      exit 1
+    fi
+  done
+  if [[ "${PARTITION_PLAN}" == "split" ]]; then
+    echo "\`first-party-stack = false\` is incompatible with 'partition-plan=split'" >&2
+    exit 1
+  fi
+fi
 
 # Store output artifacts in a versioned directory.
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
@@ -93,7 +117,18 @@ split)
   truncate -s "${DATA_IMAGE_SIZE_GIB}G" "${DATA_IMAGE}"
   ;;
 unified)
-  truncate -s "$((OS_IMAGE_SIZE_GIB + DATA_IMAGE_SIZE_GIB))G" "${OS_IMAGE}"
+  # The caller is responsible for resolving any feature-dependent default
+  # for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `first-party-stack = false`)
+  # before invoking
+  # this script; we use the value as-is. See `resolved_image_layout` in
+  # `tools/buildsys/src/manifest.rs` for the canonical resolver.
+  if [[ "${FIRST_PARTY_STACK}" == "no" ]]; then
+    # Stripped-down images do not have a DATA partition, so do not pad the
+    # OS image with the would-be data image space.
+    truncate -s "${OS_IMAGE_SIZE_GIB}G" "${OS_IMAGE}"
+  else
+    truncate -s "$((OS_IMAGE_SIZE_GIB + DATA_IMAGE_SIZE_GIB))G" "${OS_IMAGE}"
+  fi
   ;;
 *)
   echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
@@ -105,18 +140,21 @@ declare -A partlabel parttype partguid partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff
+  partsize partoff "${FIRST_PARTY_STACK}"
 set_partition_labels partlabel
 set_partition_types parttype
 set_partition_uuids partguid "${PARTITION_PLAN}"
 
 declare -a partitions
 partitions=(BIOS)
-partitions+=(EFI-A BOOT-A ROOT-A HASH-A RESERVED-A)
-if [[ "${IN_PLACE_UPDATES}" == "yes" ]]; then
-  partitions+=(EFI-B BOOT-B ROOT-B HASH-B RESERVED-B)
+partitions+=(EFI-A BOOT-A ROOT-A HASH-A)
+if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+  partitions+=(RESERVED-A)
+  if [[ "${IN_PLACE_UPDATES}" == "yes" ]]; then
+    partitions+=(EFI-B BOOT-B ROOT-B HASH-B RESERVED-B)
+  fi
+  partitions+=(PRIVATE DATA-A DATA-B)
 fi
-partitions+=(PRIVATE DATA-A DATA-B)
 
 declare -a partargs
 for part in "${partitions[@]}"; do
@@ -151,7 +189,7 @@ done
 sgdisk --clear "${partargs[@]}" --sort --print "${OS_IMAGE}"
 
 # Partition the separate data disk, if we're using the split layout.
-if [[ "${PARTITION_PLAN}" == "split" ]]; then
+if [[ "${FIRST_PARTY_STACK}" == "yes" && "${PARTITION_PLAN}" == "split" ]]; then
   data_start="${partoff["DATA-B"]}"
   data_end=$((data_start + partsize["DATA-A"]))
   data_end=$((data_end * 2048 - 1))
@@ -443,7 +481,10 @@ BUG_REPORT_URL="https://github.com/bottlerocket-os/bottlerocket/issues"
 DOCUMENTATION_URL="https://bottlerocket.dev"
 EOF
 
-# Set the BOTTLEROCKET-DATA Filesystem for creating/mounting
+# Set the BOTTLEROCKET-DATA Filesystem for creating/mounting. This is
+# written unconditionally so that `prepare-local-fs.service` can format an
+# attached data volume with `systemd-makefs` even for stripped-down images
+# (`first-party-stack = false`) that don't bake in a DATA partition.
 if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
   printf "%s\n" "DATA_PARTITION_FILESYSTEM=xfs" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 else
@@ -462,6 +503,13 @@ if [[ "${ENCRYPTED_STORAGE}" == "yes" ]]; then
   printf "%s\n" "ENCRYPTED_STORAGE=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 else
   printf "%s\n" "ENCRYPTED_STORAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+fi
+
+# Set first-party-stack flag
+if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+  printf "%s\n" "FIRST_PARTY_STACK=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+else
+  printf "%s\n" "FIRST_PARTY_STACK=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
 # BOTTLEROCKET-ROOT-A
@@ -494,9 +542,16 @@ generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize["HASH-A"]}" \
 dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
 
 # write GRUB config
-# Include the parameters that support Boot Config
-BOOTCONFIG='bootconfig'
-INITRD="initrd (\$private)/bootconfig.data"
+# Include the parameters that support Boot Config. Stripped-down images
+# (`first-party-stack = false`) have no PRIVATE partition to hold
+# bootconfig.data, so omit these entries entirely.
+if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+  BOOTCONFIG='bootconfig'
+  INITRD="initrd (\$private)/bootconfig.data"
+else
+  BOOTCONFIG=''
+  INITRD=''
+fi
 
 # If UEFI_SECURE_BOOT is set, disable interactive edits. Otherwise the intended
 # kernel command line parameters could be changed if the boot fails. Disable
@@ -582,18 +637,19 @@ boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
 echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
 # BOTTLEROCKET-PRIVATE
+if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+  # Generate bootconfig file for the image.
+  touch "${PRIVATE_MOUNT}/bootconfig.data"
+  bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
 
-# Generate bootconfig file for the image.
-touch "${PRIVATE_MOUNT}/bootconfig.data"
-bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
-
-# Targeted toward the current API server implementation.
-# Relative to the ext4 defaults, we:
-# - adjust the inode ratio since we expect lots of small files
-# - retain the inode size to allow most settings to be stored inline
-# - retain the block size to handle worse-case alignment for hardware
-mkfs.ext4 -b 4096 -i 4096 -I 256 -d "${PRIVATE_MOUNT}" "${PRIVATE_IMAGE}" "${partsize[PRIVATE]}M"
-dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRIVATE]}"
+  # Targeted toward the current API server implementation.
+  # Relative to the ext4 defaults, we:
+  # - adjust the inode ratio since we expect lots of small files
+  # - retain the inode size to allow most settings to be stored inline
+  # - retain the block size to handle worse-case alignment for hardware
+  mkfs.ext4 -b 4096 -i 4096 -I 256 -d "${PRIVATE_MOUNT}" "${PRIVATE_IMAGE}" "${partsize[PRIVATE]}M"
+  dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRIVATE]}"
+fi
 
 # Predict PCR values after all partitions are written.
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
@@ -605,45 +661,46 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
 fi
 
 # BOTTLEROCKET-DATA-A and BOTTLEROCKET-DATA-B
+if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+  # If we build on a host with SELinux enabled, we could end up with labels that
+  # do not match our policy. Since we allow replacing the data volume at runtime,
+  # we can't count on these labels being correct in any case, and it's better to
+  # remove them all.
+  UNLABELED=$(find "${DATA_MOUNT}" |
+    awk -v root="${DATA_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_rm", $1, "security.selinux"}')
 
-# If we build on a host with SELinux enabled, we could end up with labels that
-# do not match our policy. Since we allow replacing the data volume at runtime,
-# we can't count on these labels being correct in any case, and it's better to
-# remove them all.
-UNLABELED=$(find "${DATA_MOUNT}" |
-  awk -v root="${DATA_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_rm", $1, "security.selinux"}')
+  # Decide which data filesystem to create at build time based on layout.
+  #
+  # The DATA-A partition will always exist, but for the "split" layout, it will be
+  # too small to provide the desired filesystem parameters (inode count, etc) when
+  # it is grown later on. Hence this filesystem is only created for "unified".
+  #
+  # The DATA-B partition does not exist on the "unified" layout, which anticipates
+  # a single storage device. Hence this filesystem is only created for "split".
+  #
+  # If the other partition is available at runtime, the filesystem will be created
+  # during first boot instead, providing flexibility at the cost of a minor delay.
+  if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
+    mkfs_data_fn="mkfs_data_xfs"
+  else
+    mkfs_data_fn="mkfs_data_ext4"
+  fi
 
-# Decide which data filesystem to create at build time based on layout.
-#
-# The DATA-A partition will always exist, but for the "split" layout, it will be
-# too small to provide the desired filesystem parameters (inode count, etc) when
-# it is grown later on. Hence this filesystem is only created for "unified".
-#
-# The DATA-B partition does not exist on the "unified" layout, which anticipates
-# a single storage device. Hence this filesystem is only created for "split".
-#
-# If the other partition is available at runtime, the filesystem will be created
-# during first boot instead, providing flexibility at the cost of a minor delay.
-if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
-  mkfs_data_fn="mkfs_data_xfs"
-else
-  mkfs_data_fn="mkfs_data_ext4"
+  case "${PARTITION_PLAN}" in
+  unified)
+    "${mkfs_data_fn}" "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}" \
+      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
+    ;;
+  split)
+    "${mkfs_data_fn}" "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}" \
+      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
+    ;;
+  *)
+    echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
+    exit 1
+    ;;
+  esac
 fi
-
-case "${PARTITION_PLAN}" in
-unified)
-  "${mkfs_data_fn}" "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}" \
-    "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
-  ;;
-split)
-  "${mkfs_data_fn}" "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}" \
-    "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
-  ;;
-*)
-  echo "unexpected partition plan '${PARTITION_PLAN}'" >&2
-  exit 1
-  ;;
-esac
 
 sgdisk -v "${OS_IMAGE}"
 [[ -s "${DATA_IMAGE}" ]] && sgdisk -v "${DATA_IMAGE}"

@@ -135,6 +135,25 @@ PRIVATE_SCALE_FACTOR="24"
 # Postlude | GPT footer               1 MiB  | GPT is fixed, private partition grows.
 #          +---------------------------------+
 
+# Layout for an OS image with `first-party-stack = false` (default 1 GiB):
+# single bank, no RESERVED, no PRIVATE, no DATA. ROOT-A absorbs all the slack
+# that would otherwise go to those partitions. The variant has no
+# Bottlerocket-managed datastore or settings subsystem, so there is nothing
+# to persist.
+# Sizes marked with (*) scale with overall image size, but ROOT-A is the
+# residual: ROOT-A = (image size MiB) - GPT*2 - BIOS - EFI-A - BOOT-A - HASH-A.
+
+#          +---------------------------------+
+#  Prelude | GPT header               1 MiB  | 5 MiB
+#          | BIOS boot partition      4 MiB  | Fixed size.
+#          +---------------------------------+
+#          | EFI system partition    10 MiB  |
+#          | Boot partition          40 MiB* |
+#   Bank A | Root partition       residual*  | absorbs RESERVED + PRIVATE + DATA-A slack
+#          | Hash partition          10 MiB* |
+# Postlude | GPT footer               1 MiB  |
+#          +---------------------------------+
+
 ##############################################################################
 # Section 5: library functions
 
@@ -190,8 +209,28 @@ get_partition_sizes() {
 }
 
 # Populate the caller's tables with sizes and offsets for known partitions.
+#
+# Positional arguments (kept in fixed order for backward compatibility with
+# existing callers in `rpm2img` and `img2img`):
+#   $1  os_image_gib       OS image size in GiB. Required, must be a positive
+#                          integer. The caller is responsible for resolving
+#                          any feature-dependent default (e.g. 1 GiB when
+#                          `first-party-stack = false`) before invoking this
+#                          function; we use the value as-is.
+#   $2  data_image_gib     Data image size in GiB. Required even when
+#                          `first_party_stack=no` (where it is unused) so
+#                          that the parameter list remains stable.
+#   $3  partition_plan     "split" or "unified".
+#   $4  in_place_updates   "yes" or "no". Ignored when `first_party_stack=no`;
+#                          the two are validated as mutually exclusive below.
+#   $5  pp_size            (nameref) bash assoc-array to populate with sizes.
+#   $6  pp_offset          (nameref) bash assoc-array to populate with offsets.
+#   $7  first_party_stack  (optional, default "yes") "yes" or "no". When
+#                          "no", a single-bank stripped-down layout is
+#                          produced with no RESERVED, PRIVATE, or DATA
+#                          partitions.
 set_partition_sizes() {
-  local os_image_gib data_image_gib partition_plan in_place_updates
+  local os_image_gib data_image_gib partition_plan in_place_updates first_party_stack
   local -n pp_size pp_offset
   os_image_gib="${1:?}"
   data_image_gib="${2:?}"
@@ -211,11 +250,75 @@ set_partition_sizes() {
   # Table for partition offsets from start of disk, in MiB.
   pp_offset="${6:?}"
 
+  # Whether we're building the standard Bottlerocket image (the first-party
+  # software stack and its supporting partitions) or the stripped-down image
+  # without those. Defaults to "yes" if not provided so existing direct
+  # callers continue to get the standard layout unchanged.
+  first_party_stack="${7:-yes}"
+
   # Most of the partitions on the main image scale with the overall size.
   local boot_mib root_mib hash_mib reserved_mib private_mib
   boot_mib="$((os_image_gib * BOOT_SCALE_FACTOR))"
   root_mib="$((os_image_gib * ROOT_SCALE_FACTOR))"
   hash_mib="$((os_image_gib * HASH_SCALE_FACTOR))"
+
+  # Fast-path the stripped-down layout (`first-party-stack = false`). Single
+  # bank, no RESERVED-A, no PRIVATE, no DATA-A/B; ROOT-A is sized so that
+  # the partitions exactly fill the nominal image size and the GPT footer
+  # is preserved.
+  if [[ "${first_party_stack}" == "no" ]]; then
+    # Defense-in-depth: the buildsys validator and the rpm2img/img2img
+    # entry-point checks already reject these combinations, but a stale or
+    # buggy direct caller of this function should also fail loudly rather
+    # than silently producing an unexpected layout.
+    if [[ "${in_place_updates}" == "yes" ]]; then
+      echo "set_partition_sizes: first_party_stack=no is incompatible with in_place_updates=yes" >&2
+      exit 1
+    fi
+    if [[ "${partition_plan}" == "split" ]]; then
+      echo "set_partition_sizes: first_party_stack=no is incompatible with partition_plan=split" >&2
+      exit 1
+    fi
+
+    local total_mib offset
+    total_mib="$((os_image_gib * 1024))"
+    ((offset = 1)) # GPT header
+
+    pp_offset["BIOS"]="${offset}"
+    pp_size["BIOS"]="${BIOS_MIB}"
+    ((offset += BIOS_MIB))
+
+    pp_offset["EFI-A"]="${offset}"
+    pp_size["EFI-A"]="$(( EFI_MIB * 2 ))"
+    ((offset += EFI_MIB * 2))
+
+    pp_offset["BOOT-A"]="${offset}"
+    pp_size["BOOT-A"]="$(( boot_mib * 2 ))"
+    ((offset += boot_mib * 2))
+
+    # ROOT-A absorbs all the leftover space between BOOT-A and HASH-A, so:
+    # ROOT-A = total - GPT(header) - BIOS - EFI-A*2 - BOOT-A*2 - HASH-A*2 - GPT(footer)
+    local root_a_mib
+    root_a_mib="$(( total_mib - 1 - BIOS_MIB - (EFI_MIB * 2) - (boot_mib * 2) - (hash_mib * 2) - 1 ))"
+    if (( root_a_mib <= 0 )); then
+      echo "image size ${os_image_gib} GiB is too small for first_party_stack=no partition layout" >&2
+      exit 1
+    fi
+    pp_offset["ROOT-A"]="${offset}"
+    pp_size["ROOT-A"]="${root_a_mib}"
+    ((offset += root_a_mib))
+
+    pp_offset["HASH-A"]="${offset}"
+    pp_size["HASH-A"]="$(( hash_mib * 2 ))"
+    ((offset += hash_mib * 2))
+
+    # Sanity check: offsets + GPT footer must equal total_mib.
+    if (( offset + 1 != total_mib )); then
+      echo "first_party_stack=no partition layout offset mismatch: offset=${offset}, total=${total_mib}" >&2
+      exit 1
+    fi
+    return 0
+  fi
 
   # Reserved space is everything left in the bank after the other partitions
   # are scaled, minus the fixed 5 MiB EFI partition in that bank.

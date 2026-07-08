@@ -9,6 +9,12 @@ OVF_TEMPLATE=""
 EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
+# img2img does not currently parse `--with-encrypted-storage`, but we initialize
+# the variable so the first-party-stack validation below treats it consistently
+# with rpm2img. If a future change adds a flag for it, the validation below will
+# already enforce mutual exclusion when `first-party-stack = false`.
+ENCRYPTED_STORAGE="no"
+FIRST_PARTY_STACK="yes"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -25,6 +31,7 @@ for opt in "$@"; do
   --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
+  --with-first-party-stack=*) FIRST_PARTY_STACK="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -112,6 +119,28 @@ write_partition() {
 sanity_checks \
   "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
 
+# Re-validate flag combinations: img2img can be invoked directly via
+# repack-variant, so we cannot rely on buildsys to have already enforced these.
+# Keep this list in sync with `rpm2img` and with `validate_image_features` in
+# `tools/buildsys/src/manifest.rs`.
+if [[ "${FIRST_PARTY_STACK}" == "no" ]]; then
+  declare -A first_party_stack_conflicts=(
+    [UEFI_SECURE_BOOT]="uefi-secure-boot"
+    [IN_PLACE_UPDATES]="in-place-updates"
+    [ENCRYPTED_STORAGE]="encrypted-storage"
+  )
+  for f in "${!first_party_stack_conflicts[@]}"; do
+    if [[ "${!f}" == "yes" ]]; then
+      echo "\`first-party-stack = false\` is incompatible with '${first_party_stack_conflicts[${f}]}'" >&2
+      exit 1
+    fi
+  done
+  if [[ "${PARTITION_PLAN}" == "split" ]]; then
+    echo "\`first-party-stack = false\` is incompatible with 'partition-plan=split'" >&2
+    exit 1
+  fi
+fi
+
 ###############################################################################
 # Section 1: prepare working environment
 
@@ -133,11 +162,15 @@ SELINUX_POLICY="fortified"
 SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/files/file_contexts"
 
 # Collect partition sizes and offsets from the partition plan.
+# The caller is responsible for resolving any feature-dependent default
+# for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `first-party-stack = false`) before invoking
+# this script; we use the value as-is. See `resolved_image_layout` in
+# `tools/buildsys/src/manifest.rs` for the canonical resolver.
 declare -A partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff
+  partsize partoff "${FIRST_PARTY_STACK}"
 
 # Process and stage the input images to the working directory.
 declare OS_IMAGE DATA_IMAGE
