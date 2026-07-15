@@ -7,22 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-* New `standalone-image` image feature (default `false`): opt-in flag that
-  produces a stripped-down OS image without the Bottlerocket-provided software
-  stack (orchestrator integration, settings system, in-place updates,
-  BOTTLEROCKET-PRIVATE / BOTTLEROCKET-DATA partitions). Setting
-  `standalone-image = true` produces a single bank of partitions (BIOS-BOOT,
-  EFI-SYSTEM, BOOT-A, ROOT-A, HASH-A), no RESERVED, PRIVATE, or DATA
-  partitions, defaulting to a 1 GiB total disk size. Requires
-  `partition-plan = "unified"`, and is incompatible with `uefi-secure-boot`,
-  `encrypted-storage`, `in-place-updates`, `host-containers`, and
-  `partition-plan = "split"`; the build fails fast with a clear message in
-  those cases. The metadata RPM provides
-  `image-feature(standalone-image)` or `image-feature(no-standalone-image)`
-  accordingly.
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0-rc1...HEAD
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...HEAD
+## [0.22.0-rc1] - 2026-07-27
+
+### Added
+* Add support for `guest-images`, declared in a host variant's `[package.metadata.build-variant]` manifest, that embeds the disk-image artifacts of one or more already-built guest variants into the host's rootfs ([#669])
+* Add a new image feature, `standalone-image`, which when set to false produces a stripped down OS image with a single bank of partitions ([#672], [#686])
+* Introduce a new `image-format = "eif"` variant type that produces an AWS Nitro Enclaves Image Format (kernel + cmdline + ramdisk + metadata) alongside a GPT disk image and bare kernel ([#673])
+
+### Changed
+* Harden the `img2img` script and document worfklow in `docs/design` ([#680])
+
+### Build
+* Update `tough` to 0.24, `tough-kms` to 0.16, `tough-ssm` to 0.19, `tuftool` to 0.17 ([#682])
+
+[#669]: https://github.com/bottlerocket-os/twoliter/pull/669
+[#672]: https://github.com/bottlerocket-os/twoliter/pull/672
+[#673]: https://github.com/bottlerocket-os/twoliter/pull/673
+[#680]: https://github.com/bottlerocket-os/twoliter/pull/680
+[#682]: https://github.com/bottlerocket-os/twoliter/pull/682
+[#686]: https://github.com/bottlerocket-os/twoliter/pull/686
+
+[0.22.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.21.0...v0.22.0-rc1
 
 ## [0.21.0] - 2026-06-19
 
@@ -44,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#675]: https://github.com/bottlerocket-os/twoliter/pull/675
 [#676]: https://github.com/bottlerocket-os/twoliter/pull/676
 
-[0.21.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...v0.21.0-rc1
+[0.21.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...v0.21.0
 
 ## [0.20.0] - 2026-05-27
 
