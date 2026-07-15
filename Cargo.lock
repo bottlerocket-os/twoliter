@@ -5408,9 +5408,9 @@ checksum = "ea68304e134ecd095ac6c3574494fc62b909f416c4fca77e440530221e549d3d"
 
 [[package]]
 name = "tough"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c36f56d1542edfdb79e126fbe0f56198fbc010631bd54032a39c1c88a63b08c6"
+checksum = "35b378d98765c2ae9cdc3e9963ea7e670da8cdd9ee39611b8d722083c7f1ac11"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -5444,9 +5444,9 @@ dependencies = [
 
 [[package]]
 name = "tough-kms"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a96f51df7ca4901b8692a02a6a0a1a4a71150bca6bfaf8fa6831e97332fcc3e6"
+checksum = "b20b983bf6f68a9fc8ce31d11be397a3c96ecff29e8e3d09e1a80cd01366d431"
 dependencies = [
  "aws-config",
  "aws-lc-rs",
@@ -5460,9 +5460,9 @@ dependencies = [
 
 [[package]]
 name = "tough-ssm"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c991469df58eb9d8e22695799425d1a18c0e64ebc01f7635e5c95e94a1cf93d5"
+checksum = "017e136e294657ba0ba066d14055f28b2a00c0793c12a39bd3d0cb8bbadece0d"
 dependencies = [
  "aws-config",
  "aws-sdk-ssm",
@@ -5595,9 +5595,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuftool"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10d2f89ec675ca9c8694e17b9582694cd3d825e3681e41694c9656cc0856ab35"
+checksum = "b6ad45e0e6b070d202dbaaa163d0ba2062b14f79a273b0cf5603a1a4481b2aa9"
 dependencies = [
  "aws-config",
  "aws-lc-rs",
