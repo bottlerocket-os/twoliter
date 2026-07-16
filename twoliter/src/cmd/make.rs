@@ -111,7 +111,7 @@ mod test {
             "/tmp/foo",
             "--arch",
             "x86_64",
-            "testsys",
+            "build",
             "--",
             "add",
             "secret",
@@ -123,7 +123,7 @@ mod test {
         ])
         .unwrap();
 
-        assert_eq!(args.makefile_task, "testsys");
+        assert_eq!(args.makefile_task, "build");
         assert_eq!(args.additional_args[0], "add");
         assert_eq!(args.additional_args[1], "secret");
         assert_eq!(args.additional_args[2], "map");
@@ -141,7 +141,7 @@ mod test {
             "/tmp/foo",
             "--arch",
             "x86_64",
-            "testsys",
+            "build",
             "add",
             "secret",
             "map",
@@ -152,7 +152,7 @@ mod test {
         ])
         .unwrap();
 
-        assert_eq!(args.makefile_task, "testsys");
+        assert_eq!(args.makefile_task, "build");
         assert_eq!(args.additional_args[0], "add");
         assert_eq!(args.additional_args[1], "secret");
         assert_eq!(args.additional_args[2], "map");
@@ -170,7 +170,7 @@ mod test {
             "/tmp/foo",
             "--arch",
             "x86_64",
-            "testsys",
+            "build",
             "--",
             "add",
             "secret",
@@ -184,11 +184,11 @@ mod test {
         ])
         .unwrap();
 
-        assert_eq!(args.makefile_task, "testsys");
+        assert_eq!(args.makefile_task, "build");
         assert_eq!(args.additional_args[0], "add");
         assert_eq!(args.additional_args[1], "secret");
         assert_eq!(args.additional_args[2], "map");
-        // The first instance of `--`, between `testsys` and `add`, is not passed through to the
+        // The first instance of `--`, between `build` and `add`, is not passed through to the
         // varargs. After that, instances of `--` are passed through the varargs.
         assert_eq!(args.additional_args[3], "--");
         assert_eq!(args.additional_args[4], "--name");

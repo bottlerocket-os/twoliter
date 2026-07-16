@@ -18,9 +18,8 @@ members = [
     "tools/pubsys-setup",
     "tools/serde-templated",
     "tools/serde-templated-derive",
-    "tools/testsys",
-    "tools/testsys-config",
     "tools/unplug",
+
     "tools/update-metadata",
     "tools/advisory-checker",
     "tools/eif-builder",
@@ -33,7 +32,6 @@ members = [
     "twoliter/src/tool-crates/pipesys",
     "twoliter/src/tool-crates/pubsys",
     "twoliter/src/tool-crates/pubsys-setup",
-    "twoliter/src/tool-crates/testsys",
     "twoliter/src/tool-crates/tuftool",
     "twoliter/src/tool-crates/unplug",
     "twoliter/src/tool-crates/eif-builder",
@@ -59,7 +57,6 @@ targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
 [workspace.dependencies]
 advisory-checker = { version = "0.1", path = "tools/advisory-checker", artifact = [ "bin:advisory-checker" ] }
 amispec = { version = "0.1", path = "tools/amispec" }
-bottlerocket-types = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
 bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
 buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys" ] }
 buildsys-config = { version = "0.1", path = "tools/buildsys-config" }
@@ -79,9 +76,6 @@ pubsys-config = { version = "0.1", path = "tools/pubsys-config" }
 pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin:pubsys-setup" ] }
 serde-templated = { version = "0.1", path = "tools/serde-templated" }
 serde-templated-derive = { version = "0.1", path = "tools/serde-templated-derive" }
-testsys = { version = "0.1", path = "tools/testsys", artifact = [ "bin:testsys" ] }
-testsys-config = { version = "0.1", path = "tools/testsys-config" }
-testsys-model = { version = "0.0.16", git = "https://github.com/bottlerocket-os/bottlerocket-test-system", tag = "v0.0.16" }
 
 twoliter = { version = "0.22.1", path = "twoliter", artifact = [ "bin:twoliter" ] }
 twoliter-tool-advisory-checker = { version = "0.1", path = "twoliter/src/tool-crates/advisory-checker" }
@@ -92,7 +86,6 @@ twoliter-tool-pcrsys = { version = "0.1", path = "twoliter/src/tool-crates/pcrsy
 twoliter-tool-pipesys = { version = "0.1", path = "twoliter/src/tool-crates/pipesys" }
 twoliter-tool-pubsys = { version = "0.1", path = "twoliter/src/tool-crates/pubsys" }
 twoliter-tool-pubsys-setup = { version = "0.1", path = "twoliter/src/tool-crates/pubsys-setup" }
-twoliter-tool-testsys = { version = "0.1", path = "twoliter/src/tool-crates/testsys" }
 twoliter-tool-tuftool = { version = "0.1", path = "twoliter/src/tool-crates/tuftool" }
 twoliter-tool-unplug = { version = "0.1", path = "twoliter/src/tool-crates/unplug" }
 
@@ -179,7 +172,6 @@ strum = "0.27"
 tabled = "0.15"
 tar = "0.4"
 tempfile = "3"
-terminal_size = "0.4"
 test-case = "3"
 tinytemplate = "1"
 tokio = "1"
@@ -192,7 +184,6 @@ tough-ssm = "0.19"
 tracing = "0.1"
 tuftool = { version = "0.17", artifact = [ "bin:tuftool" ] }
 uds = "0.4"
-unescape = "0.1"
 url = "2"
 uuid = "1"
 walkdir = "2"

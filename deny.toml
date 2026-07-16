@@ -71,13 +71,30 @@ skip = [
     { name = "darling" },
     { name = "darling_core" },
     { name = "darling_macro" },
-]
-
-skip-tree = [
-    # we are considering removing testsys from twoliter's source tree
-    # ignoring the dependency closure for now to ensure twoliter stays
-    # up-to-date
-    { name = "testsys" },
+    # Older transitive versions pulled in by build/runtime deps (fatfs, rustls'
+    # ring, aws-lc-rs, coldsnap's http/hyper stack, snafu 0.7 via rpm, etc.);
+    # newer versions come from the rest of the workspace.
+    { name = "bitflags" },
+    { name = "block-buffer" },
+    { name = "const-oid" },
+    { name = "cpufeatures" },
+    { name = "crypto-common" },
+    { name = "digest" },
+    { name = "getrandom" },
+    { name = "heck" },
+    { name = "http" },
+    { name = "http-body" },
+    { name = "r-efi" },
+    { name = "rand_chacha" },
+    { name = "rand_core" },
+    { name = "sha2" },
+    { name = "snafu" },
+    { name = "snafu-derive" },
+    { name = "syn" },
+    { name = "unicode-width" },
+    { name = "untrusted" },
+    { name = "windows-sys" },
+    { name = "winnow" },
 ]
 
 [bans.workspace-dependencies]
@@ -86,9 +103,6 @@ include-path-dependencies = true
 unused = "deny"
 
 [sources]
-allow-git = [
-    "https://github.com/bottlerocket-os/bottlerocket-test-system",
-]
 # Deny crates from unknown registries or git repositories.
 unknown-registry = "deny"
 unknown-git = "deny"

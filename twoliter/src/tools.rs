@@ -75,12 +75,6 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
             mtime,
         ),
         write_bin("pubsys", twoliter_tool_pubsys::PUBSYS.reader(), &dir, mtime),
-        write_bin(
-            "testsys",
-            twoliter_tool_testsys::TESTSYS.reader(),
-            &dir,
-            mtime,
-        ),
     ];
 
     try_join_all(write_tasks.into_iter()).await?;
@@ -175,7 +169,6 @@ async fn test_install_tools() {
     assert!(toolsdir.join("eif-builder").is_file());
     assert!(toolsdir.join("pubsys").is_file());
     assert!(toolsdir.join("pubsys-setup").is_file());
-    assert!(toolsdir.join("testsys").is_file());
     assert!(toolsdir.join("tuftool").is_file());
     assert!(toolsdir.join("unplug").is_file());
 
