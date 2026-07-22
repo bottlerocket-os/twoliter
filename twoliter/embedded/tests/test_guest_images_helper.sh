@@ -58,6 +58,8 @@ fail() { fail_count=$((fail_count + 1)); echo "  FAIL: $1" >&2; }
     echo "IMAGE_ARTIFACT_SUFFIXES not declared" >&2; exit 1;
   }
   # At minimum, the canonical set. New entries are allowed; missing entries fail.
+  # `eif` is included because EIF guest variants ship a `.eif` sidecar that
+  # host repack needs to be able to enumerate and resign.
   required=("img.lz4" "qcow2" "vmdk" "ova" "ext4.lz4" "verity.lz4" "eif")
   for want in "${required[@]}"; do
     found=no
@@ -146,6 +148,7 @@ mkdir -p "${src}" "${dst}"
 # must be rejected.
 touch "${src}/bottlerocket-1.0.0.img.lz4"
 touch "${src}/bottlerocket-1.0.0.ext4.lz4"
+touch "${src}/bottlerocket-1.0.0.eif"
 ln -s "bottlerocket-1.0.0.img.lz4" "${src}/os_image.img.lz4"
 touch "${src}/bottlerocket-1.0.0.eif"
 touch "${src}/bottlerocket-1.0.0-disk.img"

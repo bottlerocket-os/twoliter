@@ -26,6 +26,32 @@ signing_keys = { file = { path = "/home/user/key.pem" } }
 #signing_keys = { kms = { key_id = "abc-def-123" } }
 #signing_keys = { ssm = { parameter = "/my/parameter" } }
 
+# EIF (Nitro Enclave Image Format) signing.
+#
+# For variants with `image-format = "eif"`, buildsys embeds a signature over
+# PCR0 into the produced EIF so that the Nitro hypervisor / attestation
+# clients can verify the enclave image. This is a DIFFERENT trust domain
+# from `signing_keys` above (which signs the TUF repo metadata) and from
+# `sbkeys` (which signs shim/grub/kernel for UEFI Secure Boot):
+#
+#   - EIF signatures are verified by the Nitro hypervisor / attestation
+#     consumers against a customer-owned CA (whose cert is embedded in the
+#     signature section).
+#   - TUF `signing_keys` signs update metadata; verified by tough against
+#     the root role.
+#   - `sbkeys` signs pre-boot binaries; verified by firmware against the
+#     platform db.
+#
+# The EIF signing key MUST be an EC key on a NIST P-curve (P-256 or P-384)
+# and its public key MUST match `signing_cert`. Only `file` and `kms`
+# backends are supported (see `EifSigningKey` in pubsys-config).
+#
+# When this section is omitted, EIF builds produce unsigned artifacts.
+#[eif]
+#signing_cert = "/home/user/eif-signing.crt"
+#signing_key = { file = { path = "/home/user/eif-signing.key" } }
+#signing_key = { kms = { key_id = "alias/my-eif-key" } }
+
 # If these URLs are uncommented, the repo will be pulled and used as a starting
 # point, and your images (and related files) will be added as a new update in
 # the created repo.  Otherwise, we build a new repo from scratch.

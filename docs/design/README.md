@@ -573,6 +573,20 @@ twoliter make \
 
 Because `repack-variant` skips package builds entirely, it is significantly faster than a full `build-variant`.
 
+### EIF variants
+
+For variants with `image-format = "eif"`, `repack-variant` dispatches to `eif2eif` instead of `img2img`.
+`eif2eif` extracts ROOT-A from the input `-disk.img`, replaces the CA bundle and `root.json` in the rootfs, rebuilds erofs ROOT-A and the dm-verity HASH-A tree, and produces a new signed `.eif` whose kernel command line pins the new verity root hash.
+The `-kernel` artifact is copied byte-for-byte from the input (its bytes are what the input EIF's kernel section already carried, so the new EIF embeds the identical kernel).
+Because the kernel command line changes (new verity root hash), PCR0 changes, and the EIF is rebuilt end-to-end via `eif-builder` — the `resign` subcommand is not used here.
+
+### Guest EIF resign during host repack
+
+When a non-EIF host variant declares `[[package.metadata.build-variant.guest-images]]` entries and any of those guest images is an EIF, the host repack path resigns every guest `*.eif` in place inside the extracted host rootfs before rebuilding host dm-verity.
+This is done by `img2img` walking each declared guest install path under the mounted rootfs, invoking `eif-builder resign` on each match, and then letting the standard verity rebuild pick up the new bytes.
+The resign preserves the guest kernel, cmdline, ramdisk, and metadata sections byte-for-byte; only the signature section (and header CRC) change.
+When no `[eif]` section is configured in `Infra.toml`, guest EIFs are left unchanged and the repack proceeds — matching the behavior of a repack of a host without Secure Boot keys.
+
 ## Publishing
 
 Common publishing steps such as `cargo make repo` and `cargo make ami` will be hoisted to Twoliter.

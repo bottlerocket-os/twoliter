@@ -29,6 +29,9 @@ pub struct InfraConfig {
 
     // Config for container registries
     pub vendor: Option<HashMap<String, Vendor>>,
+
+    // EIF (Nitro Enclave Image Format) signing config
+    pub eif: Option<EifConfig>,
 }
 
 impl InfraConfig {
@@ -212,6 +215,71 @@ impl TryFrom<SigningKeyConfig> for Url {
     }
 }
 
+/// EIF (Nitro Enclave Image Format) signing configuration.
+///
+/// EIF signing uses its own dedicated cert + key, separate from the sbkeys
+/// profile that signs shim/grub/kernel for UEFI Secure Boot. The two artifacts
+/// have different trust models (EIF signatures are verified by the Nitro
+/// hypervisor against a customer-owned CA; sbkeys are verified by firmware
+/// against the platform db), different key formats (EIF requires an EC key on
+/// a NIST P-curve; sbkeys is typically RSA), and different rotation cadences.
+/// Reusing sbkeys for EIF conflated all three.
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct EifConfig {
+    /// PEM-encoded X.509 certificate whose public key matches `signing_key`.
+    /// Embedded verbatim in the EIF signature section's COSE_Sign1 payload;
+    /// verifiers use its `SubjectPublicKeyInfo` to check the PCR0 signature.
+    pub signing_cert: PathBuf,
+    /// Signing key backend. `file` is a local PEM EC key; `kms` is an AWS KMS
+    /// key referenced by ID/ARN/alias. SSM/env aren't supported: `eif-builder`
+    /// only exposes `--signing-key <path>` and `--kms-key-id <id>`, and both
+    /// alternatives conflate transport with backend.
+    pub signing_key: EifSigningKey,
+}
+
+/// Backend for the EIF signing key.
+///
+/// Deliberately narrower than [`SigningKeyConfig`]: only `file` and `kms`
+/// map onto `eif-builder`'s CLI (`--signing-key` and `--kms-key-id`). Adding
+/// ssm/env variants would let operators write an `Infra.toml` that parses but
+/// can never sign an EIF; we prefer to reject such configs at load time.
+#[allow(non_camel_case_types)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub enum EifSigningKey {
+    file {
+        path: PathBuf,
+    },
+    kms {
+        key_id: String,
+        /// AWS region for the KMS `Sign` call. Optional: when absent, the
+        /// KMS backend falls back to the ambient AWS region resolution
+        /// chain (`AWS_REGION`, `~/.aws/config` profile, IMDS on EC2). In
+        /// the buildkit sandbox where `eif-builder` runs, none of those
+        /// sources is populated by default — an EC2 build host has IMDS
+        /// but the build container is a fresh minimal image without
+        /// AWS_REGION set and with no profile config file — so this field
+        /// is effectively required for the buildkit path. Left optional
+        /// only so unrelated ambient-environment callers (dev laptops
+        /// with a valid `~/.aws/config`) can still work.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<String>,
+    },
+}
+
+impl Default for EifSigningKey {
+    // Only exists so `EifConfig: Default` compiles when the outer
+    // `Option<EifConfig>` is `None`. A default `EifSigningKey` is never
+    // actually reachable through the public deserialization path — the
+    // enum has no serde default.
+    fn default() -> Self {
+        EifSigningKey::file {
+            path: PathBuf::new(),
+        }
+    }
+}
+
 /// Represents a Bottlerocket repo's location and the metadata needed to update the repo
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -292,6 +360,83 @@ mod error {
 }
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, error::Error>;
+
+#[test]
+fn eif_config_file_backend_parses() {
+    // A minimal `[eif]` section with a local-file backend must round-trip
+    // through TOML deserialization, and the enum must land on the `file`
+    // variant. Guards against accidental renaming of the field names (which
+    // are the wire contract with `Infra.toml`).
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { file = { path = "/opt/eif/signing.key" } }
+"#;
+    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
+    let eif = cfg.eif.expect("eif section missing");
+    assert_eq!(eif.signing_cert, PathBuf::from("/opt/eif/signing.crt"));
+    match eif.signing_key {
+        EifSigningKey::file { path } => {
+            assert_eq!(path, PathBuf::from("/opt/eif/signing.key"))
+        }
+        _ => panic!("expected file backend"),
+    }
+}
+
+#[test]
+fn eif_config_kms_backend_parses() {
+    // KMS variant: only `key_id` is required. `region` is optional and
+    // must default to `None` when omitted. Serde `deny_unknown_fields` on
+    // both `EifConfig` and `EifSigningKey` means any typo (e.g. `kms_key_id`)
+    // fails loudly instead of silently signing with the wrong backend.
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "alias/my-eif-key" } }
+"#;
+    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
+    let eif = cfg.eif.expect("eif section missing");
+    match eif.signing_key {
+        EifSigningKey::kms { key_id, region } => {
+            assert_eq!(key_id, "alias/my-eif-key");
+            assert_eq!(region, None);
+        }
+        _ => panic!("expected kms backend"),
+    }
+}
+
+#[test]
+fn eif_config_kms_with_region_parses() {
+    // When operators set `region` in Infra.toml the buildsys path
+    // propagates it through to `eif-builder --region`. This test guards
+    // the field name against silent typos: `deny_unknown_fields` rejects
+    // `regoin` / `aws_region` / etc.
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "alias/my-eif-key", region = "us-west-2" } }
+"#;
+    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
+    let eif = cfg.eif.expect("eif section missing");
+    match eif.signing_key {
+        EifSigningKey::kms { key_id, region } => {
+            assert_eq!(key_id, "alias/my-eif-key");
+            assert_eq!(region.as_deref(), Some("us-west-2"));
+        }
+        _ => panic!("expected kms backend"),
+    }
+}
+
+#[test]
+fn eif_config_absent_is_ok() {
+    // An Infra.toml with no [eif] must still parse (unsigned-EIF path).
+    let toml_str = r#"
+[aws]
+regions = ["us-west-2"]
+"#;
+    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
+    assert!(cfg.eif.is_none());
+}
 
 #[test]
 fn repo_expiration_deserialization_test() {

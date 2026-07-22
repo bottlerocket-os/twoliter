@@ -27,6 +27,11 @@ IMAGE_ARTIFACT_SUFFIXES=(
   "ova"
   "ext4.lz4"
   "verity.lz4"
+  # `eif` is included so that `copy_guest_image_artifacts` picks up the
+  # `.eif` files a guest EIF variant emits (see `rpm2eif` output). Like
+  # `.ova`, `.eif` is a first-class image artifact that is *not* produced
+  # by `compress_image` (it is built by `eif-builder` directly), so it
+  # deliberately has no compressor case in the `compress_image` switch.
   "eif"
 )
 

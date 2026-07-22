@@ -19,6 +19,7 @@ use error::Result;
 use lazy_static::lazy_static;
 use nonzero_ext::nonzero;
 use pipesys::server::Server as PipesysServer;
+use pubsys_config::{EifSigningKey, InfraConfig};
 use rand::Rng;
 use regex::Regex;
 use semver::{Comparator, Op, Prerelease, Version, VersionReq};
@@ -314,6 +315,9 @@ struct RepackVariantBuildArgs {
     data_image_size_gib: String,
     image_features: HashSet<ImageFeature>,
     image_format: String,
+    /// Space-joined variant-declared kernel parameters. Required at repack time
+    /// for `image-format = "eif"`
+    kernel_parameters: String,
     name: String,
     os_image_publish_size_gib: String,
     os_image_size_gib: String,
@@ -323,6 +327,10 @@ struct RepackVariantBuildArgs {
     variant_platform: String,
     version_build: String,
     version_image: String,
+    /// Newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples for host
+    /// variants that embed guest images and, on repack, need to resign the guest EIFs found
+    /// under those install paths. Mirrors `VariantBuildArgs::guest_images`.
+    guest_images: String,
 }
 
 impl RepackVariantBuildArgs {
@@ -345,6 +353,15 @@ impl RepackVariantBuildArgs {
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
+        args.build_arg("KERNEL_PARAMETERS", &self.kernel_parameters);
+        args.build_arg("GUEST_IMAGES", &self.guest_images);
+
+        // TWOLITER_VERSION mirrors what VariantBuildArgs plumbs through so
+        // `eif2eif` can embed it into EIF metadata (BuildMetadata.BuildToolVersion).
+        args.build_arg(
+            "TWOLITER_VERSION",
+            std::env::var("TWOLITER_VERSION").unwrap_or_default(),
+        );
 
         for image_feature in self.image_features.iter() {
             let value = if matches!(image_feature, ImageFeature::StandaloneImage) {
@@ -596,18 +613,20 @@ impl DockerBuild {
     }
 
     /// Create a new `DockerBuild` that can repackage a variant image.
-    pub(crate) fn repack_variant(args: RepackVariantArgs, manifest: &Manifest) -> Result<Self> {
+    ///
+    /// `guest_images` is the resolved list of guest variants declared by the
+    /// host under `[package.metadata.build-variant.guest-images]`, whose
+    /// `*.eif` files `img2img` must resign before rebuilding host verity.
+    /// Empty for an EIF variant or a host that declares no guests.
+    pub(crate) fn repack_variant(
+        args: RepackVariantArgs,
+        manifest: &Manifest,
+        guest_images: Vec<(String, std::path::PathBuf)>,
+    ) -> Result<Self> {
         let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let features = manifest.info().image_features().unwrap_or_default();
-        // Repack is implemented by `img2img`, which has no EIF support. Fail
-        // fast here so users get a clear error instead of a cryptic failure
-        // deep inside the Dockerfile build.
-        if matches!(manifest.info().image_format(), Some(ImageFormat::Eif)) {
-            return error::EifRepackUnsupportedSnafu.fail();
-        }
-
-        // Repack has already rejected EIF above, so `image_format` is always
-        // non-EIF here; pass it through anyway for defense-in-depth.
+        // When image-format="eif" the imgrepack
+        // Dockerfile stage dispatches to `eif2eif`, otherwise `img2img`.
         let image_format = manifest.info().image_format();
         let image_layout = resolved_image_layout(&raw_layout, &features, image_format);
         // Defense in depth: re-run the image feature validator here so that
@@ -661,6 +680,12 @@ impl DockerBuild {
                     Some(ImageFormat::Vmdk) => "vmdk",
                 }
                 .to_string(),
+                kernel_parameters: manifest
+                    .info()
+                    .kernel_parameters()
+                    .cloned()
+                    .unwrap_or_default()
+                    .join(" "),
                 name: args.name,
                 os_image_publish_size_gib: os_image_publish_size_gib.to_string(),
                 os_image_size_gib: os_image_size_gib.to_string(),
@@ -674,6 +699,18 @@ impl DockerBuild {
                 variant_platform,
                 version_build: args.version_build,
                 version_image: args.version_image,
+                guest_images: guest_images
+                    .iter()
+                    .map(|(guest, install_path)| {
+                        format!(
+                            "{guest}:{install_path}:build/images/{arch}-{guest}/{version_full}",
+                            install_path = install_path.display(),
+                            arch = args.common.arch,
+                            version_full = args.common.version_full,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             }),
             secrets_args: secrets_args()?,
         })
@@ -958,7 +995,123 @@ fn secrets_args() -> Result<Vec<String>> {
         args.build_secret("env", &id, var);
     }
 
+    args.extend(eif_signing_args()?);
+
     Ok(args)
+}
+
+/// Docker-build `--secret` flags carrying the EIF signing profile from
+/// `Infra.toml [eif]`. Absent config (no `PUBLISH_INFRA_CONFIG_PATH`, no
+/// `[eif]`, or no Infra.toml) is not an error: the in-container helper
+/// treats missing mounts as "unsigned". Empty cert/key files are rejected
+/// here to keep this gate in lockstep with the helper's `[[ -s ]]` check.
+fn eif_signing_args() -> Result<Vec<String>> {
+    let infra_path = match env::var("PUBLISH_INFRA_CONFIG_PATH") {
+        Ok(p) if !p.is_empty() => PathBuf::from(p),
+        _ => return Ok(Vec::new()),
+    };
+
+    let infra = InfraConfig::from_path_or_lock(&infra_path, true)
+        .context(error::InfraConfigLoadSnafu { path: &infra_path })?;
+    let Some(eif) = infra.eif else {
+        // Guard against a stale Infra.lock that predates the `[eif]` schema
+        // shadowing an `[eif]` section in Infra.toml.
+        detect_stale_infra_lock(&infra_path)?;
+        return Ok(Vec::new());
+    };
+
+    if !is_non_empty_file(&eif.signing_cert) {
+        return error::EifSigningCertMissingSnafu {
+            path: eif.signing_cert,
+        }
+        .fail();
+    }
+
+    let mut args = Vec::new();
+    args.build_secret(
+        "file",
+        "eif-signing.crt",
+        &eif.signing_cert.to_string_lossy(),
+    );
+
+    match eif.signing_key {
+        EifSigningKey::file { path } => {
+            if !is_non_empty_file(&path) {
+                return error::EifSigningKeyMissingSnafu { path }.fail();
+            }
+            args.build_secret("file", "eif-signing.key", &path.to_string_lossy());
+        }
+        EifSigningKey::kms { key_id, region } => {
+            env::set_var("EIF_KMS_KEY_ID", &key_id);
+            args.build_secret("env", "eif-kms-key-id.env", "EIF_KMS_KEY_ID");
+            if let Some(region) = region {
+                env::set_var("EIF_KMS_REGION", &region);
+                args.build_secret("env", "eif-kms-region.env", "EIF_KMS_REGION");
+            }
+        }
+    }
+
+    Ok(args)
+}
+
+/// Return boolean result of if file at `path` is a non-empty regular file.
+fn is_non_empty_file(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
+}
+
+/// Fail loudly if `Infra.lock` shadows an `[eif]` section that exists in
+/// `Infra.toml`.
+///
+/// Called from `eif_signing_args` on the "no eif config" branch. The
+/// hazard: `InfraConfig::from_path_or_lock` prefers `Infra.lock` when it
+/// exists and never consults `Infra.toml`, so a lock generated before the
+/// `[eif]` schema landed will happily deserialize to `eif = None`. Without
+/// this check that silently produces an unsigned EIF — same class of
+/// silent-downgrade failure that motivated the "reject broken Infra.toml"
+/// stance elsewhere.
+///
+/// Detection is intentionally coarse: any parseable Infra.toml with an
+/// `[eif]` section, next to an `Infra.lock` that was actually loaded, is
+/// treated as stale. We don't try to diff the two — if the lock is
+/// current, the caller already unwrapped `Some(eif)` and never reached
+/// this function.
+///
+/// If Infra.toml is malformed, missing, or the paths don't line up, we
+/// stay quiet: `from_path_or_lock` already validated whichever file it
+/// actually loaded, and the "no eif" outcome is the correct one for the
+/// no-Infra.toml case.
+fn detect_stale_infra_lock(infra_path: &Path) -> Result<()> {
+    let Ok(lock_path) = InfraConfig::compute_lock_path(infra_path) else {
+        return Ok(());
+    };
+    // Only relevant when the lock is what actually got loaded.
+    if !lock_path.exists() {
+        return Ok(());
+    }
+    // If Infra.toml is missing or unreadable, there is nothing to compare
+    // against — the lock is authoritative by design.
+    let Ok(toml_str) = fs::read_to_string(infra_path) else {
+        return Ok(());
+    };
+    // A cheap surface check on the raw TOML: does it declare an `[eif]`
+    // table? Parsing to the strongly-typed `InfraConfig` would work too,
+    // but that couples this guard to future schema additions and would
+    // reject valid Infra.toml files with unrelated new fields the current
+    // pubsys-config doesn't know about. `toml::Value` is version-tolerant.
+    let has_eif = toml::from_str::<toml::Value>(&toml_str)
+        .ok()
+        .and_then(|v| v.get("eif").cloned())
+        .is_some();
+    if has_eif {
+        return error::EifStaleInfraLockSnafu {
+            lock_path,
+            toml_path: infra_path.to_path_buf(),
+        }
+        .fail();
+    }
+    Ok(())
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
@@ -1225,6 +1378,8 @@ fn filename(p: impl AsRef<Path>) -> String {
 mod test {
     use super::*;
     use semver::Version;
+    use std::io::Write;
+    use tempfile::TempDir;
 
     #[test]
     fn test_docker_version_req_25_0_5_passes() {
@@ -1248,5 +1403,136 @@ mod test {
     fn test_docker_version_req_20_10_27_fails() {
         let version = Version::parse("20.10.27").unwrap();
         assert!(!MINIMUM_DOCKER_VERSION.matches(&version))
+    }
+
+    // ------------------------------------------------------------------
+    // EIF signing config gates. These pin down the two silent-downgrade
+    // failure modes:
+    //   1. Stale `Infra.lock` (predating the [eif] field) shadowing a
+    //      current Infra.toml → we detect and hard-fail.
+    //   2. A 0-byte signing_cert/key on disk → we reject at config load
+    //      because the in-container `eif-sign-helper` uses `[[ -s ]]`
+    //      and would otherwise silently fall back to "no profile".
+    // ------------------------------------------------------------------
+
+    /// Sanity: a regular file with content is accepted.
+    #[test]
+    fn is_non_empty_file_accepts_nonempty() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("cert.pem");
+        let mut f = File::create(&p).unwrap();
+        f.write_all(b"-----BEGIN CERTIFICATE-----\n").unwrap();
+        assert!(is_non_empty_file(&p));
+    }
+
+    /// The core of fix #2: buildkit will create a 0-byte file when a
+    /// secret `src` is missing, and openssl/pipeline mishaps can also
+    /// leave one behind. `.exists()` returns true for these; the helper's
+    /// `[[ -s ]]` returns false. `is_non_empty_file` must match the
+    /// helper.
+    #[test]
+    fn is_non_empty_file_rejects_zero_byte() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("cert.pem");
+        File::create(&p).unwrap();
+        assert!(p.exists(), "precondition: file exists on disk");
+        assert!(
+            !is_non_empty_file(&p),
+            "a 0-byte file must be treated the same as `[[ -s ]]` in the helper: not present",
+        );
+    }
+
+    #[test]
+    fn is_non_empty_file_rejects_missing() {
+        let dir = TempDir::new().unwrap();
+        assert!(!is_non_empty_file(&dir.path().join("nope")));
+    }
+
+    /// A directory is not a "file with signing material". Guards against
+    /// operators pointing signing_cert at a directory and getting a
+    /// confusing downstream error.
+    #[test]
+    fn is_non_empty_file_rejects_directory() {
+        let dir = TempDir::new().unwrap();
+        assert!(!is_non_empty_file(dir.path()));
+    }
+
+    /// The happy no-op case for fix #1: no `Infra.lock` on disk means the
+    /// stale-lock hazard doesn't exist. The guard must return Ok(()) so
+    /// callers can produce their normal "no signing profile → unsigned"
+    /// output for variants that don't ship an [eif] section at all.
+    #[test]
+    fn detect_stale_infra_lock_returns_ok_when_no_lock() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        fs::write(
+            &toml_path,
+            r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { file = { path = "/opt/eif/signing.key" } }
+"#,
+        )
+        .unwrap();
+        // No Infra.lock next to it.
+        assert!(detect_stale_infra_lock(&toml_path).is_ok());
+    }
+
+    /// The failure case for fix #1: Infra.lock exists (so
+    /// `from_path_or_lock` loaded it and got `eif = None`) *and* the
+    /// sibling Infra.toml declares [eif]. This is the exact stale-lock
+    /// version-skew scenario the guard exists to catch.
+    #[test]
+    fn detect_stale_infra_lock_errors_when_lock_shadows_eif_toml() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        let lock_path = dir.path().join("Infra.lock");
+        fs::write(
+            &toml_path,
+            r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { file = { path = "/opt/eif/signing.key" } }
+"#,
+        )
+        .unwrap();
+        // Contents don't need to be a valid lock; we're on the branch
+        // where the caller already parsed the lock and got eif = None,
+        // so this test only exercises the `.exists()` half of the check.
+        fs::write(&lock_path, "aws: null\n").unwrap();
+
+        let err = detect_stale_infra_lock(&toml_path)
+            .expect_err("stale lock shadowing Infra.toml [eif] must error");
+        // Cheap smoke check that the error path is the one we intended,
+        // without pinning the exact Display string.
+        assert!(matches!(err, error::Error::EifStaleInfraLock { .. }));
+    }
+
+    /// The other allowed branch: Infra.lock exists but Infra.toml has no
+    /// [eif] section either. That's an actual "no EIF signing configured"
+    /// project (e.g. a non-nitro variant), which must remain a clean
+    /// no-op — the guard exists to catch skew, not to require [eif].
+    #[test]
+    fn detect_stale_infra_lock_ok_when_toml_has_no_eif() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        let lock_path = dir.path().join("Infra.lock");
+        fs::write(&toml_path, "[aws]\nregions = []\n").unwrap();
+        fs::write(&lock_path, "aws: null\n").unwrap();
+        assert!(detect_stale_infra_lock(&toml_path).is_ok());
+    }
+
+    /// Malformed Infra.toml on the "no eif" branch must not itself
+    /// synthesize a stale-lock error — whichever file `from_path_or_lock`
+    /// actually loaded is already validated, and a broken Infra.toml
+    /// isn't the concern of this guard.
+    #[test]
+    fn detect_stale_infra_lock_ok_when_toml_unparseable() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        let lock_path = dir.path().join("Infra.lock");
+        fs::write(&toml_path, "this is not = valid = toml [[[").unwrap();
+        fs::write(&lock_path, "aws: null\n").unwrap();
+        assert!(detect_stale_infra_lock(&toml_path).is_ok());
     }
 }
