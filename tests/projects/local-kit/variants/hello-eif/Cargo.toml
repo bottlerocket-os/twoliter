@@ -1,0 +1,19 @@
+[package]
+name = "hello-eif"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+# Don't rebuild crate just because of changes to README.
+exclude = ["README.md"]
+
+[package.metadata.build-variant]
+included-packages = ["pkg-e"]
+image-format = "eif"
+kernel-parameters = []
+
+[lib]
+path = "../variants.rs"
+
+[build-dependencies]
+extra-3-kit = { path = "../../kits/extra-3-kit" }

@@ -1,0 +1,569 @@
+#!/usr/bin/env bash
+# rpm2eif - Build a sidecar EIF from RPMs with dm-verity integrity.
+#
+# Produces:
+#   - {name}.eif: minimal EIF (kernel + cmdline + empty ramdisk + metadata)
+#   - {name}-disk.img: GPT disk with ROOT-A (erofs) + HASH-A (verity) partitions
+#   - {name}-kernel: bare kernel for direct Firecracker boot. On aarch64 this
+#     is a flat PE arm64 `Image` (any EFI zboot wrapper has been unwrapped and
+#     decompressed); on x86_64 it is an uncompressed ELF `vmlinux` suitable
+#     for PVH boot. Byte-identical to what the .eif embeds in its kernel
+#     section.
+
+set -euo pipefail
+shopt -qs failglob
+
+# Source imghelper for generate_verity_root and related functions.
+# Source partyplanner for the Bottlerocket-standard partition type GUIDs; this
+# keeps the sidecar disk-image layout in sync with rpm2img and img2img.
+. "${0%/*}/imghelper"
+. "${0%/*}/partyplanner"
+
+usage() {
+    cat <<EOF
+Usage: $0 --package-dir=DIR --output-dir=DIR --external-kits-path=DIR [OPTIONS]
+
+Required:
+    --package-dir=DIR                Directory containing RPMs to install
+    --output-dir=DIR                 Output directory for artifacts
+    --external-kits-path=DIR         Directory containing external kit RPMs and metadata
+
+Optional:
+    --sbom-package-dir=DIR           Directory containing SBOM RPMs
+    --os-image-size-gib=N            Target disk-image size in GiB. When set,
+                                     the GPT disk image is padded to exactly
+                                     this size (ROOT-A absorbs the padding).
+                                     When omitted or 0, the disk image is
+                                     tight-fitted to the rootfs+verity content.
+    --with-erofs-root-partition=yes  Accepted for parity with rpm2img (EIF
+                                     always uses erofs; any value other than
+                                     'yes' is rejected).
+    --with-xfs-data-partition=yes    Rejected: EIF has no data partition.
+    --with-uefi-secure-boot=yes      Rejected: EIF does not sign shim/grub.
+    --with-in-place-updates=yes      Rejected: EIF is single-bank.
+    --with-encrypted-storage=yes     Rejected: EIF has no PRIVATE/DATA.
+    --with-first-party-stack=no      Required (default). Any value other than
+                                     'no' is rejected.
+
+The rejected flags are accepted by the argument parser (so the Dockerfile can
+pass the same flag set to rpm2eif and rpm2img) and then validated against a
+allowlist. This ensures a variant that opts in to an incompatible feature
+gets a clear build-time error instead of a silently-broken image.
+EOF
+    exit 1
+}
+
+PACKAGE_DIR=""
+SBOM_PACKAGE_DIR=""
+OUTPUT_DIR=""
+EXTERNAL_KITS_PATH=""
+# Nominal target OS image size in GiB. `0` means "tight-fit the content";
+# non-zero means "pad ROOT-A to hit this size exactly". Kept as a string so
+# we can distinguish "unset" from an explicit "0" if that ever matters.
+OS_IMAGE_SIZE_GIB="0"
+# Feature-flag values as parsed from the CLI. We default them to the EIF-only
+# legal value ("no"/"yes" as appropriate) and reject any deviation below.
+XFS_DATA_PARTITION="no"
+EROFS_ROOT_PARTITION="yes"
+UEFI_SECURE_BOOT="no"
+IN_PLACE_UPDATES="no"
+ENCRYPTED_STORAGE="no"
+FIRST_PARTY_STACK="no"
+
+for arg in "$@"; do
+    case "${arg}" in
+        --package-dir=*) PACKAGE_DIR="${arg#*=}" ;;
+        --sbom-package-dir=*) SBOM_PACKAGE_DIR="${arg#*=}" ;;
+        --output-dir=*) OUTPUT_DIR="${arg#*=}" ;;
+        --external-kits-path=*) EXTERNAL_KITS_PATH="${arg#*=}" ;;
+        --os-image-size-gib=*) OS_IMAGE_SIZE_GIB="${arg#*=}" ;;
+        --with-xfs-data-partition=*) XFS_DATA_PARTITION="${arg#*=}" ;;
+        --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${arg#*=}" ;;
+        --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${arg#*=}" ;;
+        --with-in-place-updates=*) IN_PLACE_UPDATES="${arg#*=}" ;;
+        --with-encrypted-storage=*) ENCRYPTED_STORAGE="${arg#*=}" ;;
+        --with-first-party-stack=*) FIRST_PARTY_STACK="${arg#*=}" ;;
+        *) echo "Unknown argument: ${arg}"; usage ;;
+    esac
+done
+
+if [[ -z "${PACKAGE_DIR}" || -z "${OUTPUT_DIR}" || -z "${EXTERNAL_KITS_PATH}" ]]; then
+    usage
+fi
+
+# Validate the feature flags: EIF has a fixed feature profile, so any flag
+# that doesn't match the EIF-only legal value gets rejected with a clear,
+# variant-author-friendly error. This mirrors the buildsys-side validator in
+# `tools/buildsys/src/manifest.rs::validate_image_features`, which normally
+# catches these earlier -- but rpm2eif can be invoked from other paths (dev
+# scripts, ad-hoc runs), so we defense-in-depth here too.
+declare -A eif_flag_allowlist=(
+    [XFS_DATA_PARTITION]="no"
+    [EROFS_ROOT_PARTITION]="yes"
+    [UEFI_SECURE_BOOT]="no"
+    [IN_PLACE_UPDATES]="no"
+    [ENCRYPTED_STORAGE]="no"
+    [FIRST_PARTY_STACK]="no"
+)
+declare -A eif_flag_names=(
+    [XFS_DATA_PARTITION]="xfs-data-partition"
+    [EROFS_ROOT_PARTITION]="erofs-root-partition"
+    [UEFI_SECURE_BOOT]="uefi-secure-boot"
+    [IN_PLACE_UPDATES]="in-place-updates"
+    [ENCRYPTED_STORAGE]="encrypted-storage"
+    [FIRST_PARTY_STACK]="first-party-stack"
+)
+eif_flag_errors=0
+for flag in "${!eif_flag_allowlist[@]}"; do
+    want="${eif_flag_allowlist[${flag}]}"
+    have="${!flag}"
+    if [[ "${have}" != "${want}" ]]; then
+        name="${eif_flag_names[${flag}]}"
+        if [[ "${flag}" == "FIRST_PARTY_STACK" ]]; then
+            echo "ERROR: \`image-format = \"eif\"\` requires \`--with-${name}=no\` (got '${have}'); EIF is inherently a stripped-down image." >&2
+        elif [[ "${flag}" == "EROFS_ROOT_PARTITION" ]]; then
+            echo "ERROR: \`image-format = \"eif\"\` requires \`--with-${name}=yes\` (got '${have}'); EIF pipeline always builds an erofs root." >&2
+        else
+            echo "ERROR: \`image-format = \"eif\"\` is incompatible with \`--with-${name}=${have}\`; the EIF pipeline does not support this feature." >&2
+        fi
+        eif_flag_errors=$((eif_flag_errors + 1))
+    fi
+done
+if (( eif_flag_errors > 0 )); then
+    exit 1
+fi
+
+# Validate --os-image-size-gib: must be a non-negative integer. We accept
+# `0` as "auto-size" so that the Dockerfile's default (when the user did
+# not set `os-image-size-gib` in their manifest) works out to the tight-fit
+# behavior. Note the buildsys resolver will normally substitute 1 GiB when
+# the manifest is silent, but that is not required for correctness -- if
+# something did pass 0 through, we simply tight-fit.
+if ! [[ "${OS_IMAGE_SIZE_GIB}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: --os-image-size-gib='${OS_IMAGE_SIZE_GIB}' is not a non-negative integer" >&2
+    exit 1
+fi
+
+# Required environment variables (provided by buildsys / the Dockerfile).
+: "${VERSION_ID:?VERSION_ID must be set}"
+: "${BUILD_ID:?BUILD_ID must be set}"
+: "${IMAGE_NAME:?IMAGE_NAME must be set}"
+: "${VARIANT_NAME:?VARIANT_NAME must be set}"
+: "${ARCH:?ARCH must be set}"
+
+# Store output artifacts in a versioned directory.
+OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
+mkdir -p "${OUTPUT_DIR}"
+
+INSTALL_ROOT="$(mktemp -d)"
+
+cleanup() {
+    local f
+    for f in "${INSTALL_ROOT:-}" "${KERNEL_LOCAL:-}" "${EXTRACTED_KERNEL:-}" \
+             "${PREPARED_KERNEL_TMP:-}" \
+             "${ROOTFS_TMP:-}" "${VERITY_TMP:-}" "${DISK_TMP:-}" \
+             "${EIF_TMP:-}" "${SBOM_MOUNT:-}" "${RPM_SBOM_DIR:-}"; do
+        [[ -n "${f}" && -e "${f}" ]] && rm -rf "${f}"
+    done
+}
+trap cleanup EXIT
+
+echo "=== Installing RPMs ==="
+INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+rpm -iv --ignorearch --root "${INSTALL_ROOT}" \
+    "${PACKAGE_DIR}"/*.rpm
+
+# extract_vmlinux <vmlinuz> <outfile>
+#
+# Adapted from the upstream Linux kernel's scripts/extract-vmlinux. PVH boot
+# (used by the sidecar EIF's Firecracker launcher) requires the uncompressed
+# ELF kernel image, but recent Bottlerocket kernel-kit RPMs (kernel-6.18+)
+# only ship the compressed /boot/vmlinuz. Scan the file for known compression
+# magic bytes and decompress from each candidate offset; the first byte
+# stream that decodes to a valid ELF (per `readelf -h`) is our vmlinux.
+extract_vmlinux() {
+    local vmlinuz="$1" out="$2" tmp
+    tmp="$(mktemp)"
+    # Each entry: "<magic-hex> <decompressor> [args...]". Magic bytes are
+    # written in hex to avoid embedding NULs or regex metacharacters in the
+    # scan pattern. Ordered by prevalence for Bottlerocket kernel configs.
+    local -a formats=(
+        '1f8b08 gunzip'
+        'fd377a585a00 unxz'
+        '425a68 bunzip2'
+        '5d0000 unlzma'
+        '894c5a4f00 lzop -d'
+        '02214c18 lz4 -d -l'
+        '28b52ffd zstd -d'
+    )
+    local entry magic tool
+    for entry in "${formats[@]}"; do
+        magic="${entry%% *}"
+        tool="${entry#* }"
+        # Enumerate every offset where the magic bytes appear. Use Perl for
+        # a NUL- and regex-safe scan: `index()` on the raw file contents
+        # returns the byte offset of each match with no interpretation.
+        local -a offsets
+        mapfile -t offsets < <(
+            perl -e '
+                my ($file, $hex) = @ARGV;
+                my $needle = pack("H*", $hex);
+                local $/;
+                open(my $fh, "<:raw", $file) or exit 0;
+                my $buf = <$fh>;
+                my $pos = 0;
+                while ((my $i = index($buf, $needle, $pos)) >= 0) {
+                    print "$i\n";
+                    $pos = $i + 1;
+                }
+            ' "${vmlinuz}" "${magic}"
+        )
+        local off
+        for off in "${offsets[@]}"; do
+            # Feed the tail of the file (from `off`) into the decompressor.
+            # Most tools bail on trailing garbage but write valid output up
+            # to the point they gave up; that's enough for readelf to
+            # validate the ELF header.
+            tail -c +$(( off + 1 )) "${vmlinuz}" 2>/dev/null \
+                | ${tool} > "${tmp}" 2>/dev/null || true
+            if readelf -h "${tmp}" >/dev/null 2>&1; then
+                mv "${tmp}" "${out}"
+                echo "Extracted vmlinux from ${vmlinuz} @offset=${off} (${tool})"
+                return 0
+            fi
+        done
+    done
+    rm -f "${tmp}"
+    return 1
+}
+
+echo "=== Extracting kernel ==="
+# Kernel format is architecture-dependent:
+#
+#   x86_64: the sidecar EIF is booted by a custom Firecracker-based launcher
+#   that uses PVH boot, which requires an uncompressed ELF kernel (vmlinux).
+#   Older Bottlerocket kernel RPMs shipped both a bare vmlinux and a compressed
+#   vmlinuz; newer ones (kernel-kit 6.18+) only ship vmlinuz. Prefer a bare
+#   vmlinux when available; otherwise carve the ELF out of vmlinuz.
+#
+#   aarch64: Firecracker does not implement PVH on arm64. It boots via the
+#   arm64 Linux boot protocol, which takes a flat PE-wrapped kernel Image
+#   (`MZ` at offset 0, `ARM\x64` magic at offset 56). Bottlerocket's arm64
+#   /boot/vmlinuz is typically an EFI zboot image (a self-decompressing PE
+#   stub around a zstd- or gzip-compressed inner Image); Firecracker's PE
+#   loader does not understand the zboot wrapper. We hand vmlinuz to
+#   eif-builder as-is; it detects the zboot header and unwraps to the flat
+#   Image before embedding it in the EIF kernel section.
+mapfile -t KERNELS < <(find "${INSTALL_ROOT}" -name 'vmlinux' | sort)
+mapfile -t VMLINUZ < <(find "${INSTALL_ROOT}" -name 'vmlinuz' | sort)
+KERNEL_QUERY_PATH=""
+
+case "${ARCH}" in
+    aarch64|arm64)
+        # arm64: use vmlinuz (PE-wrapped Image) directly. Any bare vmlinux
+        # found under INSTALL_ROOT on this arch would not be a bootable
+        # kernel image (only debug artifacts), so ignore it.
+        if (( ${#VMLINUZ[@]} != 1 )); then
+            echo "ERROR: expected exactly one vmlinuz on ${ARCH}, found ${#VMLINUZ[@]}" >&2
+            exit 1
+        fi
+        KERNEL="${VMLINUZ[0]}"
+        KERNEL_QUERY_PATH="${KERNEL#${INSTALL_ROOT}}"
+        echo "Kernel: ${KERNEL} (arm64 Image, no ELF extraction)"
+        ;;
+    x86_64|amd64)
+        if (( ${#KERNELS[@]} == 1 )); then
+            KERNEL="${KERNELS[0]}"
+            KERNEL_QUERY_PATH="${KERNEL#${INSTALL_ROOT}}"
+            echo "Kernel: ${KERNEL}"
+        elif (( ${#KERNELS[@]} > 1 )); then
+            echo "ERROR: expected at most one vmlinux, found ${#KERNELS[@]}" >&2
+            exit 1
+        else
+            if (( ${#VMLINUZ[@]} != 1 )); then
+                echo "ERROR: no vmlinux and expected exactly one vmlinuz, found ${#VMLINUZ[@]}" >&2
+                exit 1
+            fi
+            echo "No bare vmlinux; extracting from ${VMLINUZ[0]}"
+            EXTRACTED_KERNEL="$(mktemp)"
+            if ! extract_vmlinux "${VMLINUZ[0]}" "${EXTRACTED_KERNEL}"; then
+                echo "ERROR: failed to extract vmlinux ELF from ${VMLINUZ[0]}" >&2
+                exit 1
+            fi
+            KERNEL="${EXTRACTED_KERNEL}"
+            # Point --whatprovides at the RPM-owned vmlinuz, not our tempfile: the
+            # extracted ELF is not tracked in the rpm database and the query would
+            # otherwise return "unknown".
+            KERNEL_QUERY_PATH="${VMLINUZ[0]#${INSTALL_ROOT}}"
+            echo "Kernel: ${KERNEL} (from ${VMLINUZ[0]})"
+        fi
+        ;;
+    *)
+        echo "ERROR: unsupported ARCH=${ARCH}" >&2
+        exit 1
+        ;;
+esac
+
+# Determine the kernel package version from the RPM that owns the kernel
+# image. Path relative to INSTALL_ROOT is what `rpm --whatprovides` inside a
+# chroot expects. Falls back to "unknown" if the query fails so EIF builds do
+# not break on RPM-metadata edge cases.
+KERNEL_VERSION="$(rpm -q --root="${INSTALL_ROOT}" \
+    --queryformat '%{VERSION}-%{RELEASE}' \
+    --whatprovides "${KERNEL_QUERY_PATH}" 2>/dev/null || true)"
+# rpm returns non-empty error strings (e.g. "no package provides ...") on
+# stdout when --whatprovides misses; guard against that so we don't embed a
+# human-readable error into the EIF metadata.
+if [[ -z "${KERNEL_VERSION}" || "${KERNEL_VERSION}" == *"no package"* ]]; then
+    KERNEL_VERSION="unknown"
+fi
+echo "Kernel version: ${KERNEL_VERSION}"
+
+# Copy kernel to local temp before removing /boot from rootfs
+KERNEL_LOCAL="$(mktemp)"
+cp "${KERNEL}" "${KERNEL_LOCAL}"
+
+echo "=== Generating application inventory ==="
+# Shared with rpm2img via `imghelper::generate_application_inventory` so the
+# query format and post-processing stay in lockstep. See imghelper for the
+# schema.
+generate_application_inventory \
+  "${INSTALL_ROOT}" \
+  "${PACKAGE_DIR}" \
+  "${EXTERNAL_KITS_PATH}" \
+  "${ARCH}" \
+  "${OUTPUT_DIR}" \
+  "${INSTALL_TIME}"
+
+echo "=== Writing image-features.env ==="
+# Mirror rpm2img: write /usr/share/bottlerocket/image-features.env with the
+# canonical boolean values for the features an EIF image ships with. This
+# is a fixed profile -- EIF is inherently first-party-stack=false with an
+# ext4 (would-be) data partition filesystem, no IPU, no encrypted storage
+# -- but writing the file makes downstream userspace consumers (e.g.,
+# `prepare-local-fs.service`) see a "set to false" value rather than an
+# unset variable, matching the behavior of a non-EIF stripped-down image
+# built with `first-party-stack = false`.
+#
+# The file lives in `/${SYS_ROOT}/usr/share/bottlerocket/...` on non-EIF
+# variants because of the cross-compile SDK layout; on EIF variants,
+# `INSTALL_ROOT` already points at the merged sysroot, so we use a plain
+# `/usr/share/bottlerocket/...` path.
+IMAGE_FEATURES_ENV_DIR="${INSTALL_ROOT}/usr/share/bottlerocket"
+mkdir -p "${IMAGE_FEATURES_ENV_DIR}"
+cat >"${IMAGE_FEATURES_ENV_DIR}/image-features.env" <<'EOF'
+DATA_PARTITION_FILESYSTEM=ext4
+IN_PLACE_UPDATES=false
+ENCRYPTED_STORAGE=false
+FIRST_PARTY_STACK=false
+EOF
+
+echo "=== Creating rootfs.erofs ==="
+# Remove only the top-level /boot from rootfs (kernel is shipped separately).
+[[ -d "${INSTALL_ROOT}/boot" ]] && rm -rf "${INSTALL_ROOT}/boot"
+ROOTFS_TMP="$(mktemp)"
+SELINUX_FILE_CONTEXTS="${INSTALL_ROOT}/etc/selinux/fortified/contexts/files/file_contexts"
+mkfs_root_erofs "${INSTALL_ROOT}" "${ROOTFS_TMP}" "${SELINUX_FILE_CONTEXTS}"
+
+echo "=== Generating dm-verity hash tree ==="
+# Calculate verity partition size. dm-verity overhead is ~1/127 of the data
+# plus a few hash-tree levels; use a generous margin and rely on
+# `check_image_size` (invoked from generate_verity_root) to catch overflow.
+ROOTFS_SIZE="$(stat -c %s "${ROOTFS_TMP}")"
+ROOTFS_MIB="$(( (ROOTFS_SIZE + 1048575) / 1048576 ))"
+VERITY_MIB="$(( (ROOTFS_MIB / 64) + 4 ))"
+
+VERITY_TMP="$(mktemp)"
+declare -a DM_VERITY_ROOT
+generate_verity_root "${ROOTFS_TMP}" "${VERITY_TMP}" "${VERITY_MIB}" DM_VERITY_ROOT
+
+# Extract verity parameters from DM_VERITY_ROOT array
+# Format: root,,,ro,0 <sectors> verity <version> <data_dev> <hash_dev> <data_bs> <hash_bs> <blocks> 1 <algo> <root_hash> <salt> 2 restart_on_corruption ignore_zero_blocks
+VERITY_DATA_SECTORS="${DM_VERITY_ROOT[1]}"
+VERITY_DATA_BLOCKS="${DM_VERITY_ROOT[8]}"
+VERITY_ROOT_HASH="${DM_VERITY_ROOT[11]}"
+VERITY_SALT="${DM_VERITY_ROOT[12]}"
+
+# Validate verity outputs before embedding them in the kernel cmdline. If the
+# upstream tool ever changes its output format the awk extraction above could
+# silently produce garbage, leading to unbootable images.
+[[ "${VERITY_ROOT_HASH}" =~ ^[0-9a-f]{64}$ ]] \
+    || { echo "ERROR: invalid verity root hash: ${VERITY_ROOT_HASH}" >&2; exit 1; }
+[[ "${VERITY_SALT}" =~ ^[0-9a-f]+$ ]] \
+    || { echo "ERROR: invalid verity salt: ${VERITY_SALT}" >&2; exit 1; }
+[[ "${VERITY_DATA_SECTORS}" =~ ^[0-9]+$ ]] \
+    || { echo "ERROR: invalid verity data sectors: ${VERITY_DATA_SECTORS}" >&2; exit 1; }
+[[ "${VERITY_DATA_BLOCKS}" =~ ^[0-9]+$ ]] \
+    || { echo "ERROR: invalid verity data blocks: ${VERITY_DATA_BLOCKS}" >&2; exit 1; }
+
+echo "=== Creating GPT disk image ==="
+# Partition layout math is delegated to `set_eif_partition_sizes` in
+# partyplanner so the geometry lives alongside the other on-disk layouts
+# and gets the same unit-test coverage in
+# `twoliter/embedded/tests/test_partyplanner.sh`. See the helper's
+# docstring for the exact layout.
+#
+# The `target_mib` argument controls padding: if the variant set
+# `os-image-size-gib`, we pad ROOT-A upward so the disk image is exactly
+# `${OS_IMAGE_SIZE_GIB} GiB` (useful when a downstream host-embedding step
+# wants a predictable size); otherwise we tight-fit against the content.
+case "${ARCH}" in
+    x86_64|aarch64) ;;
+    *)
+        echo "ERROR: unsupported arch for EIF builds: ${ARCH}" >&2
+        exit 1
+        ;;
+esac
+ROOT_TYPE_GUID="${BOTTLEROCKET_ROOT_TYPECODE}"
+HASH_TYPE_GUID="${BOTTLEROCKET_HASH_TYPECODE}"
+
+target_mib=0
+if (( OS_IMAGE_SIZE_GIB > 0 )); then
+    target_mib=$(( OS_IMAGE_SIZE_GIB * 1024 ))
+fi
+declare -A eif_partsize eif_partoff
+set_eif_partition_sizes "${ROOTFS_MIB}" "${VERITY_MIB}" \
+    eif_partsize eif_partoff "${target_mib}"
+
+ROOT_OFF_MIB="${eif_partoff[ROOT-A]}"
+ROOT_SIZE_MIB="${eif_partsize[ROOT-A]}"
+HASH_OFF_MIB="${eif_partoff[HASH-A]}"
+HASH_SIZE_MIB="${eif_partsize[HASH-A]}"
+DISK_SIZE_MIB="$(( HASH_OFF_MIB + HASH_SIZE_MIB + 1 ))"  # +1 for GPT backup
+
+DISK_TMP="$(mktemp)"
+truncate -s "${DISK_SIZE_MIB}M" "${DISK_TMP}"
+
+# Defensively zap any pre-existing GPT before writing partitions.
+sgdisk -Z "${DISK_TMP}" >/dev/null
+
+# Confirm the rootfs and verity images fit within their partition sizes
+# before writing them. `check_image_size` is sourced from imghelper. Note
+# that when the caller passed --os-image-size-gib, `ROOT_SIZE_MIB` is the
+# padded size (>= ROOTFS_MIB), so this check remains conservative.
+check_image_size "${ROOTFS_TMP}" "${ROOT_SIZE_MIB}"
+check_image_size "${VERITY_TMP}" "${HASH_SIZE_MIB}"
+
+# Create partitions (sectors = MiB * 2048)
+ROOT_START="$(( ROOT_OFF_MIB * 2048 ))"
+ROOT_END="$(( (ROOT_OFF_MIB + ROOT_SIZE_MIB) * 2048 - 1 ))"
+HASH_START="$(( HASH_OFF_MIB * 2048 ))"
+HASH_END="$(( (HASH_OFF_MIB + HASH_SIZE_MIB) * 2048 - 1 ))"
+
+sgdisk \
+    --new=1:${ROOT_START}:${ROOT_END} --typecode=1:${ROOT_TYPE_GUID} --change-name=1:ROOT-A \
+    --new=2:${HASH_START}:${HASH_END} --typecode=2:${HASH_TYPE_GUID} --change-name=2:HASH-A \
+    "${DISK_TMP}"
+
+# Write rootfs and verity data to partitions. When ROOT-A is padded, the
+# tail of the partition beyond ROOTFS_MIB stays zero, which is what
+# dm-verity expects (the verity hash tree covers ROOTFS_MIB of data; any
+# trailing padding is not part of the verified region).
+dd if="${ROOTFS_TMP}" of="${DISK_TMP}" conv=notrunc bs=1M seek="${ROOT_OFF_MIB}"
+dd if="${VERITY_TMP}" of="${DISK_TMP}" conv=notrunc bs=1M seek="${HASH_OFF_MIB}"
+
+sgdisk -v "${DISK_TMP}"
+
+echo "=== Building EIF with dm-verity cmdline ==="
+# Build dm-verity kernel cmdline with /dev/vda1 and /dev/vda2. Any
+# variant-defined KERNEL_PARAMETERS are appended so per-variant settings
+# (extra console=, sysctl, etc.) reach the kernel.
+DM_CREATE="dm-mod.create=\"root,,,ro,0 ${VERITY_DATA_SECTORS} verity 1 /dev/vda1 /dev/vda2 4096 4096 ${VERITY_DATA_BLOCKS} 1 sha256 ${VERITY_ROOT_HASH} ${VERITY_SALT} 2 restart_on_corruption ignore_zero_blocks\""
+KERNEL_CMDLINE="root=/dev/dm-0 ro rootwait console=ttyS0 initcall_blacklist=i8042_init ${DM_CREATE}${KERNEL_PARAMETERS:+ ${KERNEL_PARAMETERS}}"
+
+EIF_TMP="$(mktemp)"
+# Ask eif-builder to also emit the *prepared* kernel bytes (post-zboot-unwrap
+# on arm64; pass-through vmlinux on x86_64) so the published ${prefix}-kernel
+# artifact is directly loadable by a stock Firecracker's PE / PVH loader.
+# The raw RPM-shipped vmlinuz on arm64 is an EFI zboot outer whose bytes at
+# offset 56 do not match the ARM64 Linux boot protocol magic; Firecracker's
+# PE loader would reject it with "invalid Image magic number". The EIF itself
+# still embeds the same prepared kernel, so this file is byte-identical to
+# what the enclave would load.
+PREPARED_KERNEL_TMP="$(mktemp)"
+/host/build/tools/eif-builder \
+    --kernel "${KERNEL_LOCAL}" \
+    --cmdline "${KERNEL_CMDLINE}" \
+    --output "${EIF_TMP}" \
+    --arch "${ARCH}" \
+    --build-tool-version "${TWOLITER_VERSION:-}" \
+    --kernel-version "${KERNEL_VERSION}" \
+    --out-prepared-kernel "${PREPARED_KERNEL_TMP}"
+
+echo "=== Generating SBOMs ==="
+# Mirror rpm2img: generate SBOMs over the variant RPMs and merge with the
+# kit SBOMs shipped in the SBOM RPM set. Both spdx-sbom.json and
+# cyclonedx-sbom.json are emitted next to the EIF artifacts. When this EIF
+# is later embedded as a guest by a host rpm2img (PR #669), the host merges
+# these files into its top-level SBOM; missing files here would break that.
+SBOM_MOUNT="$(mktemp -d)"
+
+# Discover SBOM RPMs without tripping `failglob` on empty globs.
+shopt -u failglob
+sbom_rpms=()
+if [[ -n "${SBOM_PACKAGE_DIR}" && -d "${SBOM_PACKAGE_DIR}" ]]; then
+    mapfile -t sbom_rpms < <(find "${SBOM_PACKAGE_DIR}" -maxdepth 1 -name '*.rpm' -type f)
+fi
+shopt -s failglob
+
+# The kit SBOMs are shipped by additional metadata RPMs (kit-<name>-sbom).
+# Any single "metadata" SBOM package on its own does not contain kit SBOMs,
+# so match rpm2img's heuristic of only installing when >1 SBOM RPM exists.
+if (( ${#sbom_rpms[@]} > 1 )); then
+    mkdir -p "${SBOM_MOUNT}/var/lib/rpm"
+    rpm -iv --ignorearch --root "${SBOM_MOUNT}" "${sbom_rpms[@]}"
+    # SBOM RPMs unpack under /<triple>-linux-gnu/sys-root/usr; expose that
+    # as ${SBOM_MOUNT}/usr for a stable KIT_SBOMS_DIR path.
+    shopt -u failglob
+    usr_dirs=( "${SBOM_MOUNT}"/*-linux-gnu/sys-root/usr )
+    shopt -s failglob
+    if [[ -d "${usr_dirs[0]}" ]]; then
+        ln -rs "${usr_dirs[0]}" "${SBOM_MOUNT}/usr"
+    fi
+fi
+
+RPM_SBOM_DIR="$(mktemp -d)"
+sbomtool generate \
+    --name variant-rpms \
+    --build-dir "${PACKAGE_DIR}" \
+    --out-dir "${RPM_SBOM_DIR}" \
+    --spdx --cyclonedx
+
+KIT_SBOMS_DIR="${SBOM_MOUNT}/usr/share/sboms"
+for format in "spdx" "cyclonedx"; do
+    image_sbom="${format}-sbom.json"
+    image_sbom_path="${OUTPUT_DIR}/${image_sbom}"
+    rpm_sbom="${RPM_SBOM_DIR}/variant-rpms-${format}.json"
+    if [[ -d "${KIT_SBOMS_DIR}" ]]; then
+        find "${KIT_SBOMS_DIR}" -name "*-${format}.json" -type f \
+            -exec sbomtool merge --output "${image_sbom_path}" "${rpm_sbom}" {} \+
+    else
+        cp "${rpm_sbom}" "${image_sbom_path}"
+    fi
+    if [[ ! -f "${image_sbom_path}" ]]; then
+        echo "ERROR: missing SBOM output: ${image_sbom_path}" >&2
+        exit 1
+    fi
+done
+
+echo "=== Copying artifacts to output ==="
+# All published artifacts are prefixed with ${ARTIFACT_PREFIX} so parallel
+# builds against the same output directory (e.g. different variants sharing
+# a mount, or CI reruns) cannot overwrite one another. The `latest-*`
+# symlinks provide unversioned aliases for consumers that want them.
+ARTIFACT_PREFIX="${IMAGE_NAME}-${VARIANT_NAME}-${ARCH}-${VERSION_ID}-${BUILD_ID}"
+# Ship the *prepared* kernel (zboot-unwrapped on arm64; vmlinux pass-through on
+# x86_64) so a plain Firecracker can boot it directly for local smoke tests.
+# The EIF's kernel section already embeds these same bytes; the two artifacts
+# are byte-identical apart from being one bare file vs. one EIF section.
+cp "${PREPARED_KERNEL_TMP}" "${OUTPUT_DIR}/${ARTIFACT_PREFIX}-kernel"
+cp "${EIF_TMP}" "${OUTPUT_DIR}/${ARTIFACT_PREFIX}.eif"
+cp "${DISK_TMP}" "${OUTPUT_DIR}/${ARTIFACT_PREFIX}-disk.img"
+
+# Create symlinks
+ln -snf "${ARTIFACT_PREFIX}.eif" "${OUTPUT_DIR}/latest.eif"
+ln -snf "${ARTIFACT_PREFIX}-disk.img" "${OUTPUT_DIR}/latest-disk.img"
+ln -snf "${ARTIFACT_PREFIX}-kernel" "${OUTPUT_DIR}/latest-kernel"
+
+echo "=== Build complete ==="
+ls -lh "${OUTPUT_DIR}/"

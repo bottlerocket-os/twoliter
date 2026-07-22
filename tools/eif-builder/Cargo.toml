@@ -1,0 +1,20 @@
+[package]
+name = "eif-builder"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[dependencies]
+crc32fast.workspace = true
+clap = { workspace = true, features = ["derive"] }
+flate2.workspace = true
+serde_json.workspace = true
+snafu.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

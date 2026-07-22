@@ -60,6 +60,12 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
             &dir,
             mtime,
         ),
+        write_bin(
+            "eif-builder",
+            twoliter_tool_eif_builder::EIF_BUILD_BIN.reader(),
+            &dir,
+            mtime,
+        ),
         write_bin("unplug", twoliter_tool_unplug::UNPLUG.reader(), &dir, mtime),
         write_bin("krane", krane_bundle::KRANE_BIN.reader(), &dir, mtime),
         write_bin(
@@ -158,12 +164,14 @@ async fn test_install_tools() {
     assert!(toolsdir.join("rpm2kit").is_file());
     assert!(toolsdir.join("rpm2kmodkit").is_file());
     assert!(toolsdir.join("rpm2migrations").is_file());
+    assert!(toolsdir.join("rpm2eif").is_file());
 
     // Check that binaries were copied.
     assert!(toolsdir.join("advisory-checker").is_file());
     assert!(toolsdir.join("buildsys").is_file());
     assert!(toolsdir.join("pcrsys").is_file());
     assert!(toolsdir.join("pipesys").is_file());
+    assert!(toolsdir.join("eif-builder").is_file());
     assert!(toolsdir.join("pubsys").is_file());
     assert!(toolsdir.join("pubsys-setup").is_file());
     assert!(toolsdir.join("testsys").is_file());

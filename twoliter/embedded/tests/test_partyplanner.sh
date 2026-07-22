@@ -201,6 +201,90 @@ else
 fi
 
 ###############################################################################
+# Test 7: `set_eif_partition_sizes` tight-fit layout.
+#
+# With rootfs_mib=100 and verity_mib=8:
+#   GPT header = 1 MiB
+#   ROOT-A     = 100 MiB @ offset 1
+#   HASH-A     = 8 MiB   @ offset 101
+#   GPT footer = 1 MiB   @ offset 109
+#   total      = 110 MiB
+###############################################################################
+echo "Test 7: set_eif_partition_sizes tight-fit layout"
+declare -A eif_size eif_off
+set_eif_partition_sizes 100 8 eif_size eif_off
+
+assert_eq "${eif_off[ROOT-A]}"  "1"   "EIF tight ROOT-A offset"
+assert_eq "${eif_size[ROOT-A]}" "100" "EIF tight ROOT-A size"
+assert_eq "${eif_off[HASH-A]}"  "101" "EIF tight HASH-A offset"
+assert_eq "${eif_size[HASH-A]}" "8"   "EIF tight HASH-A size"
+# Standard-layout partitions must not leak into the EIF result.
+assert_unset eif_size "BIOS"     "EIF layout has no BIOS partition"
+assert_unset eif_size "EFI-A"    "EIF layout has no EFI-A partition"
+assert_unset eif_size "PRIVATE"  "EIF layout has no PRIVATE partition"
+assert_unset eif_size "DATA-A"   "EIF layout has no DATA-A partition"
+assert_unset eif_size "RESERVED-A" "EIF layout has no RESERVED-A partition"
+
+###############################################################################
+# Test 8: `set_eif_partition_sizes` with explicit target size grows ROOT-A.
+#
+# rootfs=100, verity=8, target=256 MiB:
+#   ROOT-A = 256 - 8 - 2 = 246 MiB, offset 1
+#   HASH-A = 8 MiB,               offset 247
+#   footer @ 255, total 256
+###############################################################################
+echo "Test 8: set_eif_partition_sizes with padded target"
+declare -A eif_size2 eif_off2
+set_eif_partition_sizes 100 8 eif_size2 eif_off2 256
+
+assert_eq "${eif_off2[ROOT-A]}"  "1"   "EIF padded ROOT-A offset"
+assert_eq "${eif_size2[ROOT-A]}" "246" "EIF padded ROOT-A size"
+assert_eq "${eif_off2[HASH-A]}"  "247" "EIF padded HASH-A offset"
+assert_eq "${eif_size2[HASH-A]}" "8"   "EIF padded HASH-A size"
+
+###############################################################################
+# Test 9: target equal to the minimum is accepted (edge case).
+#
+# rootfs=64, verity=4 -> minimum = 64 + 4 + 2 = 70 MiB.
+###############################################################################
+echo "Test 9: set_eif_partition_sizes target at exact minimum"
+declare -A eif_size3 eif_off3
+set_eif_partition_sizes 64 4 eif_size3 eif_off3 70
+assert_eq "${eif_size3[ROOT-A]}" "64" "EIF exact-min ROOT-A size"
+assert_eq "${eif_size3[HASH-A]}" "4"  "EIF exact-min HASH-A size"
+
+###############################################################################
+# Test 10: target smaller than the minimum is rejected.
+###############################################################################
+echo "Test 10: set_eif_partition_sizes rejects target smaller than minimum"
+assert_fails "target=50 rejected when minimum is 70" \
+  bash -c '
+    set -eu -o pipefail
+    . "'"${PARTYPLANNER}"'"
+    declare -A s o
+    set_eif_partition_sizes 64 4 s o 50
+  '
+
+###############################################################################
+# Test 11: zero / non-numeric arguments are rejected.
+###############################################################################
+echo "Test 11: set_eif_partition_sizes rejects zero and non-numeric sizes"
+assert_fails "rootfs_mib=0 rejected" \
+  bash -c '
+    set -eu -o pipefail
+    . "'"${PARTYPLANNER}"'"
+    declare -A s o
+    set_eif_partition_sizes 0 4 s o
+  '
+assert_fails "verity_mib=abc rejected" \
+  bash -c '
+    set -eu -o pipefail
+    . "'"${PARTYPLANNER}"'"
+    declare -A s o
+    set_eif_partition_sizes 64 abc s o
+  '
+
+###############################################################################
 echo
 echo "Results: ${pass_count} passed, ${fail_count} failed"
 if [[ "${fail_count}" -gt 0 ]]; then

@@ -368,10 +368,12 @@ ARG IN_PLACE_UPDATES
 ARG ENCRYPTED_STORAGE
 ARG FIRST_PARTY_STACK
 ARG PROJECT_VENDOR
+ARG TWOLITER_VERSION
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
-    KERNEL_PARAMETERS=${KERNEL_PARAMETERS}
+    KERNEL_PARAMETERS=${KERNEL_PARAMETERS} \
+    TWOLITER_VERSION=${TWOLITER_VERSION}
 WORKDIR /root
 
 USER root
@@ -394,24 +396,47 @@ RUN --mount=target=/host \
     --mount=type=secret,id=aws-session-token.env,target=/root/.aws/aws-session-token.env \
     /host/build/tools/pipesys link --fd-socket "${BYPASS_SOCKET}" --target /bypass && \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
-    /host/build/tools/rpm2img \
-      --package-dir=/local/rpms \
-      --sbom-package-dir=/local/sbom-rpms \
-      --output-dir=/output \
-      --external-kits-path="/bypass/build/external-kits" \
-      --output-fmt="${IMAGE_FORMAT}" \
-      --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
-      --data-image-size-gib="${DATA_IMAGE_SIZE_GIB}" \
-      --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
-      --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
-      --partition-plan="${PARTITION_PLAN}" \
-      --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
-      ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
-      ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
-      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
-      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
-      ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
-      --with-first-party-stack="${FIRST_PARTY_STACK:-no}" && \
+    if [ "${IMAGE_FORMAT}" = "eif" ]; then \
+      # EIF variants produce a self-contained sidecar EIF plus a GPT disk \
+      # image and bare kernel. `rpm2eif` accepts the same feature flags as \
+      # `rpm2img` and validates each one -- most are hard-rejected for EIF \
+      # (secure-boot, IPU, encrypted-storage, xfs-data, non-erofs root) so \
+      # that misconfiguration surfaces at build time rather than being \
+      # silently ignored. `--os-image-size-gib` is honored: when set, the \
+      # GPT disk image is padded to that exact size (useful for downstream \
+      # host-embedding steps). \
+      /host/build/tools/rpm2eif \
+        --package-dir=/local/rpms \
+        --sbom-package-dir=/local/sbom-rpms \
+        --output-dir=/output \
+        --external-kits-path="/bypass/build/external-kits" \
+        --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
+        ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
+        ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
+        ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
+        ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
+        ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
+        --with-first-party-stack="${FIRST_PARTY_STACK:-no}" ; \
+    else \
+      /host/build/tools/rpm2img \
+        --package-dir=/local/rpms \
+        --sbom-package-dir=/local/sbom-rpms \
+        --output-dir=/output \
+        --external-kits-path="/bypass/build/external-kits" \
+        --output-fmt="${IMAGE_FORMAT}" \
+        --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
+        --data-image-size-gib="${DATA_IMAGE_SIZE_GIB}" \
+        --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
+        --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
+        --partition-plan="${PARTITION_PLAN}" \
+        --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
+        ${XFS_DATA_PARTITION:+--with-xfs-data-partition=yes} \
+        ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
+        ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
+        ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
+        ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
+        --with-first-party-stack="${FIRST_PARTY_STACK:-no}" ; \
+    fi && \
     rm -rf /local/rpms && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \

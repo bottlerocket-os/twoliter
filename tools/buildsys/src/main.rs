@@ -322,8 +322,9 @@ fn check_arch_support(manifest: &ManifestInfo, arch: SupportedArch) {
 fn validate_first_party_stack_or_warn(manifest: &ManifestInfo) -> Result<()> {
     let features = manifest.image_features().unwrap_or_default();
     let raw_layout = manifest.image_layout().cloned().unwrap_or_default();
-    let layout = resolved_image_layout(&raw_layout, &features);
-    validate_image_features(&features, &layout).context(error::ImageFeaturesSnafu)?;
+    let image_format = manifest.image_format();
+    let layout = resolved_image_layout(&raw_layout, &features, image_format);
+    validate_image_features(&features, &layout, image_format).context(error::ImageFeaturesSnafu)?;
 
     if !features.contains(&ImageFeature::FirstPartyStack) {
         // `cargo:warning` is line-oriented, so emit one line per call.

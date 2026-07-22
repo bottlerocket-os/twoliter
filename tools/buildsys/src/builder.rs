@@ -265,6 +265,16 @@ impl VariantBuildArgs {
         args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
         args.build_arg("VERSION_ID", &self.version_image);
 
+        // TWOLITER_VERSION is injected by the twoliter binary into its
+        // subprocess environment. Passing it through as a Docker build-arg
+        // lets rpm2eif embed it into EIF metadata (BuildMetadata.BuildToolVersion).
+        // Absence is not an error: buildsys may be invoked directly during
+        // development, in which case the field is left empty.
+        args.build_arg(
+            "TWOLITER_VERSION",
+            std::env::var("TWOLITER_VERSION").unwrap_or_default(),
+        );
+
         for image_feature in self.image_features.iter() {
             // `first-party-stack` is the inverted, default-true feature: pass
             // `yes` to bash so the Dockerfile can pipe the value through to
@@ -451,11 +461,13 @@ impl DockerBuild {
     pub(crate) fn new_variant(args: BuildVariantArgs, manifest: &Manifest) -> Result<Self> {
         let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let features = manifest.info().image_features().unwrap_or_default();
-        let image_layout = resolved_image_layout(&raw_layout, &features);
+        let image_format = manifest.info().image_format();
+        let image_layout = resolved_image_layout(&raw_layout, &features, image_format);
         // Defense in depth: re-run the image feature validator here so that
         // any future code path that constructs a `DockerBuild` cannot bypass
         // the gate that `main.rs::validate_first_party_stack_or_warn` provides.
-        validate_image_features(&features, &image_layout).context(error::GraphSnafu)?;
+        validate_image_features(&features, &image_layout, image_format)
+            .context(error::GraphSnafu)?;
         let os_image_size_gib = image_layout.os_image_size_gib();
         let data_image_size_gib = image_layout.data_image_size_gib;
         let partition_plan = image_layout.partition_plan;
@@ -509,6 +521,7 @@ impl DockerBuild {
                 data_image_size_gib: data_image_size_gib.to_string(),
                 image_features: manifest.info().image_features().unwrap_or_default(),
                 image_format: match manifest.info().image_format() {
+                    Some(ImageFormat::Eif) => "eif",
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",
                     Some(ImageFormat::Vmdk) => "vmdk",
@@ -552,11 +565,22 @@ impl DockerBuild {
     pub(crate) fn repack_variant(args: RepackVariantArgs, manifest: &Manifest) -> Result<Self> {
         let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let features = manifest.info().image_features().unwrap_or_default();
-        let image_layout = resolved_image_layout(&raw_layout, &features);
+        // Repack is implemented by `img2img`, which has no EIF support. Fail
+        // fast here so users get a clear error instead of a cryptic failure
+        // deep inside the Dockerfile build.
+        if matches!(manifest.info().image_format(), Some(ImageFormat::Eif)) {
+            return error::EifRepackUnsupportedSnafu.fail();
+        }
+
+        // Repack has already rejected EIF above, so `image_format` is always
+        // non-EIF here; pass it through anyway for defense-in-depth.
+        let image_format = manifest.info().image_format();
+        let image_layout = resolved_image_layout(&raw_layout, &features, image_format);
         // Defense in depth: re-run the image feature validator here so that
         // any future code path that constructs a `DockerBuild` cannot bypass
         // the gate that `main.rs::validate_first_party_stack_or_warn` provides.
-        validate_image_features(&features, &image_layout).context(error::GraphSnafu)?;
+        validate_image_features(&features, &image_layout, image_format)
+            .context(error::GraphSnafu)?;
         let os_image_size_gib = image_layout.os_image_size_gib();
         let data_image_size_gib = image_layout.data_image_size_gib;
         let partition_plan = image_layout.partition_plan;
@@ -597,6 +621,7 @@ impl DockerBuild {
                 data_image_size_gib: data_image_size_gib.to_string(),
                 image_features: manifest.info().image_features().unwrap_or_default(),
                 image_format: match manifest.info().image_format() {
+                    Some(ImageFormat::Eif) => "eif",
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",
                     Some(ImageFormat::Vmdk) => "vmdk",

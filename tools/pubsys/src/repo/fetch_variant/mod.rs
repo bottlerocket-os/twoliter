@@ -144,10 +144,18 @@ async fn fetch_variant(
     let image_ext = match image_format {
         Some(ImageFormat::Raw) | None => "img.lz4",
         Some(ImageFormat::Qcow2) => "qcow2",
+        Some(ImageFormat::Eif) => "eif",
         Some(ImageFormat::Vmdk) => "ova",
     };
 
     let targets = match image_format {
+        // EIF variants publish three artifacts: the EIF, the GPT disk image, and a bare kernel.
+        // The partition plan is irrelevant because rpm2eif owns the on-disk layout.
+        Some(ImageFormat::Eif) => vec![
+            format!("{filename_prefix}.eif"),
+            format!("{filename_prefix}-disk.img"),
+            format!("{filename_prefix}-kernel"),
+        ],
         // Since the OVA will contain all of the necessary VMDKs, the partition plan is irrelevant.
         Some(ImageFormat::Vmdk) => {
             vec![format!("{filename_prefix}.{image_ext}")]
