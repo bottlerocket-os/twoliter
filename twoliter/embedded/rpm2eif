@@ -42,8 +42,8 @@ Optional:
     --with-uefi-secure-boot=yes      Rejected: EIF does not sign shim/grub.
     --with-in-place-updates=yes      Rejected: EIF is single-bank.
     --with-encrypted-storage=yes     Rejected: EIF has no PRIVATE/DATA.
-    --with-first-party-stack=no      Required (default). Any value other than
-                                     'no' is rejected.
+    --with-standalone-image=yes      Required (default). Any value other than
+                                     'yes' is rejected.
 
 The rejected flags are accepted by the argument parser (so the Dockerfile can
 pass the same flag set to rpm2eif and rpm2img) and then validated against a
@@ -68,7 +68,7 @@ EROFS_ROOT_PARTITION="yes"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
-FIRST_PARTY_STACK="no"
+STANDALONE_IMAGE="yes"
 
 for arg in "$@"; do
     case "${arg}" in
@@ -82,7 +82,7 @@ for arg in "$@"; do
         --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${arg#*=}" ;;
         --with-in-place-updates=*) IN_PLACE_UPDATES="${arg#*=}" ;;
         --with-encrypted-storage=*) ENCRYPTED_STORAGE="${arg#*=}" ;;
-        --with-first-party-stack=*) FIRST_PARTY_STACK="${arg#*=}" ;;
+        --with-standalone-image=*) STANDALONE_IMAGE="${arg#*=}" ;;
         *) echo "Unknown argument: ${arg}"; usage ;;
     esac
 done
@@ -103,7 +103,7 @@ declare -A eif_flag_allowlist=(
     [UEFI_SECURE_BOOT]="no"
     [IN_PLACE_UPDATES]="no"
     [ENCRYPTED_STORAGE]="no"
-    [FIRST_PARTY_STACK]="no"
+    [STANDALONE_IMAGE]="yes"
 )
 declare -A eif_flag_names=(
     [XFS_DATA_PARTITION]="xfs-data-partition"
@@ -111,7 +111,7 @@ declare -A eif_flag_names=(
     [UEFI_SECURE_BOOT]="uefi-secure-boot"
     [IN_PLACE_UPDATES]="in-place-updates"
     [ENCRYPTED_STORAGE]="encrypted-storage"
-    [FIRST_PARTY_STACK]="first-party-stack"
+    [STANDALONE_IMAGE]="standalone-image"
 )
 eif_flag_errors=0
 for flag in "${!eif_flag_allowlist[@]}"; do
@@ -119,8 +119,8 @@ for flag in "${!eif_flag_allowlist[@]}"; do
     have="${!flag}"
     if [[ "${have}" != "${want}" ]]; then
         name="${eif_flag_names[${flag}]}"
-        if [[ "${flag}" == "FIRST_PARTY_STACK" ]]; then
-            echo "ERROR: \`image-format = \"eif\"\` requires \`--with-${name}=no\` (got '${have}'); EIF is inherently a stripped-down image." >&2
+        if [[ "${flag}" == "STANDALONE_IMAGE" ]]; then
+            echo "ERROR: \`image-format = \"eif\"\` requires \`--with-${name}=yes\` (got '${have}'); EIF is inherently a stripped-down image." >&2
         elif [[ "${flag}" == "EROFS_ROOT_PARTITION" ]]; then
             echo "ERROR: \`image-format = \"eif\"\` requires \`--with-${name}=yes\` (got '${have}'); EIF pipeline always builds an erofs root." >&2
         else
@@ -338,12 +338,12 @@ generate_application_inventory \
 echo "=== Writing image-features.env ==="
 # Mirror rpm2img: write /usr/share/bottlerocket/image-features.env with the
 # canonical boolean values for the features an EIF image ships with. This
-# is a fixed profile -- EIF is inherently first-party-stack=false with an
+# is a fixed profile -- EIF is inherently standalone-image=true with an
 # ext4 (would-be) data partition filesystem, no IPU, no encrypted storage
 # -- but writing the file makes downstream userspace consumers (e.g.,
-# `prepare-local-fs.service`) see a "set to false" value rather than an
+# `prepare-local-fs.service`) see a consistent value rather than an
 # unset variable, matching the behavior of a non-EIF stripped-down image
-# built with `first-party-stack = false`.
+# built with `standalone-image = true`.
 #
 # The file lives in `/${SYS_ROOT}/usr/share/bottlerocket/...` on non-EIF
 # variants because of the cross-compile SDK layout; on EIF variants,
@@ -355,7 +355,7 @@ cat >"${IMAGE_FEATURES_ENV_DIR}/image-features.env" <<'EOF'
 DATA_PARTITION_FILESYSTEM=ext4
 IN_PLACE_UPDATES=false
 ENCRYPTED_STORAGE=false
-FIRST_PARTY_STACK=false
+STANDALONE_IMAGE=true
 EOF
 
 echo "=== Creating rootfs.erofs ==="

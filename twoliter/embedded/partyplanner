@@ -135,7 +135,7 @@ PRIVATE_SCALE_FACTOR="24"
 # Postlude | GPT footer               1 MiB  | GPT is fixed, private partition grows.
 #          +---------------------------------+
 
-# Layout for an OS image with `first-party-stack = false` (default 1 GiB):
+# Layout for an OS image with `standalone-image = true` (default 1 GiB):
 # single bank, no RESERVED, no PRIVATE, no DATA. ROOT-A absorbs all the slack
 # that would otherwise go to those partitions. The variant has no
 # Bottlerocket-managed datastore or settings subsystem, so there is nothing
@@ -215,22 +215,22 @@ get_partition_sizes() {
 #   $1  os_image_gib       OS image size in GiB. Required, must be a positive
 #                          integer. The caller is responsible for resolving
 #                          any feature-dependent default (e.g. 1 GiB when
-#                          `first-party-stack = false`) before invoking this
+#                          `standalone-image = true`) before invoking this
 #                          function; we use the value as-is.
 #   $2  data_image_gib     Data image size in GiB. Required even when
-#                          `first_party_stack=no` (where it is unused) so
+#                          `standalone_image=yes` (where it is unused) so
 #                          that the parameter list remains stable.
 #   $3  partition_plan     "split" or "unified".
-#   $4  in_place_updates   "yes" or "no". Ignored when `first_party_stack=no`;
+#   $4  in_place_updates   "yes" or "no". Ignored when `standalone_image=yes`;
 #                          the two are validated as mutually exclusive below.
 #   $5  pp_size            (nameref) bash assoc-array to populate with sizes.
 #   $6  pp_offset          (nameref) bash assoc-array to populate with offsets.
-#   $7  first_party_stack  (optional, default "yes") "yes" or "no". When
-#                          "no", a single-bank stripped-down layout is
+#   $7  standalone_image  (optional, default "no") "yes" or "no". When
+#                          "yes", a single-bank stripped-down layout is
 #                          produced with no RESERVED, PRIVATE, or DATA
 #                          partitions.
 set_partition_sizes() {
-  local os_image_gib data_image_gib partition_plan in_place_updates first_party_stack
+  local os_image_gib data_image_gib partition_plan in_place_updates standalone_image
   local -n pp_size pp_offset
   os_image_gib="${1:?}"
   data_image_gib="${2:?}"
@@ -250,11 +250,11 @@ set_partition_sizes() {
   # Table for partition offsets from start of disk, in MiB.
   pp_offset="${6:?}"
 
-  # Whether we're building the standard Bottlerocket image (the first-party
-  # software stack and its supporting partitions) or the stripped-down image
-  # without those. Defaults to "yes" if not provided so existing direct
+  # Whether we're building the stripped-down image (standalone configuration
+  # without the first-party Bottlerocket software stack) or the standard
+  # Bottlerocket image. Defaults to "no" if not provided so existing direct
   # callers continue to get the standard layout unchanged.
-  first_party_stack="${7:-yes}"
+  standalone_image="${7:-no}"
 
   # Most of the partitions on the main image scale with the overall size.
   local boot_mib root_mib hash_mib reserved_mib private_mib
@@ -262,21 +262,21 @@ set_partition_sizes() {
   root_mib="$((os_image_gib * ROOT_SCALE_FACTOR))"
   hash_mib="$((os_image_gib * HASH_SCALE_FACTOR))"
 
-  # Fast-path the stripped-down layout (`first-party-stack = false`). Single
+  # Fast-path the stripped-down layout (`standalone-image = true`). Single
   # bank, no RESERVED-A, no PRIVATE, no DATA-A/B; ROOT-A is sized so that
   # the partitions exactly fill the nominal image size and the GPT footer
   # is preserved.
-  if [[ "${first_party_stack}" == "no" ]]; then
+  if [[ "${standalone_image}" == "yes" ]]; then
     # Defense-in-depth: the buildsys validator and the rpm2img/img2img
     # entry-point checks already reject these combinations, but a stale or
     # buggy direct caller of this function should also fail loudly rather
     # than silently producing an unexpected layout.
     if [[ "${in_place_updates}" == "yes" ]]; then
-      echo "set_partition_sizes: first_party_stack=no is incompatible with in_place_updates=yes" >&2
+      echo "set_partition_sizes: standalone_image=yes is incompatible with in_place_updates=yes" >&2
       exit 1
     fi
     if [[ "${partition_plan}" == "split" ]]; then
-      echo "set_partition_sizes: first_party_stack=no is incompatible with partition_plan=split" >&2
+      echo "set_partition_sizes: standalone_image=yes is incompatible with partition_plan=split" >&2
       exit 1
     fi
 
@@ -301,7 +301,7 @@ set_partition_sizes() {
     local root_a_mib
     root_a_mib="$(( total_mib - 1 - BIOS_MIB - (EFI_MIB * 2) - (boot_mib * 2) - (hash_mib * 2) - 1 ))"
     if (( root_a_mib <= 0 )); then
-      echo "image size ${os_image_gib} GiB is too small for first_party_stack=no partition layout" >&2
+      echo "image size ${os_image_gib} GiB is too small for standalone_image=yes partition layout" >&2
       exit 1
     fi
     pp_offset["ROOT-A"]="${offset}"
@@ -314,7 +314,7 @@ set_partition_sizes() {
 
     # Sanity check: offsets + GPT footer must equal total_mib.
     if (( offset + 1 != total_mib )); then
-      echo "first_party_stack=no partition layout offset mismatch: offset=${offset}, total=${total_mib}" >&2
+      echo "standalone_image=yes partition layout offset mismatch: offset=${offset}, total=${total_mib}" >&2
       exit 1
     fi
     return 0
@@ -424,7 +424,7 @@ set_partition_sizes() {
 # separate entry point (rather than a mode of `set_partition_sizes`) so
 # that:
 #   - The math stays simple to read and easy to test in isolation.
-#   - The existing `first_party_stack=no` path continues to size ROOT-A
+#   - The existing `standalone_image=yes` path continues to size ROOT-A
 #     against the nominal image size (residual), while EIF sizes the disk
 #     image against the *actual* content plus optional padding.
 #   - Direct callers of `set_partition_sizes` cannot accidentally invoke

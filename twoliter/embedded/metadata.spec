@@ -66,10 +66,10 @@ Provides: %{_cross_os}image-feature(encrypted-storage)
 Provides: %{_cross_os}image-feature(no-encrypted-storage)
 %endif
 
-%if %{with first_party_stack}
-Provides: %{_cross_os}image-feature(first-party-stack)
+%if %{with standalone_image}
+Provides: %{_cross_os}image-feature(standalone-image)
 %else
-Provides: %{_cross_os}image-feature(no-first-party-stack)
+Provides: %{_cross_os}image-feature(no-standalone-image)
 %endif
 
 %description

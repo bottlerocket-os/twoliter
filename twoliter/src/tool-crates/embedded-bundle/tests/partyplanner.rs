@@ -2,8 +2,8 @@
 //!
 //! The actual assertions live in `embedded/tests/test_partyplanner.sh`,
 //! which sources `partyplanner` as a library and exercises the
-//! `set_partition_sizes` helper across standard and stripped-down (first-party-stack
-//! disabled) layouts. This
+//! `set_partition_sizes` helper across standard and stripped-down (standalone-image
+//! enabled) layouts. This
 //! Rust wrapper exists so the bash tests run under `cargo test` alongside
 //! the validator tests in the `buildsys` crate.
 

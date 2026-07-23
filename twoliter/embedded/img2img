@@ -10,11 +10,11 @@ EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 # img2img does not currently parse `--with-encrypted-storage`, but we initialize
-# the variable so the first-party-stack validation below treats it consistently
+# the variable so the standalone-image validation below treats it consistently
 # with rpm2img. If a future change adds a flag for it, the validation below will
-# already enforce mutual exclusion when `first-party-stack = false`.
+# already enforce mutual exclusion when `standalone-image = true`.
 ENCRYPTED_STORAGE="no"
-FIRST_PARTY_STACK="yes"
+STANDALONE_IMAGE="no"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -31,7 +31,7 @@ for opt in "$@"; do
   --with-erofs-root-partition=*) EROFS_ROOT_PARTITION="${optarg}" ;;
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
-  --with-first-party-stack=*) FIRST_PARTY_STACK="${optarg}" ;;
+  --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -123,20 +123,20 @@ sanity_checks \
 # repack-variant, so we cannot rely on buildsys to have already enforced these.
 # Keep this list in sync with `rpm2img` and with `validate_image_features` in
 # `tools/buildsys/src/manifest.rs`.
-if [[ "${FIRST_PARTY_STACK}" == "no" ]]; then
-  declare -A first_party_stack_conflicts=(
+if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
+  declare -A standalone_image_conflicts=(
     [UEFI_SECURE_BOOT]="uefi-secure-boot"
     [IN_PLACE_UPDATES]="in-place-updates"
     [ENCRYPTED_STORAGE]="encrypted-storage"
   )
-  for f in "${!first_party_stack_conflicts[@]}"; do
+  for f in "${!standalone_image_conflicts[@]}"; do
     if [[ "${!f}" == "yes" ]]; then
-      echo "\`first-party-stack = false\` is incompatible with '${first_party_stack_conflicts[${f}]}'" >&2
+      echo "\`standalone-image = true\` is incompatible with '${standalone_image_conflicts[${f}]}'" >&2
       exit 1
     fi
   done
   if [[ "${PARTITION_PLAN}" == "split" ]]; then
-    echo "\`first-party-stack = false\` is incompatible with 'partition-plan=split'" >&2
+    echo "\`standalone-image = true\` is incompatible with 'partition-plan=split'" >&2
     exit 1
   fi
 fi
@@ -163,14 +163,14 @@ SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/
 
 # Collect partition sizes and offsets from the partition plan.
 # The caller is responsible for resolving any feature-dependent default
-# for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `first-party-stack = false`) before invoking
+# for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `standalone-image = true`) before invoking
 # this script; we use the value as-is. See `resolved_image_layout` in
 # `tools/buildsys/src/manifest.rs` for the canonical resolver.
 declare -A partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff "${FIRST_PARTY_STACK}"
+  partsize partoff "${STANDALONE_IMAGE}"
 
 # Process and stage the input images to the working directory.
 declare OS_IMAGE DATA_IMAGE

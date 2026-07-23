@@ -78,7 +78,7 @@ BASE=(
   --package-dir=/tmp/rpm2eif-test-no-such-dir
   --output-dir=/tmp/rpm2eif-test-out
   --external-kits-path=/tmp/rpm2eif-test-kits
-  --with-first-party-stack=no
+  --with-standalone-image=yes
 )
 
 echo "Test 1: legal minimal flags pass validation"
@@ -105,9 +105,9 @@ assert_rejects_with "xfs-data-partition=yes rejected" "xfs-data-partition" \
   "${BASE[@]}" --with-xfs-data-partition=yes
 
 echo
-echo "Test 6: reject first-party-stack=yes"
-assert_rejects_with "first-party-stack=yes rejected" "first-party-stack" \
-  "${BASE[@]/--with-first-party-stack=no/--with-first-party-stack=yes}"
+echo "Test 6: reject standalone-image=no"
+assert_rejects_with "standalone-image=no rejected" "standalone-image" \
+  "${BASE[@]/--with-standalone-image=yes/--with-standalone-image=no}"
 
 echo
 echo "Test 7: reject non-yes erofs-root-partition"
@@ -158,7 +158,7 @@ echo "Test 13: all conflicts reported in a single run"
 # Regression guard: rpm2eif should report every failing flag, not stop at
 # the first. The user should see the full picture in one build cycle.
 out=$(run_rpm2eif \
-  "${BASE[@]/--with-first-party-stack=no/--with-first-party-stack=yes}" \
+  "${BASE[@]/--with-standalone-image=yes/--with-standalone-image=no}" \
   --with-uefi-secure-boot=yes \
   --with-in-place-updates=yes \
   --with-encrypted-storage=yes)
@@ -167,7 +167,7 @@ for needle in \
     "uefi-secure-boot" \
     "in-place-updates" \
     "encrypted-storage" \
-    "first-party-stack"
+    "standalone-image"
 do
   if [[ "${out}" != *"${needle}"* ]]; then
     missing+=("${needle}")

@@ -11,7 +11,7 @@ EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
-FIRST_PARTY_STACK="yes"
+STANDALONE_IMAGE="no"
 GUEST_IMAGES=""
 
 for opt in "$@"; do
@@ -32,7 +32,7 @@ for opt in "$@"; do
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
-  --with-first-party-stack=*) FIRST_PARTY_STACK="${optarg}" ;;
+  --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
   --guest-images=*) GUEST_IMAGES="${optarg}" ;;
   --sbom-package-dir=*) SBOM_PACKAGE_DIR="${optarg}" ;;
   *)
@@ -61,20 +61,20 @@ sanity_checks \
 # repack-variant, so we cannot rely on buildsys to have already enforced these.
 # Keep this list in sync with `img2img` and with `validate_image_features` in
 # `tools/buildsys/src/manifest.rs`.
-if [[ "${FIRST_PARTY_STACK}" == "no" ]]; then
-  declare -A first_party_stack_conflicts=(
+if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
+  declare -A standalone_image_conflicts=(
     [UEFI_SECURE_BOOT]="uefi-secure-boot"
     [IN_PLACE_UPDATES]="in-place-updates"
     [ENCRYPTED_STORAGE]="encrypted-storage"
   )
-  for f in "${!first_party_stack_conflicts[@]}"; do
+  for f in "${!standalone_image_conflicts[@]}"; do
     if [[ "${!f}" == "yes" ]]; then
-      echo "\`first-party-stack = false\` is incompatible with '${first_party_stack_conflicts[${f}]}'" >&2
+      echo "\`standalone-image = true\` is incompatible with '${standalone_image_conflicts[${f}]}'" >&2
       exit 1
     fi
   done
   if [[ "${PARTITION_PLAN}" == "split" ]]; then
-    echo "\`first-party-stack = false\` is incompatible with 'partition-plan=split'" >&2
+    echo "\`standalone-image = true\` is incompatible with 'partition-plan=split'" >&2
     exit 1
   fi
 fi
@@ -124,11 +124,11 @@ split)
   ;;
 unified)
   # The caller is responsible for resolving any feature-dependent default
-  # for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `first-party-stack = false`)
+  # for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `standalone-image = true`)
   # before invoking
   # this script; we use the value as-is. See `resolved_image_layout` in
   # `tools/buildsys/src/manifest.rs` for the canonical resolver.
-  if [[ "${FIRST_PARTY_STACK}" == "no" ]]; then
+  if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
     # Stripped-down images do not have a DATA partition, so do not pad the
     # OS image with the would-be data image space.
     truncate -s "${OS_IMAGE_SIZE_GIB}G" "${OS_IMAGE}"
@@ -146,7 +146,7 @@ declare -A partlabel parttype partguid partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff "${FIRST_PARTY_STACK}"
+  partsize partoff "${STANDALONE_IMAGE}"
 set_partition_labels partlabel
 set_partition_types parttype
 set_partition_uuids partguid "${PARTITION_PLAN}"
@@ -154,7 +154,7 @@ set_partition_uuids partguid "${PARTITION_PLAN}"
 declare -a partitions
 partitions=(BIOS)
 partitions+=(EFI-A BOOT-A ROOT-A HASH-A)
-if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   partitions+=(RESERVED-A)
   if [[ "${IN_PLACE_UPDATES}" == "yes" ]]; then
     partitions+=(EFI-B BOOT-B ROOT-B HASH-B RESERVED-B)
@@ -195,7 +195,7 @@ done
 sgdisk --clear "${partargs[@]}" --sort --print "${OS_IMAGE}"
 
 # Partition the separate data disk, if we're using the split layout.
-if [[ "${FIRST_PARTY_STACK}" == "yes" && "${PARTITION_PLAN}" == "split" ]]; then
+if [[ "${STANDALONE_IMAGE}" == "no" && "${PARTITION_PLAN}" == "split" ]]; then
   data_start="${partoff["DATA-B"]}"
   data_end=$((data_start + partsize["DATA-A"]))
   data_end=$((data_end * 2048 - 1))
@@ -479,7 +479,7 @@ EOF
 # Set the BOTTLEROCKET-DATA Filesystem for creating/mounting. This is
 # written unconditionally so that `prepare-local-fs.service` can format an
 # attached data volume with `systemd-makefs` even for stripped-down images
-# (`first-party-stack = false`) that don't bake in a DATA partition.
+# (`standalone-image = true`) that don't bake in a DATA partition.
 if [[ "${XFS_DATA_PARTITION}" == "yes" ]]; then
   printf "%s\n" "DATA_PARTITION_FILESYSTEM=xfs" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 else
@@ -500,11 +500,11 @@ else
   printf "%s\n" "ENCRYPTED_STORAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
-# Set first-party-stack flag
-if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
-  printf "%s\n" "FIRST_PARTY_STACK=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+# Set standalone-image flag
+if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
+  printf "%s\n" "STANDALONE_IMAGE=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 else
-  printf "%s\n" "FIRST_PARTY_STACK=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+  printf "%s\n" "STANDALONE_IMAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
 # BOTTLEROCKET-ROOT-A
@@ -538,9 +538,9 @@ dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["HAS
 
 # write GRUB config
 # Include the parameters that support Boot Config. Stripped-down images
-# (`first-party-stack = false`) have no PRIVATE partition to hold
+# (`standalone-image = true`) have no PRIVATE partition to hold
 # bootconfig.data, so omit these entries entirely.
-if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   BOOTCONFIG='bootconfig'
   INITRD="initrd (\$private)/bootconfig.data"
 else
@@ -632,7 +632,7 @@ boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
 echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
 # BOTTLEROCKET-PRIVATE
-if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   # Generate bootconfig file for the image.
   touch "${PRIVATE_MOUNT}/bootconfig.data"
   bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
@@ -656,7 +656,7 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
 fi
 
 # BOTTLEROCKET-DATA-A and BOTTLEROCKET-DATA-B
-if [[ "${FIRST_PARTY_STACK}" == "yes" ]]; then
+if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   # If we build on a host with SELinux enabled, we could end up with labels that
   # do not match our policy. Since we allow replacing the data volume at runtime,
   # we can't count on these labels being correct in any case, and it's better to
