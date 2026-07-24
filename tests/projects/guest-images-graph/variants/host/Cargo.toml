@@ -1,0 +1,19 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "../../lib.rs"
+
+[package.metadata.build-variant]
+included-packages = []
+kernel-parameters = []
+
+[package.metadata.build-variant.guest-images]
+direct = "/usr/share/bottlerocket/guests/direct"
+
+[build-dependencies]
+direct = { path = "../direct" }
+middle-kit = { path = "../../kits/middle-kit" }

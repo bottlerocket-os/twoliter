@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "kits/wrapper-kit",
+    "packages/inner-pkg",
+    "variants/inner-variant",
+    "variants/wrapper-variant",
+]
+
+[profile.dev]
+debug = false
+opt-level = 'z'
+
+[profile.dev.build-override]
+opt-level = 'z'

@@ -306,9 +306,9 @@ use buildsys_config::EXTERNAL_KIT_METADATA;
 use guppy::graph::{DependencyDirection, PackageGraph, PackageLink, PackageMetadata};
 use guppy::{CargoMetadata, PackageId};
 use serde::{Deserialize, Serialize};
-use snafu::{OptionExt, ResultExt, Snafu};
+use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::fs;
@@ -397,6 +397,87 @@ impl Manifest {
         Ok(kits)
     }
 
+    /// For a host variant manifest, validate the `guest-images` field and return the resolved
+    /// list of `(guest_name, install_path)` pairs. Each guest must:
+    ///
+    /// 1. Be declared as a **direct** `[build-dependencies]` entry of this host variant (so
+    ///    Cargo builds it before the host's `build.rs` runs, and so the relationship is
+    ///    explicit rather than relying on a transitive path).
+    /// 2. Itself be a variant crate (carry `[package.metadata.build-variant]`).
+    /// 3. Have an absolute install-path with no `..` components.
+    /// 4. Not name the host variant itself.
+    /// 5. Use a name and path free of `:` and newline characters, which are reserved as
+    ///    field/record separators in the `GUEST_IMAGES` build-arg passed to the image stage.
+    ///
+    /// Returns an empty vector if the manifest declares no `guest-images`.
+    pub fn guest_image_variant_deps(&self) -> Result<Vec<(String, PathBuf)>> {
+        let Some(guest_images) = self.info().guest_images() else {
+            return Ok(Vec::new());
+        };
+        if guest_images.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let host_name = self.info().manifest_name();
+
+        // Syntactic validation runs first, before any cargo-graph work, so configuration
+        // errors fail fast and are unit-testable without a graph fixture.
+        validate_guest_image_entries(host_name, guest_images, self.info().image_format())?;
+
+        // Collect the set of *direct* build-dependency variant names of the host. We do not
+        // walk the graph transitively: each guest must be an explicit build-dep of the host so
+        // the relationship is visible in `Cargo.toml`.
+        let id = find_id(host_name, &self.graph, BuildType::Variant)
+            .context(error::RootDependencyMissingSnafu { name: host_name })?;
+        let host_metadata = self
+            .graph
+            .metadata(&id)
+            .context(error::CargoPackageQuerySnafuSnafu { id: id.clone() })?;
+        let direct_build_dep_variants: HashSet<String> = host_metadata
+            .direct_links()
+            .filter(|link| link.build().is_present())
+            .map(|link| link.to())
+            .filter(|to| is_manifest_type(to, BuildType::Variant))
+            .filter_map(|to| filter_map_to_name(host_name, &to))
+            .collect();
+
+        // To produce a more actionable error, also gather every *transitively reachable*
+        // variant so we can distinguish "missing" from "transitive only".
+        let ids = [&id];
+        let query = self
+            .graph
+            .query_forward(ids.into_iter())
+            .context(error::CargoPackageQuerySnafuSnafu { id: id.clone() })?;
+        let package_set = query.resolve_with_fn(|_, link| is_valid_dep(host_name, &link));
+        let reachable_variants: HashSet<String> = package_set
+            .packages(DependencyDirection::Forward)
+            .filter(|pkg_metadata| is_manifest_type(pkg_metadata, BuildType::Variant))
+            .filter_map(|pkg_metadata| filter_map_to_name(host_name, &pkg_metadata))
+            .collect();
+
+        let mut resolved = Vec::with_capacity(guest_images.len());
+        for (guest, path) in guest_images.iter() {
+            if !direct_build_dep_variants.contains(guest) {
+                if reachable_variants.contains(guest) {
+                    return Err(error::GuestImagesNotDirectBuildDepSnafu {
+                        name: host_name.to_string(),
+                        guest: guest.clone(),
+                    }
+                    .build()
+                    .into());
+                }
+                return Err(error::GuestImagesMissingBuildDepSnafu {
+                    name: host_name.to_string(),
+                    guest: guest.clone(),
+                }
+                .build()
+                .into());
+            }
+            resolved.push((guest.clone(), path.clone()));
+        }
+        Ok(resolved)
+    }
+
     pub fn info(&self) -> &ManifestInfo {
         &self.manifest_info
     }
@@ -479,8 +560,8 @@ impl ManifestInfo {
     }
 
     /// Convenience method to return the package name. If the manifest has an override in the
-    /// `package.metadata.build-package.package-name` key, it is returned, otherwise the Cargo
-    /// manifest name is returned from `package.name`.
+    /// `package.metadata.build-package.package-name` key, it is returned, otherwise the
+    /// Cargo manifest name is returned from `package.name`.
     pub fn package_name(&self) -> &str {
         self.build_package()
             .and_then(|b| b.package_name.as_deref())
@@ -602,6 +683,11 @@ impl ManifestInfo {
         Some(features)
     }
 
+    /// Convenience method to return the guest-image install paths declared by this variant.
+    pub fn guest_images(&self) -> Option<&BTreeMap<String, PathBuf>> {
+        self.build_variant().and_then(|b| b.guest_images.as_ref())
+    }
+
     /// Returns the type of build the manifest is requesting.
     // TODO - alter ManifestInfo struct to use an enum and eliminate the use of Result here.
     pub fn build_type(&self) -> Result<BuildType> {
@@ -642,6 +728,23 @@ impl ManifestInfo {
             .and_then(|m| m.build_variant.as_ref())
     }
 
+    /// Returns the names of any sibling `[package.metadata.build-*]` tables present alongside
+    /// this manifest's primary build metadata. Used to detect ambiguous manifests that mix
+    /// build types.
+    pub fn conflicting_build_metadata(&self) -> Vec<&'static str> {
+        let mut conflicts = Vec::new();
+        if self.build_package().is_some() {
+            conflicts.push("build-package");
+        }
+        if self.build_kit().is_some() {
+            conflicts.push("build-kit");
+        }
+        if self.build_variant().is_some() {
+            conflicts.push("build-variant");
+        }
+        conflicts
+    }
+
     /// Returns variant attribute overrides from `[package.metadata.build-variant]`.
     pub fn variant_overrides(&self) -> bottlerocket_variant::VariantOverrides {
         self.build_variant()
@@ -654,6 +757,70 @@ impl ManifestInfo {
             })
             .unwrap_or_default()
     }
+}
+
+/// Syntactic validation of the `[package.metadata.build-variant.guest-images]` map for the
+/// host variant `host_name`. Performs only the checks that don't require the cargo graph:
+/// image-format compatibility, self-reference, name well-formedness, path absoluteness, and
+/// path safety. Caller is responsible for the graph-level "must be a direct build-dep" check.
+///
+/// The `:` and newline checks exist because the `GUEST_IMAGES` build-arg passed to the image
+/// stage is a newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples; a
+/// literal `:` or newline in either field would corrupt parsing in `rpm2img`. The `..`
+/// rejection prevents an install path from escaping the host rootfs target.
+///
+/// Guest-image embedding is implemented only in `rpm2img`; the `rpm2eif` pipeline does not
+/// consume the `GUEST_IMAGES` build-arg. Rejecting `image-format = "eif"` here turns a
+/// silent "build succeeds, guest images not embedded" footgun into a clear build-time error,
+/// mirroring the existing `EifRepackUnsupported` check for `img2img`.
+fn validate_guest_image_entries(
+    host_name: &str,
+    guest_images: &BTreeMap<String, PathBuf>,
+    image_format: Option<&ImageFormat>,
+) -> Result<()> {
+    ensure!(
+        !matches!(image_format, Some(ImageFormat::Eif)),
+        error::GuestImagesUnsupportedImageFormatSnafu {
+            name: host_name.to_string(),
+        }
+    );
+    for (guest, path) in guest_images.iter() {
+        ensure!(
+            guest != host_name,
+            error::GuestImagesSelfReferenceSnafu {
+                name: host_name.to_string(),
+            }
+        );
+        ensure!(
+            !guest.is_empty() && !guest.contains(':') && !guest.contains('\n'),
+            error::GuestImagesInvalidNameSnafu {
+                name: host_name.to_string(),
+                guest: guest.clone(),
+            }
+        );
+        ensure!(
+            path.is_absolute(),
+            error::GuestImagesPathNotAbsoluteSnafu {
+                name: host_name.to_string(),
+                guest: guest.clone(),
+                path: path.clone(),
+            }
+        );
+        let path_str = path.to_string_lossy();
+        let has_invalid_char = path_str.contains(':') || path_str.contains('\n');
+        let has_parent_component = path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+        ensure!(
+            !has_invalid_char && !has_parent_component,
+            error::GuestImagesInvalidPathSnafu {
+                name: host_name.to_string(),
+                guest: guest.clone(),
+                path: path.clone(),
+            }
+        );
+    }
+    Ok(())
 }
 
 /// For the "top-level manifest", i.e. the thing that `buildsys` is building, only
@@ -704,8 +871,8 @@ fn filter_map_to_name(top_manifest_name: &str, pkg_metadata: &PackageMetadata) -
 /// Get the `package.metadata.build-package.package-name` value if there is one, otherwise return
 /// the Cargo manifest's package name. This is the same as `manifest_info.package_name()`.
 fn get_buildsys_package_name(pkg_metadata: &PackageMetadata) -> String {
-    let package_name_override = pkg_metadata
-        .metadata_table()
+    let metadata = pkg_metadata.metadata_table();
+    let package_name_override = metadata
         .get("build-package")
         .and_then(|v| v.as_object())
         .and_then(|build_package| build_package.get("package-name"))
@@ -768,6 +935,23 @@ pub enum SensitivityType {
     Flavor,
 }
 
+/// Metadata for a `build-variant`.
+///
+/// `guest-images` is a map from a guest variant's crate name to an absolute install path in
+/// this (host) variant's root filesystem. During the host's image build stage, each guest's
+/// `build/images/<arch>-<guest>/<version>/` directory is copied recursively into the install
+/// path. The guest variant must be declared as a `[build-dependencies]` of this host variant
+/// so that Cargo builds it first; otherwise the host build fails.
+///
+/// Example `Cargo.toml` snippet:
+/// ```ignore
+/// [package.metadata.build-variant]
+/// included-packages = ["release"]
+/// guest-images = { "inner-variant" = "/usr/share/bottlerocket/guests/inner" }
+///
+/// [build-dependencies]
+/// inner-variant = { path = "../inner-variant" }
+/// ```
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct BuildVariant {
@@ -778,6 +962,9 @@ pub struct BuildVariant {
     pub supported_arches: Option<HashSet<SupportedArch>>,
     pub kernel_parameters: Option<Vec<String>>,
     pub image_features: Option<HashMap<ImageFeature, bool>>,
+    /// Map of guest variant crate name -> absolute install path in this variant's root
+    /// filesystem.
+    pub guest_images: Option<BTreeMap<String, PathBuf>>,
     // Variant attribute overrides
     pub platform: Option<String>,
     pub runtime: Option<String>,
@@ -1225,6 +1412,11 @@ mod test {
         p.join("tests").join("projects")
     }
 
+    // Fixture manifest paths must be canonicalized so they match the paths that `cargo
+    // metadata` emits (macOS resolves `/var` -> `/private/var`, etc.); `Manifest::new`
+    // looks up the graph node by exact path. Symlink resolution is the desired behavior
+    // here, so opt out of the workspace-wide `canonicalize` lint at each helper.
+    #[allow(clippy::disallowed_methods)]
     fn cargo_manifest(name: &str) -> PathBuf {
         let subdir = if name.starts_with("pkg-") {
             "packages"
@@ -1852,5 +2044,467 @@ image-format = "eif"
         let features = HashSet::from([ImageFeature::ExternalKmodDevelopment]);
         let resolved = resolved_image_layout(&raw_layout, &features, Some(&ImageFormat::Eif));
         assert!(matches!(resolved.partition_plan, PartitionPlan::Unified));
+    }
+
+    /// `build_type()` returns `BuildType::Variant` and `guest_images()` round-trips when the
+    /// manifest carries a `[package.metadata.build-variant]` section with `guest-images`.
+    #[test]
+    fn test_build_variant_with_guest_images() {
+        let toml = r#"
+[package]
+name = "wrapper-variant"
+version = "0.1.0"
+
+[package.metadata.build-variant]
+guest-images = { "inner-variant" = "/usr/share/bottlerocket/guests/inner" }
+"#;
+        let info: ManifestInfo = toml::from_str(toml).unwrap();
+        assert_eq!(info.build_type().unwrap(), BuildType::Variant);
+        let guests = info.guest_images().expect("guest-images should round-trip");
+        assert_eq!(guests.len(), 1);
+        assert_eq!(
+            guests.get("inner-variant").map(|p| p.as_path()),
+            Some(std::path::Path::new("/usr/share/bottlerocket/guests/inner"))
+        );
+    }
+
+    /// A variant manifest without `guest-images` returns `None` from the accessor.
+    #[test]
+    fn test_build_variant_without_guest_images() {
+        let toml = r#"
+[package]
+name = "plain-variant"
+version = "0.1.0"
+
+[package.metadata.build-variant]
+"#;
+        let info: ManifestInfo = toml::from_str(toml).unwrap();
+        assert_eq!(info.build_type().unwrap(), BuildType::Variant);
+        assert!(info.guest_images().is_none());
+    }
+
+    /// A manifest without any build-* metadata still defaults to `Package` (preserved behavior).
+    #[test]
+    fn test_build_type_default_package_unchanged() {
+        let toml = r#"
+[package]
+name = "ordinary"
+version = "0.1.0"
+"#;
+        let info: ManifestInfo = toml::from_str(toml).unwrap();
+        assert_eq!(info.build_type().unwrap(), BuildType::Package);
+    }
+
+    /// Helper: build a `BTreeMap` for `validate_guest_image_entries` from a slice of pairs.
+    fn guest_map(entries: &[(&str, &str)]) -> BTreeMap<String, PathBuf> {
+        entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), PathBuf::from(*v)))
+            .collect()
+    }
+
+    /// Empty / valid input is accepted.
+    #[test]
+    fn test_validate_guest_image_entries_accepts_well_formed_input() {
+        let map = guest_map(&[
+            ("inner-variant", "/usr/share/bottlerocket/guests/inner"),
+            ("other-guest", "/var/lib/guests/other"),
+        ]);
+        validate_guest_image_entries("host-variant", &map, None)
+            .expect("well-formed input must pass");
+    }
+
+    /// A variant cannot use itself as a guest. The error must mention the variant name.
+    #[test]
+    fn test_validate_guest_image_entries_rejects_self_reference() {
+        let map = guest_map(&[("host-variant", "/usr/share/guests/self")]);
+        let err = validate_guest_image_entries("host-variant", &map, None)
+            .expect_err("self-reference must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("host-variant") && msg.contains("itself"),
+            "error must explain the self-reference, got: {msg}"
+        );
+    }
+
+    /// `:` and newline are reserved as `GUEST_IMAGES` field/record separators and must be
+    /// rejected in guest names.
+    #[test]
+    fn test_validate_guest_image_entries_rejects_invalid_names() {
+        for bad_name in [":sneaky", "with:colon", "new\nline", ""] {
+            let map = guest_map(&[(bad_name, "/usr/share/guests/foo")]);
+            let err = validate_guest_image_entries("host", &map, None).expect_err(&format!(
+                "guest name {bad_name:?} should have been rejected but was accepted"
+            ));
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("not permitted in a guest variant name"),
+                "bad name {bad_name:?} should produce InvalidName error, got: {msg}"
+            );
+        }
+    }
+
+    /// Install paths must be absolute and free of `:`, newline, or `..` components.
+    #[test]
+    fn test_validate_guest_image_entries_rejects_invalid_paths() {
+        // Non-absolute -> distinct error variant; we just check it fails.
+        let map = guest_map(&[("g", "relative/path")]);
+        let err = validate_guest_image_entries("host", &map, None)
+            .expect_err("non-absolute path must be rejected");
+        assert!(format!("{err}").contains("must be absolute"));
+
+        // `:` injection
+        let map = guest_map(&[("g", "/usr/share:trick")]);
+        assert!(
+            validate_guest_image_entries("host", &map, None).is_err(),
+            "':' in path must be rejected"
+        );
+
+        // newline injection
+        let map = guest_map(&[("g", "/usr/share/foo\nbar")]);
+        assert!(
+            validate_guest_image_entries("host", &map, None).is_err(),
+            "newline in path must be rejected"
+        );
+
+        // `..` traversal
+        let map = guest_map(&[("g", "/usr/share/../etc/passwd")]);
+        let err = validate_guest_image_entries("host", &map, None)
+            .expect_err("'..' in path must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("must not contain '..' components"),
+            "'..' rejection should explain itself, got: {msg}"
+        );
+    }
+
+    /// `image-format = "eif"` combined with a non-empty `guest-images` map must be rejected
+    /// up front: the EIF pipeline (`rpm2eif`) does not consume the `GUEST_IMAGES` build-arg,
+    /// so silently accepting the combination would produce a host image with no embedded
+    /// guest artifacts. This mirrors the pre-existing `EifRepackUnsupported` check for
+    /// `img2img`. See PR#669 review comments from `sky1122` and `vigh-m`.
+    #[test]
+    fn test_validate_guest_image_entries_rejects_eif_image_format() {
+        let map = guest_map(&[("inner-variant", "/usr/share/bottlerocket/guests/inner")]);
+        let err = validate_guest_image_entries("host-variant", &map, Some(&ImageFormat::Eif))
+            .expect_err("EIF host variant must not declare guest-images");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("host-variant") && msg.contains("eif"),
+            "error must name the variant and the offending image-format, got: {msg}"
+        );
+    }
+
+    /// Non-EIF image formats (raw/qcow2/vmdk) — and the absence of an explicit
+    /// `image-format` — must all accept `guest-images` unchanged, so the new EIF gate does
+    /// not regress the disk-image path.
+    #[test]
+    fn test_validate_guest_image_entries_accepts_disk_image_formats() {
+        let map = guest_map(&[("inner-variant", "/usr/share/bottlerocket/guests/inner")]);
+        for fmt in [
+            None,
+            Some(&ImageFormat::Raw),
+            Some(&ImageFormat::Qcow2),
+            Some(&ImageFormat::Vmdk),
+        ] {
+            validate_guest_image_entries("host-variant", &map, fmt).unwrap_or_else(|e| {
+                panic!("image-format {fmt:?} must accept guest-images, got error: {e}")
+            });
+        }
+    }
+
+    /// Validation runs at the manifest level (`Manifest::guest_image_variant_deps`), so the
+    /// graph-aware happy path is exercised against the `guest-images-kit` fixture: declaring
+    /// `inner-variant` (a direct build-dep) succeeds and round-trips the install path.
+    #[test]
+    fn test_guest_image_variant_deps_happy_path() {
+        let manifest_path = guest_kit_manifest("wrapper-variant");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = guest_kit_cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let deps = manifest
+            .guest_image_variant_deps()
+            .expect("wrapper-variant -> inner-variant is a valid direct build-dep");
+        assert_eq!(deps.len(), 1);
+        let (guest, path) = &deps[0];
+        assert_eq!(guest, "inner-variant");
+        assert_eq!(path, &PathBuf::from("/usr/share/bottlerocket/guests/inner"));
+    }
+
+    /// A leaf variant (`inner-variant`) declares no `guest-images`, so the call returns an
+    /// empty list rather than erroring.
+    #[test]
+    fn test_guest_image_variant_deps_returns_empty_when_unset() {
+        let manifest_path = guest_kit_manifest("inner-variant");
+        let temp_dir = TempDir::new().unwrap();
+        let cargo_metadata_path = guest_kit_cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, cargo_metadata_path).unwrap();
+        let deps = manifest.guest_image_variant_deps().unwrap();
+        assert!(deps.is_empty());
+    }
+
+    /// `guest-kit-manifest` resolves to a `Cargo.toml` under the `guest-images-kit` fixture.
+    /// Subdir is derived from the name's prefix/suffix the same way `cargo_manifest` does it.
+    #[allow(clippy::disallowed_methods)] // canonicalize required to match cargo-metadata's paths
+    fn guest_kit_manifest(name: &str) -> PathBuf {
+        let subdir = if name.starts_with("pkg-") || name.ends_with("-pkg") {
+            "packages"
+        } else if name.ends_with("kit") {
+            "kits"
+        } else {
+            "variants"
+        };
+        let path = test_projects_dir()
+            .join("guest-images-kit")
+            .join(subdir)
+            .join(name)
+            .join("Cargo.toml");
+        path.canonicalize()
+            .unwrap_or_else(|_| panic!("unable to canonicalize {}", path.display()))
+    }
+
+    fn guest_kit_cargo_metadata_path(temp_dir: &TempDir) -> PathBuf {
+        let output_path = temp_dir.path().join("cargo_metadata.json");
+        let output = MetadataCommand::new()
+            .manifest_path(
+                test_projects_dir()
+                    .join("guest-images-kit")
+                    .join("Cargo.toml"),
+            )
+            .current_dir(temp_dir.path())
+            .other_options(["--locked", "--frozen", "--offline"])
+            .cargo_command()
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            panic!("cargo command failed {:?}", output)
+        }
+
+        fs::write(&output_path, output.stdout).unwrap();
+        output_path
+    }
+
+    /// Minimal fixture under `tests/projects/guest-images-graph/` whose only purpose is to
+    /// exercise the graph-aware checks in `guest_image_variant_deps`. Layout:
+    ///
+    /// ```text
+    /// host (variant)
+    ///   ├─ [build-deps] direct (variant)         <- valid guest
+    ///   └─ [build-deps] middle-kit (kit)
+    ///         ├─ [deps] transitive (variant)     <- reachable but NOT a direct build-dep
+    ///         └─ [deps] some-pkg (package)
+    /// ```
+    #[allow(clippy::disallowed_methods)] // canonicalize required to match cargo-metadata's paths
+    fn graph_fixture_manifest(name: &str) -> PathBuf {
+        let subdir = if name.starts_with("pkg-") || name.ends_with("-pkg") {
+            "packages"
+        } else if name.ends_with("kit") {
+            "kits"
+        } else {
+            "variants"
+        };
+        let path = test_projects_dir()
+            .join("guest-images-graph")
+            .join(subdir)
+            .join(name)
+            .join("Cargo.toml");
+        path.canonicalize()
+            .unwrap_or_else(|_| panic!("unable to canonicalize {}", path.display()))
+    }
+
+    fn graph_fixture_cargo_metadata_path(temp_dir: &TempDir) -> PathBuf {
+        let output_path = temp_dir.path().join("cargo_metadata.json");
+        let output = MetadataCommand::new()
+            .manifest_path(
+                test_projects_dir()
+                    .join("guest-images-graph")
+                    .join("Cargo.toml"),
+            )
+            .current_dir(temp_dir.path())
+            .other_options(["--locked", "--frozen", "--offline"])
+            .cargo_command()
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            panic!("cargo command failed {:?}", output)
+        }
+
+        fs::write(&output_path, output.stdout).unwrap();
+        output_path
+    }
+
+    /// `host` declares `direct` (a direct build-dep variant) under `guest-images`. This is the
+    /// only acceptable shape; the graph fixture's `host/Cargo.toml` already configures it that
+    /// way, so `Manifest::new` + `guest_image_variant_deps` should round-trip cleanly.
+    #[test]
+    fn test_guest_image_variant_deps_accepts_direct_build_dep() {
+        let manifest_path = graph_fixture_manifest("host");
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = graph_fixture_cargo_metadata_path(&temp_dir);
+        let manifest = Manifest::new(manifest_path, metadata_path).unwrap();
+        let deps = manifest
+            .guest_image_variant_deps()
+            .expect("direct build-dep variant must be accepted");
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].0, "direct");
+    }
+
+    /// Replacing `host`'s `guest-images` with `transitive` (which is reachable only via
+    /// `middle-kit`'s normal `[dependencies]`, not as a direct build-dep of `host`) must
+    /// produce the actionable `GuestImagesNotDirectBuildDep` error rather than the generic
+    /// "missing" variant.
+    #[test]
+    fn test_guest_image_variant_deps_rejects_transitive_only_dep() {
+        // Build a synthetic `host/Cargo.toml` that points at `transitive` instead of `direct`,
+        // place it next to the real fixture in a temp dir, and re-resolve metadata. We can't
+        // rewrite the source fixture in-place because other tests rely on the original shape
+        // and parallel test execution would race.
+        let temp = TempDir::new().unwrap();
+        let workspace_root = stage_graph_fixture_with_host_override(
+            &temp,
+            r#"
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "../../lib.rs"
+
+[package.metadata.build-variant]
+included-packages = []
+kernel-parameters = []
+
+[package.metadata.build-variant.guest-images]
+transitive = "/usr/share/bottlerocket/guests/transitive"
+
+[build-dependencies]
+direct = { path = "../direct" }
+middle-kit = { path = "../../kits/middle-kit" }
+"#,
+        );
+        // `cargo metadata` emits canonical paths on macOS (where `/var` is a symlink to
+        // `/private/var`); `Manifest::new` matches the manifest to the graph node by path,
+        // so the test path must be canonicalized to match. This is precisely the case where
+        // symlink resolution is intended, so opt out of the workspace-wide `canonicalize`
+        // lint locally rather than papering over the mismatch with `path_absolutize`.
+        #[allow(clippy::disallowed_methods)]
+        let manifest_path = workspace_root
+            .join("variants/host/Cargo.toml")
+            .canonicalize()
+            .unwrap();
+        let metadata_path = run_cargo_metadata(&workspace_root, &temp);
+        let manifest = Manifest::new(manifest_path, metadata_path).unwrap();
+        let err = manifest
+            .guest_image_variant_deps()
+            .expect_err("transitive-only variant must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("transitive dependency, not a direct"),
+            "error must explain that the dep is transitive, got: {msg}"
+        );
+        assert!(msg.contains("transitive"), "error must name the guest");
+    }
+
+    /// Naming a crate that doesn't exist (or isn't a variant) under `guest-images` produces
+    /// `GuestImagesMissingBuildDep` rather than `NotDirectBuildDep`. We exercise both
+    /// sub-cases: an unknown name (`nonexistent`) and a known but non-variant crate
+    /// (`some-pkg`, a package). Both must point the user at `[build-dependencies]`.
+    #[test]
+    fn test_guest_image_variant_deps_rejects_unknown_or_non_variant_dep() {
+        for unknown in ["nonexistent", "some-pkg"] {
+            let temp = TempDir::new().unwrap();
+            let workspace_root = stage_graph_fixture_with_host_override(
+                &temp,
+                &format!(
+                    r#"
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "../../lib.rs"
+
+[package.metadata.build-variant]
+included-packages = []
+kernel-parameters = []
+
+[package.metadata.build-variant.guest-images]
+{unknown} = "/usr/share/bottlerocket/guests/x"
+
+[build-dependencies]
+direct = {{ path = "../direct" }}
+middle-kit = {{ path = "../../kits/middle-kit" }}
+"#
+                ),
+            );
+            // See `test_guest_image_variant_deps_rejects_transitive_only_dep` for why
+            // symlink resolution is needed here (macOS `/var` -> `/private/var`).
+            #[allow(clippy::disallowed_methods)]
+            let manifest_path = workspace_root
+                .join("variants/host/Cargo.toml")
+                .canonicalize()
+                .unwrap();
+            let metadata_path = run_cargo_metadata(&workspace_root, &temp);
+            let manifest = Manifest::new(manifest_path, metadata_path).unwrap();
+            let err = manifest
+                .guest_image_variant_deps()
+                .expect_err(&format!("guest {unknown:?} must be rejected"));
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("not in its build-dependencies"),
+                "guest {unknown:?} should produce MissingBuildDep error, got: {msg}"
+            );
+        }
+    }
+
+    /// Stage a copy of the `guest-images-graph` fixture into `temp`, replacing
+    /// `variants/host/Cargo.toml` with the supplied contents. Returns the staged workspace
+    /// root. Other crates and the workspace `Cargo.toml` are copied verbatim so cargo can
+    /// resolve a fresh metadata dump rooted there.
+    fn stage_graph_fixture_with_host_override(temp: &TempDir, host_toml: &str) -> PathBuf {
+        let src = test_projects_dir().join("guest-images-graph");
+        let dst = temp.path().join("guest-images-graph");
+        copy_dir_all(&src, &dst);
+        fs::write(dst.join("variants/host/Cargo.toml"), host_toml).unwrap();
+        // Force regeneration of Cargo.lock from the modified manifest. The original lockfile
+        // still works (host's deps are unchanged) but if a future test mutates the dep graph,
+        // dropping the lock keeps things honest.
+        let _ = fs::remove_file(dst.join("Cargo.lock"));
+        dst
+    }
+
+    fn run_cargo_metadata(workspace_root: &Path, temp: &TempDir) -> PathBuf {
+        let output_path = temp.path().join("cargo_metadata.json");
+        let output = MetadataCommand::new()
+            .manifest_path(workspace_root.join("Cargo.toml"))
+            .current_dir(temp.path())
+            .cargo_command()
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            panic!("cargo metadata failed: {output:?}");
+        }
+        fs::write(&output_path, output.stdout).unwrap();
+        output_path
+    }
+
+    fn copy_dir_all(src: &Path, dst: &Path) {
+        fs::create_dir_all(dst).unwrap();
+        for entry in fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let from = entry.path();
+            let to = dst.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir_all(&from, &to);
+            } else {
+                fs::copy(&from, &to).unwrap();
+            }
+        }
     }
 }

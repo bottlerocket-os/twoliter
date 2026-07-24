@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# This file needs to exist in the project: https://github.com/bottlerocket-os/twoliter/issues/120
+# TODO - delete this file when no longer needed
+echo "generate-local-sbkeys script was called"

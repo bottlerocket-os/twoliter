@@ -52,4 +52,60 @@ pub(super) enum Error {
         context: &'static str,
         reason: String,
     },
+
+    #[snafu(display(
+        "Variant '{name}' declares guest-images for itself. A variant cannot use its \
+         own images as a guest."
+    ))]
+    GuestImagesSelfReference { name: String },
+
+    #[snafu(display(
+        "Variant '{name}' declares guest-images path '{}' for guest '{guest}'; the install path \
+         must be absolute.",
+        path.display(),
+    ))]
+    GuestImagesPathNotAbsolute {
+        name: String,
+        guest: String,
+        path: PathBuf,
+    },
+
+    #[snafu(display(
+        "Variant '{name}' declares `guest-images = [\"{guest}\"]` but `{guest}` is not in its \
+         build-dependencies; add it under [build-dependencies]."
+    ))]
+    GuestImagesMissingBuildDep { name: String, guest: String },
+
+    #[snafu(display(
+        "Variant '{name}' declares `guest-images = [\"{guest}\"]` but `{guest}` is a transitive \
+         dependency, not a direct `[build-dependencies]` entry. Add `{guest}` directly under \
+         [build-dependencies] of this variant."
+    ))]
+    GuestImagesNotDirectBuildDep { name: String, guest: String },
+
+    #[snafu(display(
+        "Variant '{name}' declares guest-images key '{guest}', which contains a character that \
+         is not permitted in a guest variant name (must be a non-empty crate name without ':' or \
+         newline characters)."
+    ))]
+    GuestImagesInvalidName { name: String, guest: String },
+
+    #[snafu(display(
+        "Variant '{name}' declares guest-images path '{}' for guest '{guest}'; the install path \
+         must not contain ':' or newline characters, and must not contain '..' components.",
+        path.display(),
+    ))]
+    GuestImagesInvalidPath {
+        name: String,
+        guest: String,
+        path: PathBuf,
+    },
+
+    #[snafu(display(
+        "Variant '{name}' declares `guest-images` but has `image-format = \"eif\"`. Guest image \
+         embedding is only implemented for disk-image formats (raw/qcow2/vmdk); the EIF pipeline \
+         (`rpm2eif`) does not honor the `GUEST_IMAGES` build-arg. Remove `guest-images` or switch \
+         the host variant to a disk-image format."
+    ))]
+    GuestImagesUnsupportedImageFormat { name: String },
 }

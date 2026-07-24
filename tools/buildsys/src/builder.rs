@@ -109,6 +109,12 @@ lazy_static! {
 
 static DOCKER_BUILD_MAX_ATTEMPTS: NonZeroU16 = nonzero!(10u16);
 
+// Build stages that must always run (no Docker cache reuse), because they produce non-deterministic
+// timestamps or rely on host state. Keep this list in sync with the stage names in
+// `twoliter/embedded/build.Dockerfile`.
+const NO_CACHE_FILTER_STAGES: &str =
+    "rpmbuild,kitbuild,repobuild,imgbuild,migrationbuild,kmodkitbuild,imgrepack";
+
 // Expected UID for privileged and unprivileged processes inside the build container.
 const ROOT_UID: u32 = 0;
 lazy_static! {
@@ -231,6 +237,9 @@ struct VariantBuildArgs {
     variant_runtime: String,
     version_build: String,
     version_image: String,
+    /// Newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples describing
+    /// guest variant images that the host image build should embed into its rootfs.
+    guest_images: String,
 }
 
 impl VariantBuildArgs {
@@ -264,6 +273,7 @@ impl VariantBuildArgs {
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("VARIANT_RUNTIME", &self.variant_runtime);
         args.build_arg("VERSION_ID", &self.version_image);
+        args.build_arg("GUEST_IMAGES", &self.guest_images);
 
         // TWOLITER_VERSION is injected by the twoliter binary into its
         // subprocess environment. Passing it through as a Docker build-arg
@@ -458,7 +468,11 @@ impl DockerBuild {
     }
 
     /// Create a new `DockerBuild` that can build a variant image.
-    pub(crate) fn new_variant(args: BuildVariantArgs, manifest: &Manifest) -> Result<Self> {
+    pub(crate) fn new_variant(
+        args: BuildVariantArgs,
+        manifest: &Manifest,
+        guest_images: Vec<(String, std::path::PathBuf)>,
+    ) -> Result<Self> {
         let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let features = manifest.info().image_features().unwrap_or_default();
         let image_format = manifest.info().image_format();
@@ -556,6 +570,18 @@ impl DockerBuild {
                 variant_runtime,
                 version_build: args.version_build,
                 version_image: args.version_image,
+                guest_images: guest_images
+                    .iter()
+                    .map(|(guest, install_path)| {
+                        format!(
+                            "{guest}:{install_path}:build/images/{arch}-{guest}/{version_full}",
+                            install_path = install_path.display(),
+                            arch = args.common.arch,
+                            version_full = args.common.version_full,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             }),
             secrets_args: secrets_args()?,
         })
@@ -674,7 +700,7 @@ impl DockerBuild {
             --tag {tag} \
             --network host \
             --file {dockerfile} \
-            --no-cache-filter rpmbuild,kitbuild,repobuild,imgbuild,migrationbuild,kmodkitbuild,imgrepack \
+            --no-cache-filter {no_cache_filter} \
             --build-arg BYPASS_SOCKET={tag}-bypass \
             --build-arg BUILDER_UID={uid}",
             context = self.context.display(),
@@ -682,6 +708,7 @@ impl DockerBuild {
             target = self.target,
             tag = self.tag,
             uid = *BUILDER_UID,
+            no_cache_filter = NO_CACHE_FILTER_STAGES,
         )
         .split_string();
 

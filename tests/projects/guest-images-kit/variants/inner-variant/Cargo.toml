@@ -1,0 +1,24 @@
+[package]
+name = "inner-variant"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+exclude = ["README.md"]
+
+[package.metadata.build-variant.image-features]
+grub-set-private-var = true
+uefi-secure-boot = true
+xfs-data-partition = true
+systemd-networkd = true
+
+[package.metadata.build-variant]
+included-packages = []
+kernel-parameters = []
+
+[lib]
+path = "../variants.rs"
+
+# inner-variant is intentionally a leaf variant with no kit dependencies; its sole purpose is
+# to produce disk-image artifacts that `inner-images` can bundle into an RPM.
+[build-dependencies]

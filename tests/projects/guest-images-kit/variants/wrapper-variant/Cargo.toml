@@ -1,0 +1,30 @@
+[package]
+name = "wrapper-variant"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+exclude = ["README.md"]
+
+[package.metadata.build-variant.image-features]
+grub-set-private-var = true
+uefi-secure-boot = true
+xfs-data-partition = true
+systemd-networkd = true
+
+[package.metadata.build-variant]
+# Pull a normal package into this variant.
+included-packages = ["inner-pkg"]
+kernel-parameters = []
+
+# Embed `inner-variant`'s built disk images into this host variant's rootfs at the
+# specified install path.
+[package.metadata.build-variant.guest-images]
+inner-variant = "/usr/share/bottlerocket/guests/inner"
+
+[lib]
+path = "../variants.rs"
+
+[build-dependencies]
+wrapper-kit = { path = "../../kits/wrapper-kit" }
+inner-variant = { path = "../inner-variant" }

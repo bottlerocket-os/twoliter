@@ -1,0 +1,19 @@
+[package]
+name = "middle-kit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "../../lib.rs"
+
+[package.metadata.build-kit]
+vendor = "bottlerocket"
+included-packages = ["some-pkg"]
+
+# `transitive` is intentionally a regular `[dependencies]` entry, not a build-dep,
+# so that `host -> middle-kit -> transitive` is reachable in the cargo graph but
+# `transitive` is not a direct build-dep of `host`.
+[dependencies]
+some-pkg = { path = "../../packages/some-pkg" }
+transitive = { path = "../../variants/transitive" }

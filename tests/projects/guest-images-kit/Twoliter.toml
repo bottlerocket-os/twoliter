@@ -1,0 +1,12 @@
+schema-version = 1
+release-version = "1.0.0"
+
+[sdk]
+name = "bottlerocket-sdk"
+vendor = "bottlerocket"
+version = "0.66.0"
+
+[vendor.bottlerocket]
+# This test will fail if Twoliter overrides aren't working
+# See `Twoliter.override`
+registry = "this-definitely-wont-resolve/bottlerocket"

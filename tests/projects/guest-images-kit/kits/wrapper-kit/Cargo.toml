@@ -1,0 +1,19 @@
+[package]
+name = "wrapper-kit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+exclude = ["README.md"]
+
+[package.metadata.build-kit]
+vendor = "bottlerocket"
+included-packages = [
+    "inner-pkg",
+]
+
+[lib]
+path = "../kit.rs"
+
+[build-dependencies]
+inner-pkg = { path = "../../packages/inner-pkg" }
