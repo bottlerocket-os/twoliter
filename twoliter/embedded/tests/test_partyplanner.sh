@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Test the `first-party-stack` partition-layout math in `partyplanner` by
+# Test the `standalone-image` partition-layout math in `partyplanner` by
 # sourcing the script into a sub-shell and asserting on the populated
 # `pp_size`/`pp_offset` tables. This complements the Rust-side validator
 # tests in `tools/buildsys/src/manifest.rs`, which cover the high-level
@@ -75,7 +75,7 @@ assert_fails() {
 }
 
 ###############################################################################
-# Test 1: 1 GiB stripped-down image (first_party_stack=no) produces the
+# Test 1: 1 GiB stripped-down image (standalone_image=yes) produces the
 # expected partition table.
 #
 # With BIOS_MIB=4, EFI_MIB=5, BOOT_SCALE_FACTOR=20, HASH_SCALE_FACTOR=5:
@@ -88,9 +88,9 @@ assert_fails() {
 #   HASH-A     = 10  (5 * 2)
 #   GPT footer = 1
 ###############################################################################
-echo "Test 1: first_party_stack=no 1 GiB layout"
+echo "Test 1: standalone_image=yes 1 GiB layout"
 declare -A partsize partoff
-set_partition_sizes 1 1 unified no partsize partoff no
+set_partition_sizes 1 1 unified no partsize partoff yes
 
 assert_eq "${partoff[BIOS]}"   "1"   "BIOS offset"
 assert_eq "${partsize[BIOS]}"  "4"   "BIOS size"
@@ -123,9 +123,9 @@ assert_eq "${total_used}" "1023" "partitions fill image up to GPT footer"
 # HASH-A     = 20  (5 * 2 * 2 GiB)
 # ROOT-A     = 2048 - 1 - 4 - 10 - 80 - 20 - 1 = 1932
 ###############################################################################
-echo "Test 2: first_party_stack=no 2 GiB layout"
+echo "Test 2: standalone_image=yes 2 GiB layout"
 declare -A partsize2 partoff2
-set_partition_sizes 2 1 unified no partsize2 partoff2 no
+set_partition_sizes 2 1 unified no partsize2 partoff2 yes
 
 assert_eq "${partsize2[BIOS]}"   "4"    "2GiB BIOS size"
 assert_eq "${partsize2[EFI-A]}"  "10"   "2GiB EFI-A size"
@@ -134,32 +134,32 @@ assert_eq "${partsize2[HASH-A]}" "20"   "2GiB HASH-A size"
 assert_eq "${partsize2[ROOT-A]}" "1932" "2GiB ROOT-A size (residual)"
 
 ###############################################################################
-# Test 3: defense-in-depth — first_party_stack=no + in_place_updates=yes is
+# Test 3: defense-in-depth — standalone_image=yes + in_place_updates=yes is
 # rejected.
 #
 # Run in a sub-shell so the `exit 1` inside `set_partition_sizes` does not
 # kill the test runner.
 ###############################################################################
-echo "Test 3: first_party_stack=no rejects in_place_updates=yes"
-assert_fails "set_partition_sizes 1 1 unified yes <size> <off> no" \
+echo "Test 3: standalone_image=yes rejects in_place_updates=yes"
+assert_fails "set_partition_sizes 1 1 unified yes <size> <off> yes" \
   bash -c '
     set -eu -o pipefail
     . "'"${PARTYPLANNER}"'"
     declare -A s o
-    set_partition_sizes 1 1 unified yes s o no
+    set_partition_sizes 1 1 unified yes s o yes
   '
 
 ###############################################################################
-# Test 4: defense-in-depth — first_party_stack=no + partition_plan=split is
+# Test 4: defense-in-depth — standalone_image=yes + partition_plan=split is
 # rejected.
 ###############################################################################
-echo "Test 4: first_party_stack=no rejects partition_plan=split"
-assert_fails "set_partition_sizes 1 1 split no <size> <off> no" \
+echo "Test 4: standalone_image=yes rejects partition_plan=split"
+assert_fails "set_partition_sizes 1 1 split no <size> <off> yes" \
   bash -c '
     set -eu -o pipefail
     . "'"${PARTYPLANNER}"'"
     declare -A s o
-    set_partition_sizes 1 1 split no s o no
+    set_partition_sizes 1 1 split no s o yes
   '
 
 ###############################################################################
@@ -168,36 +168,36 @@ assert_fails "set_partition_sizes 1 1 split no <size> <off> no" \
 # We force a too-small image by overriding BOOT_SCALE_FACTOR so that ROOT-A
 # would be non-positive.
 ###############################################################################
-echo "Test 5: too-small first_party_stack=no image is rejected"
-assert_fails "first_party_stack=no 1 GiB with absurd boot scale factor" \
+echo "Test 5: too-small standalone_image=yes image is rejected"
+assert_fails "standalone_image=yes 1 GiB with absurd boot scale factor" \
   bash -c '
     set -eu -o pipefail
     . "'"${PARTYPLANNER}"'"
     BOOT_SCALE_FACTOR=10000
     declare -A s o
-    set_partition_sizes 1 1 unified no s o no
+    set_partition_sizes 1 1 unified no s o yes
   '
 
 ###############################################################################
 # Test 6: backward-compat / default — omitting the 7th arg defaults to
-# first_party_stack=yes and produces the standard layout (with PRIVATE/DATA
-# partitions). This is the polarity-flipped default: direct callers that do
-# not pass the flag get the full Bottlerocket layout, matching the new Rust
-# default of `first-party-stack = true`.
+# standalone_image=no and produces the standard layout (with PRIVATE/DATA
+# partitions). Direct callers that do not pass the flag get the full
+# Bottlerocket layout, matching the new Rust default of
+# `standalone-image = false`.
 ###############################################################################
-echo "Test 6: first_party_stack defaults to 'yes' for the standard layout"
+echo "Test 6: standalone_image defaults to 'no' for the standard layout"
 declare -A partsize3 partoff3
 set_partition_sizes 2 1 unified no partsize3 partoff3
 # We expect PRIVATE to exist in the standard layout.
 if [[ -v "partsize3[PRIVATE]" ]]; then
-  pass "PRIVATE partition present when first_party_stack is omitted"
+  pass "PRIVATE partition present when standalone_image is omitted"
 else
-  fail "PRIVATE partition should exist when first_party_stack is omitted"
+  fail "PRIVATE partition should exist when standalone_image is omitted"
 fi
 if [[ -v "partsize3[DATA-A]" ]]; then
-  pass "DATA-A partition present when first_party_stack is omitted"
+  pass "DATA-A partition present when standalone_image is omitted"
 else
-  fail "DATA-A partition should exist when first_party_stack is omitted"
+  fail "DATA-A partition should exist when standalone_image is omitted"
 fi
 
 ###############################################################################

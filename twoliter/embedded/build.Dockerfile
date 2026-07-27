@@ -229,7 +229,7 @@ ARG HOST_CONTAINERS
 ARG FIPS
 ARG EXTERNAL_KMOD_DEVELOPMENT
 ARG ENCRYPTED_STORAGE
-ARG FIRST_PARTY_STACK
+ARG STANDALONE_IMAGE
 
 USER builder
 WORKDIR /home/builder
@@ -254,7 +254,7 @@ RUN \
    && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${EXTERNAL_KMOD_DEVELOPMENT:+%bcond_without external_kmod_development\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${ENCRYPTED_STORAGE:+%bcond_without encrypted_storage\n}" >> "${RPM_BCONDS}" \
-   && echo -e -n "${FIRST_PARTY_STACK:+%bcond_without first_party_stack\n}" >> "${RPM_BCONDS}"
+   && echo -e -n "${STANDALONE_IMAGE:+%bcond_without standalone_image\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Creates an RPM repository from packages created in Section 1 and kits from Section 2.
@@ -366,7 +366,7 @@ ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
 ARG ENCRYPTED_STORAGE
-ARG FIRST_PARTY_STACK
+ARG STANDALONE_IMAGE
 ARG PROJECT_VENDOR
 ARG TWOLITER_VERSION
 ARG GUEST_IMAGES
@@ -417,7 +417,7 @@ RUN --mount=target=/host \
         ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
         ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
         ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
-        --with-first-party-stack="${FIRST_PARTY_STACK:-no}" ; \
+        --with-standalone-image="${STANDALONE_IMAGE:-no}" ; \
     else \
       /host/build/tools/rpm2img \
         --package-dir=/local/rpms \
@@ -437,7 +437,7 @@ RUN --mount=target=/host \
         ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
         ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
         ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
-        --with-first-party-stack="${FIRST_PARTY_STACK:-no}" ; \
+        --with-standalone-image="${STANDALONE_IMAGE:-no}" ; \
     fi && \
     rm -rf /local/rpms && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
@@ -558,7 +558,7 @@ ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG UEFI_SECURE_BOOT
 ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
-ARG FIRST_PARTY_STACK
+ARG STANDALONE_IMAGE
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
 WORKDIR /root
@@ -597,7 +597,7 @@ RUN --mount=target=/host \
       ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
       ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
       ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
-      --with-first-party-stack="${FIRST_PARTY_STACK:-no}" && \
+      --with-standalone-image="${STANDALONE_IMAGE:-no}" && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
     rm /bypass && \

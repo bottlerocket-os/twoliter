@@ -8,18 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-* New `first-party-stack` image feature (default `true`): controls whether the
-  Bottlerocket-provided software stack (orchestrator integration, settings
-  system, in-place updates, BOTTLEROCKET-PRIVATE / BOTTLEROCKET-DATA partitions)
-  is built into the image. Setting `first-party-stack = false` produces a
-  stripped-down OS image with a single bank of partitions (BIOS-BOOT,
+* New `standalone-image` image feature (default `false`): opt-in flag that
+  produces a stripped-down OS image without the Bottlerocket-provided software
+  stack (orchestrator integration, settings system, in-place updates,
+  BOTTLEROCKET-PRIVATE / BOTTLEROCKET-DATA partitions). Setting
+  `standalone-image = true` produces a single bank of partitions (BIOS-BOOT,
   EFI-SYSTEM, BOOT-A, ROOT-A, HASH-A), no RESERVED, PRIVATE, or DATA
   partitions, defaulting to a 1 GiB total disk size. Requires
   `partition-plan = "unified"`, and is incompatible with `uefi-secure-boot`,
   `encrypted-storage`, `in-place-updates`, `host-containers`, and
   `partition-plan = "split"`; the build fails fast with a clear message in
   those cases. The metadata RPM provides
-  `image-feature(first-party-stack)` or `image-feature(no-first-party-stack)`
+  `image-feature(standalone-image)` or `image-feature(no-standalone-image)`
   accordingly.
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.20.0...HEAD

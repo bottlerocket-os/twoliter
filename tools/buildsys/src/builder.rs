@@ -286,11 +286,11 @@ impl VariantBuildArgs {
         );
 
         for image_feature in self.image_features.iter() {
-            // `first-party-stack` is the inverted, default-true feature: pass
+            // `standalone-image` is the opt-in stripped-image feature: pass
             // `yes` to bash so the Dockerfile can pipe the value through to
-            // `--with-first-party-stack=`. All other features stay on the
+            // `--with-standalone-image=`. All other features stay on the
             // simple `1`-presence convention.
-            let value = if matches!(image_feature, ImageFeature::FirstPartyStack) {
+            let value = if matches!(image_feature, ImageFeature::StandaloneImage) {
                 "yes"
             } else {
                 "1"
@@ -340,7 +340,7 @@ impl RepackVariantBuildArgs {
         args.build_arg("VERSION_ID", &self.version_image);
 
         for image_feature in self.image_features.iter() {
-            let value = if matches!(image_feature, ImageFeature::FirstPartyStack) {
+            let value = if matches!(image_feature, ImageFeature::StandaloneImage) {
                 "yes"
             } else {
                 "1"
@@ -479,7 +479,7 @@ impl DockerBuild {
         let image_layout = resolved_image_layout(&raw_layout, &features, image_format);
         // Defense in depth: re-run the image feature validator here so that
         // any future code path that constructs a `DockerBuild` cannot bypass
-        // the gate that `main.rs::validate_first_party_stack_or_warn` provides.
+        // the gate that `main.rs::validate_standalone_image_or_warn` provides.
         validate_image_features(&features, &image_layout, image_format)
             .context(error::GraphSnafu)?;
         let os_image_size_gib = image_layout.os_image_size_gib();
@@ -604,7 +604,7 @@ impl DockerBuild {
         let image_layout = resolved_image_layout(&raw_layout, &features, image_format);
         // Defense in depth: re-run the image feature validator here so that
         // any future code path that constructs a `DockerBuild` cannot bypass
-        // the gate that `main.rs::validate_first_party_stack_or_warn` provides.
+        // the gate that `main.rs::validate_standalone_image_or_warn` provides.
         validate_image_features(&features, &image_layout, image_format)
             .context(error::GraphSnafu)?;
         let os_image_size_gib = image_layout.os_image_size_gib();

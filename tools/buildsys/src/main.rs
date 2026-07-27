@@ -268,7 +268,7 @@ fn build_variant(args: BuildVariantArgs) -> Result<()> {
     .context(error::ManifestParseSnafu)?;
 
     check_arch_support(manifest.info(), args.common.arch);
-    validate_first_party_stack_or_warn(manifest.info())?;
+    validate_standalone_image_or_warn(manifest.info())?;
 
     // Resolve declared guest-images and emit a rerun-if-changed for each guest's image
     // directory, so rebuilding a guest variant triggers a rebuild of this host variant.
@@ -304,7 +304,7 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
     .context(error::ManifestParseSnafu)?;
 
     check_arch_support(manifest.info(), args.common.arch);
-    validate_first_party_stack_or_warn(manifest.info())?;
+    validate_standalone_image_or_warn(manifest.info())?;
 
     if args.common.cicd_hack {
         return Ok(());
@@ -331,20 +331,20 @@ fn check_arch_support(manifest: &ManifestInfo, arch: SupportedArch) {
 }
 
 /// Re-validate image features against the resolved image layout, and emit a
-/// multi-line warning when `first-party-stack = false` so that build logs
+/// multi-line warning when `standalone-image = true` so that build logs
 /// make the implications obvious.
-fn validate_first_party_stack_or_warn(manifest: &ManifestInfo) -> Result<()> {
+fn validate_standalone_image_or_warn(manifest: &ManifestInfo) -> Result<()> {
     let features = manifest.image_features().unwrap_or_default();
     let raw_layout = manifest.image_layout().cloned().unwrap_or_default();
     let image_format = manifest.image_format();
     let layout = resolved_image_layout(&raw_layout, &features, image_format);
     validate_image_features(&features, &layout, image_format).context(error::ImageFeaturesSnafu)?;
 
-    if !features.contains(&ImageFeature::FirstPartyStack) {
+    if features.contains(&ImageFeature::StandaloneImage) {
         // `cargo:warning` is line-oriented, so emit one line per call.
         for line in [
-            "WARNING: image feature `first-party-stack` is disabled.",
-            "With `first-party-stack = false`, the resulting image will NOT contain the",
+            "WARNING: image feature `standalone-image` is enabled.",
+            "With `standalone-image = true`, the resulting image will NOT contain the",
             "Bottlerocket datastore, settings subsystem, host-containers, or any",
             "first-party Bottlerocket management software. You are responsible for",
             "owning all system configuration yourself. The image will not have a",
