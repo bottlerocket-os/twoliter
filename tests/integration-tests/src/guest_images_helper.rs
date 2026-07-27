@@ -14,7 +14,7 @@ fn helper_path() -> PathBuf {
 
 /// Build a synthetic guest image directory mimicking the layout produced by a real variant
 /// build. Includes:
-///   - the bootable image artifacts that should be copied
+///   - the bootable image artifacts that should be copied (standard + EIF)
 ///   - the build-metadata files that must NOT be copied (the bug we're guarding against)
 ///   - a stable-name symlink (`os_image.img.lz4` -> `bottlerocket-…img.lz4`)
 fn populate_synthetic_guest_dir(dir: &Path) {
@@ -31,10 +31,24 @@ fn populate_synthetic_guest_dir(dir: &Path) {
         std::fs::write(dir.join(f), b"image-bytes").unwrap();
     }
 
-    // Stable-name symlink. After copy it should still point at the right target name.
+    // EIF artifacts produced by rpm2eif (hyphen-separated names).
+    for f in [
+        "bottlerocket-inner-x86_64-1.0.0-0.eif",
+        "bottlerocket-inner-x86_64-1.0.0-0-disk.img",
+        "bottlerocket-inner-x86_64-1.0.0-0-kernel",
+    ] {
+        std::fs::write(dir.join(f), b"eif-bytes").unwrap();
+    }
+
+    // Stable-name symlinks.
     std::os::unix::fs::symlink(
         "bottlerocket-inner-x86_64-1.0.0-0.img.lz4",
         dir.join("os_image.img.lz4"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "bottlerocket-inner-x86_64-1.0.0-0.eif",
+        dir.join("latest.eif"),
     )
     .unwrap();
 
@@ -56,13 +70,15 @@ fn populate_synthetic_guest_dir(dir: &Path) {
 /// for inspection.
 fn run_copy(src: &Path, dst: &Path) -> std::process::Output {
     let helper = helper_path();
-    // `guest-images-helper` requires `IMAGE_ARTIFACT_SUFFIXES` to be pre-set (normally by
-    // sourcing `imghelper`, which is not safe to source here because it hard-fails on
-    // missing build-env vars). Declare the array directly to exercise just the helper.
+    // `guest-images-helper` requires `IMAGE_ARTIFACT_SUFFIXES` and `IMAGE_ARTIFACT_GLOBS`
+    // to be pre-set (normally by sourcing `imghelper`, which is not safe to source here
+    // because it hard-fails on missing build-env vars). Declare both arrays directly to
+    // exercise just the helper.
     let script = format!(
         r#"
         set -euo pipefail
-        IMAGE_ARTIFACT_SUFFIXES=(img.lz4 qcow2 vmdk ova ext4.lz4 verity.lz4)
+        IMAGE_ARTIFACT_SUFFIXES=(img.lz4 qcow2 vmdk ova ext4.lz4 verity.lz4 eif)
+        IMAGE_ARTIFACT_GLOBS=("*-disk.img" "*-kernel")
         source "{helper}"
         copy_guest_image_artifacts "{src}" "{dst}"
         "#,
@@ -103,7 +119,7 @@ fn test_copy_guest_image_artifacts_filters_metadata_and_sboms() {
 
     let copied = entries_in(&dst);
 
-    // Required: every bootable artifact + the symlink. Order independent.
+    // Required: every bootable artifact + EIF artifacts + symlinks. Order independent.
     for required in [
         "bottlerocket-inner-x86_64-1.0.0-0.img.lz4",
         "bottlerocket-inner-x86_64-1.0.0-0-data.img.lz4",
@@ -112,7 +128,11 @@ fn test_copy_guest_image_artifacts_filters_metadata_and_sboms() {
         "bottlerocket-inner-x86_64-1.0.0-0-root.verity.lz4",
         "bottlerocket-inner-x86_64-1.0.0-0.qcow2",
         "bottlerocket-inner-x86_64-1.0.0-0.vmdk",
+        "bottlerocket-inner-x86_64-1.0.0-0.eif",
+        "bottlerocket-inner-x86_64-1.0.0-0-disk.img",
+        "bottlerocket-inner-x86_64-1.0.0-0-kernel",
         "os_image.img.lz4",
+        "latest.eif",
     ] {
         assert!(
             copied.iter().any(|n| n == required),

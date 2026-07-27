@@ -58,7 +58,7 @@ fail() { fail_count=$((fail_count + 1)); echo "  FAIL: $1" >&2; }
     echo "IMAGE_ARTIFACT_SUFFIXES not declared" >&2; exit 1;
   }
   # At minimum, the canonical set. New entries are allowed; missing entries fail.
-  required=("img.lz4" "qcow2" "vmdk" "ova" "ext4.lz4" "verity.lz4")
+  required=("img.lz4" "qcow2" "vmdk" "ova" "ext4.lz4" "verity.lz4" "eif")
   for want in "${required[@]}"; do
     found=no
     for have in "${IMAGE_ARTIFACT_SUFFIXES[@]}"; do
@@ -142,10 +142,15 @@ src="${tmp}/src"; dst="${tmp}/dst"
 mkdir -p "${src}" "${dst}"
 
 # Two bootable artifacts (one per allowlisted suffix), one stable-name symlink,
-# and three sidecar-metadata files that must be rejected.
+# EIF artifacts (eif, disk.img, kernel), and three sidecar-metadata files that
+# must be rejected.
 touch "${src}/bottlerocket-1.0.0.img.lz4"
 touch "${src}/bottlerocket-1.0.0.ext4.lz4"
 ln -s "bottlerocket-1.0.0.img.lz4" "${src}/os_image.img.lz4"
+touch "${src}/bottlerocket-1.0.0.eif"
+touch "${src}/bottlerocket-1.0.0-disk.img"
+touch "${src}/bottlerocket-1.0.0-kernel"
+ln -s "bottlerocket-1.0.0.eif" "${src}/latest.eif"
 touch "${src}/application-inventory.json"
 touch "${src}/spdx-sbom.json"
 touch "${src}/artifact-metadata.json"
@@ -163,7 +168,9 @@ if [[ "${rc}" -ne 0 ]]; then
   fail "copy_guest_image_artifacts returned ${rc} on a valid source dir"
 else
   # Verify allowlisted artifacts landed at the destination.
-  wanted=("bottlerocket-1.0.0.img.lz4" "bottlerocket-1.0.0.ext4.lz4" "os_image.img.lz4")
+  wanted=("bottlerocket-1.0.0.img.lz4" "bottlerocket-1.0.0.ext4.lz4" "os_image.img.lz4"
+          "bottlerocket-1.0.0.eif" "bottlerocket-1.0.0-disk.img" "bottlerocket-1.0.0-kernel"
+          "latest.eif")
   missing=""
   for f in "${wanted[@]}"; do
     [[ -e "${dst}/${f}" ]] || missing+=" ${f}"
