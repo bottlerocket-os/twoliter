@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0-rc2...HEAD
 
-## [0.22.0-rc1] - 2026-07-27
+## [0.22.0-rc2] - 2026-07-27
 
 ### Added
 * Add support for `guest-images`, declared in a host variant's `[package.metadata.build-variant]` manifest, that embeds the disk-image artifacts of one or more already-built guest variants into the host's rootfs ([#669])
@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 * Harden the `img2img` script and document worfklow in `docs/design` ([#680])
+* Buildsys includes EIF artifacts in `copy_guest_image_artifacts` ([#690])
 
 ### Build
 * Update `tough` to 0.24, `tough-kms` to 0.16, `tough-ssm` to 0.19, `tuftool` to 0.17 ([#682])
@@ -28,8 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#680]: https://github.com/bottlerocket-os/twoliter/pull/680
 [#682]: https://github.com/bottlerocket-os/twoliter/pull/682
 [#686]: https://github.com/bottlerocket-os/twoliter/pull/686
+[#690]: https://github.com/bottlerocket-os/twoliter/pull/690
 
-[0.22.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.21.0...v0.22.0-rc1
+[0.22.0-rc2]: https://github.com/bottlerocket-os/twoliter/compare/v0.21.0...v0.22.0-rc2
 
 ## [0.21.0] - 2026-06-19
 
