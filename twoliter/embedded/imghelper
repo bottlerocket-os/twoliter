@@ -27,6 +27,18 @@ IMAGE_ARTIFACT_SUFFIXES=(
   "ova"
   "ext4.lz4"
   "verity.lz4"
+  "eif"
+)
+
+# Additional find-name globs for artifacts that do not follow the `*.suffix`
+# dot-separated convention. `rpm2eif` produces `{prefix}-disk.img` and
+# `{prefix}-kernel` using a hyphen separator rather than a dot, so they cannot
+# be expressed as entries in IMAGE_ARTIFACT_SUFFIXES. These patterns are used
+# only by `copy_guest_image_artifacts` in `guest-images-helper`; they are NOT
+# validated by `compress_image` (which only handles dot-suffixed extensions).
+IMAGE_ARTIFACT_GLOBS=(
+  "*-disk.img"
+  "*-kernel"
 )
 
 OS_IMAGE_NAME="${FILENAME_PREFIX}"

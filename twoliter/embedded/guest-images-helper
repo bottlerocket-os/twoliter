@@ -30,6 +30,16 @@ copy_guest_image_artifacts() {
   for suffix in "${IMAGE_ARTIFACT_SUFFIXES[@]}"; do
     find_args+=( -o -name "*.${suffix}" )
   done
+  # EIF artifacts use hyphen-separated names (`*-disk.img`, `*-kernel`) that
+  # cannot be expressed as dot-suffix patterns. Include them via the separate
+  # globs array when it is defined (it lives in `imghelper` alongside the
+  # suffixes array).
+  local glob
+  if [[ -n "${IMAGE_ARTIFACT_GLOBS+x}" ]]; then
+    for glob in "${IMAGE_ARTIFACT_GLOBS[@]}"; do
+      find_args+=( -o -name "${glob}" )
+    done
+  fi
   find_args+=( \) -print0 )
   local copied=0 file
   while IFS= read -r -d '' file; do
