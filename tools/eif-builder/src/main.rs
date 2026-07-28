@@ -3,8 +3,8 @@
 use clap::Parser;
 use eif_builder::kernel::prepare_kernel;
 use eif_builder::{
-    build_eif, EifError, PrepareKernelSnafu, ReadKernelSnafu, TargetArch, WritePreparedKernelSnafu,
-    DEFAULT_CMDLINE, DEFAULT_PCIE_FLAGS,
+    build_eif, EifError, MetadataFields, PrepareKernelSnafu, ReadKernelSnafu, TargetArch,
+    WritePreparedKernelSnafu, DEFAULT_CMDLINE, DEFAULT_PCIE_FLAGS,
 };
 use snafu::{report, ResultExt};
 use std::path::{Path, PathBuf};
@@ -53,6 +53,24 @@ struct Args {
     #[arg(long, default_value = "")]
     kernel_version: String,
 
+    /// User-facing image version to embed in EIF metadata (populates the
+    /// top-level `ImageVersion` field). rpm2eif passes `VERSION_ID`
+    /// (Bottlerocket release, e.g. `1.63.0`); eif2eif carries forward the
+    /// value from the input EIF. Optional; empty by default.
+    #[arg(long, default_value = "")]
+    image_version: String,
+
+    /// Build time to embed in EIF metadata as RFC 3339 UTC
+    /// (populates `BuildMetadata.BuildTime`). Optional; empty by default.
+    /// Callers that want reproducible EIFs should pass a fixed timestamp
+    /// derived from a stable input (rpm2eif uses `BUILD_ID_TIMESTAMP`, the
+    /// git commit Unix seconds, which is the same timestamp already baked
+    /// into `KernelVersion`). Upstream nitro-cli uses `Utc::now()` here,
+    /// but we do not default to that on purpose — determinism is a
+    /// buildsys-wide convention.
+    #[arg(long, default_value = "")]
+    build_time: String,
+
     /// Optional: also write the *prepared* kernel bytes (the exact byte
     /// stream embedded in the EIF's kernel section) to this path. Intended
     /// for local dev smoke-tests; the EIF itself is written unchanged. See
@@ -86,6 +104,12 @@ fn write_prepared_kernel(
 #[report]
 fn main() -> Result<(), EifError> {
     let args = Args::parse();
+    let metadata = MetadataFields {
+        build_tool_version: &args.build_tool_version,
+        kernel_version: &args.kernel_version,
+        image_version: &args.image_version,
+        build_time: &args.build_time,
+    };
     build_eif(
         &args.kernel,
         &args.cmdline,
@@ -94,8 +118,7 @@ fn main() -> Result<(), EifError> {
         args.cpus,
         args.pcie_flags,
         args.arch,
-        &args.build_tool_version,
-        &args.kernel_version,
+        &metadata,
     )?;
     println!("Created {}", args.output.display());
 

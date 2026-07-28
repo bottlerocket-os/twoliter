@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0...HEAD
 
+### Fixed
+* Populate ImageVersion and BuildTime in EIF Metadata ([#692])
+
 ## [0.22.0] - 2026-07-29
 
 ### Added

@@ -370,8 +370,17 @@ ARG STANDALONE_IMAGE
 ARG PROJECT_VENDOR
 ARG TWOLITER_VERSION
 ARG GUEST_IMAGES
+# BUILD_ID_TIMESTAMP: git commit Unix seconds. Set by buildsys (see
+# `Builder::build_arg` in tools/buildsys/src/builder.rs). Consumed by
+# `rpm2eif` to derive the reproducible RFC 3339 `BuildTime` written into
+# the EIF METADATA section. Also baked into the RPM `dist` release string
+# in the earlier `rpmbuild` stage — we forward it here separately because
+# `imgbuild` inherits from `repobuild`, not from `rpmbuild`, so the
+# rpmbuild ENV does not reach this stage.
+ARG BUILD_ID_TIMESTAMP
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
+    BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
     KERNEL_PARAMETERS=${KERNEL_PARAMETERS} \
     TWOLITER_VERSION=${TWOLITER_VERSION}
