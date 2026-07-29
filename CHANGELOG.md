@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0-rc2...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0...HEAD
 
-## [0.22.0-rc2] - 2026-07-27
+## [0.22.0] - 2026-07-29
 
 ### Added
 * Add support for `guest-images`, declared in a host variant's `[package.metadata.build-variant]` manifest, that embeds the disk-image artifacts of one or more already-built guest variants into the host's rootfs ([#669])
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#686]: https://github.com/bottlerocket-os/twoliter/pull/686
 [#690]: https://github.com/bottlerocket-os/twoliter/pull/690
 
-[0.22.0-rc2]: https://github.com/bottlerocket-os/twoliter/compare/v0.21.0...v0.22.0-rc2
+[0.22.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.21.0...v0.22.0
 
 ## [0.21.0] - 2026-06-19
 
