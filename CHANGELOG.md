@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Build
+* `krane-bundle` now embeds an official prebuilt `krane` binary from the
+  [go-containerregistry](https://github.com/google/go-containerregistry)
+  release (pinned to `v0.21.8`) instead of building it from source. Removes the
+  `go` and `patch` build-time dependencies.
+
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0...HEAD
 
 ## [0.22.0] - 2026-07-29

@@ -27,11 +27,19 @@ echo "Clarifying crate dependency licenses..."
 
 # =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=  =^.^=
 # go-containerregistry
+#
+# We ship an official prebuilt `krane` binary from the go-containerregistry
+# release, but for attribution we still fetch the matching source tarball
+# (pinned by SHA512 in `tools/krane/hashes/source`) so we can vendor its Go
+# dependencies and scan their licenses.
 pushd /src/tools/krane
-../build-cache-fetch hashes/crane
-TARBALL=$(grep -oP '\(\K[^\)]*' hashes/crane)
+../build-cache-fetch hashes/source
+TARBALL=$(grep -oP '\(\K[^\)]*' hashes/source)
 GO_CONTAINERREGISTRY_UNPACK_DIR=$(mktemp -d)
-tar --strip-components=1 -xvf "${TARBALL}" -C "${GO_CONTAINERREGISTRY_UNPACK_DIR}"
+# The upstream release tarball (goreleaser output) has files at the top
+# level, unlike GitHub's auto-generated archive which wraps them in a
+# `go-containerregistry-<version>/` directory, so no components to strip.
+tar -xvf "${TARBALL}" -C "${GO_CONTAINERREGISTRY_UNPACK_DIR}"
 
 pushd "${GO_CONTAINERREGISTRY_UNPACK_DIR}/cmd/krane"
 go mod vendor
