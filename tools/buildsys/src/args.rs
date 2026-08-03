@@ -164,6 +164,15 @@ pub(crate) struct BuildVariantArgs {
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
 
+    /// Timestamp of the latest project commit (Unix seconds). Consumed by
+    /// `rpm2eif` inside the buildkit sandbox to derive a reproducible RFC 3339
+    /// `BuildTime` for the EIF METADATA section, mirroring what
+    /// `BuildPackageArgs` already forwards for RPM release strings. Same
+    /// value in both places so a rebuilt EIF's `BuildTime` and the timestamp
+    /// baked into its `KernelVersion` (`.<ts>.<sha>.br1`) agree.
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD_TIMESTAMP")]
+    pub(crate) version_build_timestamp: String,
+
     #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
     pub(crate) version_image: String,
 

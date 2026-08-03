@@ -236,6 +236,12 @@ struct VariantBuildArgs {
     variant_platform: String,
     variant_runtime: String,
     version_build: String,
+    /// Unix seconds of the latest project commit. Forwarded to the buildkit
+    /// sandbox as `BUILD_ID_TIMESTAMP` so `rpm2eif` can derive a reproducible
+    /// RFC 3339 `BuildTime` for the EIF METADATA section. Same source of
+    /// truth as the timestamp baked into the RPM `dist` release string (see
+    /// `PackageBuildArgs::build_args`).
+    version_build_timestamp: String,
     version_image: String,
     /// Newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples describing
     /// guest variant images that the host image build should embed into its rootfs.
@@ -250,6 +256,7 @@ impl VariantBuildArgs {
             self.data_image_publish_size_gib.to_string(),
         );
         args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("BUILD_ID_TIMESTAMP", &self.version_build_timestamp);
         args.build_arg("DATA_IMAGE_SIZE_GIB", &self.data_image_size_gib);
         args.build_arg("IMAGE_FORMAT", &self.image_format);
         args.build_arg("IMAGE_NAME", &self.name);
@@ -569,6 +576,7 @@ impl DockerBuild {
                 variant_platform,
                 variant_runtime,
                 version_build: args.version_build,
+                version_build_timestamp: args.version_build_timestamp,
                 version_image: args.version_image,
                 guest_images: guest_images
                     .iter()

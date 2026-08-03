@@ -481,6 +481,25 @@ EIF_TMP="$(mktemp)"
 # still embeds the same prepared kernel, so this file is byte-identical to
 # what the enclave would load.
 PREPARED_KERNEL_TMP="$(mktemp)"
+
+# BuildTime: format the git-commit Unix timestamp (BUILD_ID_TIMESTAMP, set
+# by buildsys via build.Dockerfile ARG) as RFC 3339 UTC. This is the same
+# timestamp baked into the RPM `dist` release string that ends up inside
+# `KernelVersion`, so BuildTime and KernelVersion agree on when this EIF's
+# inputs were built. Using the commit time (rather than `date +%s` at
+# build time) keeps EIFs reproducible: same commit -> same BuildTime ->
+# byte-identical METADATA section. See utils/identity.rs in the upstream
+# `aws-nitro-enclaves-image-format` crate for the reference format
+# (`DateTime::to_rfc3339()`); `date -u -d @N` produces the same shape.
+#
+# Fallback to empty string if BUILD_ID_TIMESTAMP is unset or non-numeric;
+# an empty BuildTime is still schema-valid (see `build_metadata` in
+# tools/eif-builder/src/lib.rs).
+BUILD_TIME_RFC3339=""
+if [[ "${BUILD_ID_TIMESTAMP:-}" =~ ^[0-9]+$ ]]; then
+    BUILD_TIME_RFC3339="$(date -u -d "@${BUILD_ID_TIMESTAMP}" +%Y-%m-%dT%H:%M:%SZ)"
+fi
+
 /host/build/tools/eif-builder \
     --kernel "${KERNEL_LOCAL}" \
     --cmdline "${KERNEL_CMDLINE}" \
@@ -488,6 +507,8 @@ PREPARED_KERNEL_TMP="$(mktemp)"
     --arch "${ARCH}" \
     --build-tool-version "${TWOLITER_VERSION:-}" \
     --kernel-version "${KERNEL_VERSION}" \
+    --image-version "${VERSION_ID}" \
+    --build-time "${BUILD_TIME_RFC3339}" \
     --out-prepared-kernel "${PREPARED_KERNEL_TMP}"
 
 echo "=== Generating SBOMs ==="

@@ -114,14 +114,23 @@ pub enum EifError {
 /// still works normally: the hypervisor measures the kernel, cmdline, and
 /// (dm-verity-anchored) rootfs handoff into PCRs at launch. See
 /// `README.md` for details.
-fn build_metadata(build_tool_version: &str, kernel_version: &str) -> String {
+fn build_metadata(
+    build_tool_version: &str,
+    kernel_version: &str,
+    image_version: &str,
+    build_time: &str,
+) -> String {
     // `serde_json` handles escaping so we can safely embed values that may
     // contain characters requiring escaping (e.g. dashes, colons, quotes).
+    //
+    // Empty-string values are preserved (not omitted). The upstream
+    // `EifIdentityInfo` / `EifBuildInfo` structs use `String`, not
+    // `Option<String>`, so consumers expect the keys to always exist.
     serde_json::json!({
         "ImageName": "bottlerocket-sidecar",
-        "ImageVersion": "",
+        "ImageVersion": image_version,
         "BuildMetadata": {
-            "BuildTime": "",
+            "BuildTime": build_time,
             "BuildTool": "twoliter",
             "BuildToolVersion": build_tool_version,
             "OperatingSystem": "Linux",
@@ -131,6 +140,33 @@ fn build_metadata(build_tool_version: &str, kernel_version: &str) -> String {
         "CustomMetadata": serde_json::Value::Null,
     })
     .to_string()
+}
+
+/// Bundle of caller-supplied metadata fields for the EIF METADATA section.
+///
+/// Every field is optional (empty string = unknown); the JSON keys
+/// themselves are always emitted so the NE hypervisor's `EifIdentityInfo`
+/// / `EifBuildInfo` deserializers (which use `String`, not
+/// `Option<String>`) accept the output.
+#[derive(Debug, Default, Clone)]
+pub struct MetadataFields<'a> {
+    /// `BuildMetadata.BuildToolVersion` — semver of the tool producing the
+    /// EIF (twoliter). rpm2eif forwards `TWOLITER_VERSION` here.
+    pub build_tool_version: &'a str,
+    /// `BuildMetadata.KernelVersion` — RPM `VERSION-RELEASE` of the kernel
+    /// package that owns the vmlinuz. rpm2eif derives it from
+    /// `rpm --whatprovides`.
+    pub kernel_version: &'a str,
+    /// `ImageVersion` (top-level, not nested under BuildMetadata) — the
+    /// user-facing release version. Bottlerocket sets this to `VERSION_ID`
+    /// (`1.63.0` etc.), matching upstream nitro-cli's `--image-version` flag.
+    pub image_version: &'a str,
+    /// `BuildMetadata.BuildTime` — RFC 3339 UTC timestamp string. Upstream
+    /// nitro-cli uses `Utc::now()` here (non-reproducible). Our pipeline
+    /// prefers determinism: rpm2eif passes the git commit timestamp
+    /// (`BUILD_ID_TIMESTAMP`) formatted as RFC 3339, which is the same
+    /// timestamp already baked into `KernelVersion`. Empty = "unknown".
+    pub build_time: &'a str,
 }
 
 fn write_section(eif: &mut Vec<u8>, section_type: u16, data: &[u8]) {
@@ -146,10 +182,10 @@ fn write_section(eif: &mut Vec<u8>, section_type: u16, data: &[u8]) {
 /// it must match the kernel image at `kernel_path` (cross-arch builds are
 /// legitimate and expected in cross-compile pipelines).
 ///
-/// `build_tool_version` and `kernel_version` populate the corresponding fields
-/// in the METADATA section's `BuildMetadata` object. Pass empty strings if
-/// unknown; the keys themselves are always present in the JSON to match the
-/// NE hypervisor's expected schema.
+/// `metadata` populates the METADATA section. Every field is optional
+/// (empty string = unknown); the JSON keys themselves are always emitted so
+/// the NE hypervisor's `EifIdentityInfo` / `EifBuildInfo` deserializers
+/// (which use `String`, not `Option<String>`) accept the output.
 #[allow(clippy::too_many_arguments)]
 pub fn build_eif(
     kernel_path: &Path,
@@ -159,8 +195,7 @@ pub fn build_eif(
     default_cpus: u64,
     pcie_flags: u16,
     target_arch: TargetArch,
-    build_tool_version: &str,
-    kernel_version: &str,
+    metadata: &MetadataFields<'_>,
 ) -> Result<(), EifError> {
     let kernel_data = fs::read(kernel_path).context(ReadKernelSnafu { path: kernel_path })?;
     ensure!(!kernel_data.is_empty(), EmptyKernelSnafu);
@@ -181,8 +216,13 @@ pub fn build_eif(
     // (e.g. anything computing PCR2 over concatenated ramdisks) will see empty
     // input here. Our custom launcher handles this correctly.
     let ramdisk_data: &[u8] = &[];
-    let metadata = build_metadata(build_tool_version, kernel_version);
-    let metadata_data = metadata.as_bytes();
+    let metadata_json = build_metadata(
+        metadata.build_tool_version,
+        metadata.kernel_version,
+        metadata.image_version,
+        metadata.build_time,
+    );
+    let metadata_data = metadata_json.as_bytes();
 
     let num_sections: u16 = 4;
     debug_assert!(
@@ -287,8 +327,12 @@ mod tests {
             2,
             DEFAULT_PCIE_FLAGS,
             TargetArch::X86_64,
-            "0.20.0",
-            "6.1.152-0.br1",
+            &MetadataFields {
+                build_tool_version: "0.20.0",
+                kernel_version: "6.1.152-0.br1",
+                image_version: "",
+                build_time: "",
+            },
         )
         .unwrap();
 
@@ -324,8 +368,7 @@ mod tests {
             2,
             0,
             TargetArch::X86_64,
-            "",
-            "",
+            &MetadataFields::default(),
         );
         assert!(matches!(result, Err(EifError::EmptyKernel)));
     }
@@ -335,10 +378,10 @@ mod tests {
         // Verify the metadata JSON has all keys the NE hypervisor expects,
         // including nested BuildMetadata sub-keys, and that caller-supplied
         // values are embedded verbatim.
-        let json = build_metadata("0.20.0", "6.1.152-0.br1");
+        let json = build_metadata("0.20.0", "6.1.152-0.br1", "1.63.0", "2026-07-28T22:20:54Z");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(v.get("ImageName").is_some());
-        assert!(v.get("ImageVersion").is_some());
+        assert_eq!(v.get("ImageVersion").unwrap(), "1.63.0");
         assert!(v.get("DockerInfo").is_some());
         assert!(v.get("CustomMetadata").is_some());
         let bm = v.get("BuildMetadata").unwrap();
@@ -346,18 +389,20 @@ mod tests {
         assert_eq!(bm.get("BuildToolVersion").unwrap(), "0.20.0");
         assert_eq!(bm.get("KernelVersion").unwrap(), "6.1.152-0.br1");
         assert_eq!(bm.get("OperatingSystem").unwrap(), "Linux");
-        assert!(bm.get("BuildTime").is_some());
+        assert_eq!(bm.get("BuildTime").unwrap(), "2026-07-28T22:20:54Z");
     }
 
     #[test]
     fn test_metadata_empty_values() {
         // Empty strings must still round-trip through the schema (keys present,
         // values empty) rather than being omitted.
-        let json = build_metadata("", "");
+        let json = build_metadata("", "", "", "");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v.get("ImageVersion").unwrap(), "");
         let bm = v.get("BuildMetadata").unwrap();
         assert_eq!(bm.get("BuildToolVersion").unwrap(), "");
         assert_eq!(bm.get("KernelVersion").unwrap(), "");
+        assert_eq!(bm.get("BuildTime").unwrap(), "");
     }
 
     #[test]
@@ -407,7 +452,17 @@ mod tests {
             (TargetArch::X86_64, EIF_ARCH_X86_64, &x86_kernel),
             (TargetArch::Aarch64, EIF_ARCH_AARCH64, &arm_kernel),
         ] {
-            build_eif(kernel_path, "", &output, 512 << 20, 2, 0, arch, "", "").unwrap();
+            build_eif(
+                kernel_path,
+                "",
+                &output,
+                512 << 20,
+                2,
+                0,
+                arch,
+                &MetadataFields::default(),
+            )
+            .unwrap();
             let eif = fs::read(&output).unwrap();
             // flags is u16 at offset 6; PCIE bits are 0 here so the full value
             // equals just the arch bits.
@@ -437,8 +492,7 @@ mod tests {
             2,
             0,
             TargetArch::Aarch64,
-            "",
-            "",
+            &MetadataFields::default(),
         )
         .unwrap_err();
         assert!(matches!(err, EifError::PrepareKernel { .. }), "err={err:?}");
