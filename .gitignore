@@ -2,5 +2,6 @@ target/
 .ignore/
 *.tar.gz
 /tools/krane/go-containerregistry-*
+/tools/krane/go-containerregistry_*
 /tools/krane/krane
 /tools/krane/krane.gz

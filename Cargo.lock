@@ -2871,7 +2871,6 @@ dependencies = [
  "lazy_static",
  "tar",
  "tempfile",
- "which",
 ]
 
 [[package]]
