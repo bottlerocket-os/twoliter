@@ -7,13 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.1-rc1...HEAD
+
+## [0.22.1-rc1] - 2026-08-03
+
+### Added
+* Populate `ImageVersion` and `BuildTime` in EIF metadata ([#692])
+
 ### Build
 * `krane-bundle` now embeds an official prebuilt `krane` binary from the
   [go-containerregistry](https://github.com/google/go-containerregistry)
   release (pinned to `v0.21.8`) instead of building it from source. Removes the
-  `go` and `patch` build-time dependencies.
+  `go` and `patch` build-time dependencies. ([#694])
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0...HEAD
+[#692]: https://github.com/bottlerocket-os/twoliter/pull/692
+[#694]: https://github.com/bottlerocket-os/twoliter/pull/694
+
+[0.22.1-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.0...v0.22.1-rc1
 
 ## [0.22.0] - 2026-07-29
 
