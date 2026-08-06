@@ -24,26 +24,27 @@ usage() {
 Usage: $0 --package-dir=DIR --output-dir=DIR --external-kits-path=DIR [OPTIONS]
 
 Required:
-    --package-dir=DIR                Directory containing RPMs to install
-    --output-dir=DIR                 Output directory for artifacts
-    --external-kits-path=DIR         Directory containing external kit RPMs and metadata
+    --package-dir=DIR                     Directory containing RPMs to install
+    --output-dir=DIR                      Output directory for artifacts
+    --external-kits-path=DIR              Directory containing external kit RPMs and metadata
 
 Optional:
-    --sbom-package-dir=DIR           Directory containing SBOM RPMs
-    --os-image-size-gib=N            Target disk-image size in GiB. When set,
-                                     the GPT disk image is padded to exactly
-                                     this size (ROOT-A absorbs the padding).
-                                     When omitted or 0, the disk image is
-                                     tight-fitted to the rootfs+verity content.
-    --with-erofs-root-partition=yes  Accepted for parity with rpm2img (EIF
-                                     always uses erofs; any value other than
-                                     'yes' is rejected).
-    --with-xfs-data-partition=yes    Rejected: EIF has no data partition.
-    --with-uefi-secure-boot=yes      Rejected: EIF does not sign shim/grub.
-    --with-in-place-updates=yes      Rejected: EIF is single-bank.
-    --with-encrypted-storage=yes     Rejected: EIF has no PRIVATE/DATA.
-    --with-standalone-image=yes      Required (default). Any value other than
-                                     'yes' is rejected.
+    --sbom-package-dir=DIR                Directory containing SBOM RPMs
+    --os-image-size-gib=N                 Target disk-image size in GiB. When set,
+                                          the GPT disk image is padded to exactly
+                                          this size (ROOT-A absorbs the padding).
+                                          When omitted or 0, the disk image is
+                                          tight-fitted to the rootfs+verity content.
+    --with-erofs-root-partition=yes       Accepted for parity with rpm2img (EIF
+                                          always uses erofs; any value other than
+                                          'yes' is rejected).
+    --with-xfs-data-partition=yes         Rejected: EIF has no data partition.
+    --with-uefi-secure-boot=yes           Rejected: EIF does not sign shim/grub.
+    --with-in-place-updates=yes           Rejected: EIF is single-bank.
+    --with-encrypted-storage=yes          Rejected: EIF has no PRIVATE/DATA.
+    --with-ephemeral-encryption-keys=yes  Rejected: EIF has no PRIVATE/DATA.
+    --with-standalone-image=yes           Required (default). Any value other than
+                                          'yes' is rejected.
 
 The rejected flags are accepted by the argument parser (so the Dockerfile can
 pass the same flag set to rpm2eif and rpm2img) and then validated against a
@@ -68,6 +69,7 @@ EROFS_ROOT_PARTITION="yes"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
+EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="yes"
 
 for arg in "$@"; do
@@ -82,6 +84,7 @@ for arg in "$@"; do
         --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${arg#*=}" ;;
         --with-in-place-updates=*) IN_PLACE_UPDATES="${arg#*=}" ;;
         --with-encrypted-storage=*) ENCRYPTED_STORAGE="${arg#*=}" ;;
+        --with-ephemeral-encryption-keys=*) EPHEMERAL_ENCRYPTION_KEYS="${arg#*=}" ;;
         --with-standalone-image=*) STANDALONE_IMAGE="${arg#*=}" ;;
         *) echo "Unknown argument: ${arg}"; usage ;;
     esac
@@ -103,6 +106,7 @@ declare -A eif_flag_allowlist=(
     [UEFI_SECURE_BOOT]="no"
     [IN_PLACE_UPDATES]="no"
     [ENCRYPTED_STORAGE]="no"
+    [EPHEMERAL_ENCRYPTION_KEYS]="no"
     [STANDALONE_IMAGE]="yes"
 )
 declare -A eif_flag_names=(
@@ -111,6 +115,7 @@ declare -A eif_flag_names=(
     [UEFI_SECURE_BOOT]="uefi-secure-boot"
     [IN_PLACE_UPDATES]="in-place-updates"
     [ENCRYPTED_STORAGE]="encrypted-storage"
+    [EPHEMERAL_ENCRYPTION_KEYS]="ephemeral-encryption-keys"
     [STANDALONE_IMAGE]="standalone-image"
 )
 eif_flag_errors=0

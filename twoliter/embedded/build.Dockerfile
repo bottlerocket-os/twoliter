@@ -229,6 +229,7 @@ ARG HOST_CONTAINERS
 ARG FIPS
 ARG EXTERNAL_KMOD_DEVELOPMENT
 ARG ENCRYPTED_STORAGE
+ARG EPHEMERAL_ENCRYPTION_KEYS
 ARG STANDALONE_IMAGE
 
 USER builder
@@ -254,6 +255,7 @@ RUN \
    && echo -e -n "${HOST_CONTAINERS:+%bcond_without host_containers\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${EXTERNAL_KMOD_DEVELOPMENT:+%bcond_without external_kmod_development\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${ENCRYPTED_STORAGE:+%bcond_without encrypted_storage\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${EPHEMERAL_ENCRYPTION_KEYS:+%bcond_without ephemeral_encryption_keys\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${STANDALONE_IMAGE:+%bcond_without standalone_image\n}" >> "${RPM_BCONDS}"
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
@@ -366,6 +368,7 @@ ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
 ARG IN_PLACE_UPDATES
 ARG ENCRYPTED_STORAGE
+ARG EPHEMERAL_ENCRYPTION_KEYS
 ARG STANDALONE_IMAGE
 ARG PROJECT_VENDOR
 ARG TWOLITER_VERSION
@@ -426,6 +429,7 @@ RUN --mount=target=/host \
         ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
         ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
         ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
+        ${EPHEMERAL_ENCRYPTION_KEYS:+--with-ephemeral-encryption-keys=yes} \
         --with-standalone-image="${STANDALONE_IMAGE:-no}" ; \
     else \
       /host/build/tools/rpm2img \
@@ -446,6 +450,7 @@ RUN --mount=target=/host \
         ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
         ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
         ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
+        ${EPHEMERAL_ENCRYPTION_KEYS:+--with-ephemeral-encryption-keys=yes} \
         --with-standalone-image="${STANDALONE_IMAGE:-no}" ; \
     fi && \
     rm -rf /local/rpms && \

@@ -9,11 +9,13 @@ OVF_TEMPLATE=""
 EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
-# img2img does not currently parse `--with-encrypted-storage`, but we initialize
-# the variable so the standalone-image validation below treats it consistently
-# with rpm2img. If a future change adds a flag for it, the validation below will
-# already enforce mutual exclusion when `standalone-image = true`.
+# img2img does not currently parse `--with-encrypted-storage`,
+# `--with-ephemeral-encryption-keys` but we initialize the variables so the
+# standalone-image validation below treats it consistently with rpm2img.
+# If a future change adds a flag for it, the validation below will already
+# enforce mutual exclusion when `standalone-image = true`.
 ENCRYPTED_STORAGE="no"
+EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="no"
 
 for opt in "$@"; do
@@ -128,6 +130,7 @@ if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
     [UEFI_SECURE_BOOT]="uefi-secure-boot"
     [IN_PLACE_UPDATES]="in-place-updates"
     [ENCRYPTED_STORAGE]="encrypted-storage"
+    [EPHEMERAL_ENCRYPTION_KEYS]="ephemeral-encryption-keys"
   )
   for f in "${!standalone_image_conflicts[@]}"; do
     if [[ "${!f}" == "yes" ]]; then
