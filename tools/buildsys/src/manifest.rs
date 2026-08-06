@@ -1126,12 +1126,14 @@ pub enum ImageFeature {
     HostContainers,
     ExternalKmodDevelopment,
     EncryptedStorage,
+    EphemeralEncryptionKeys,
     StandaloneImage,
 }
 
 const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::EncryptedStorage,
     &ImageFeature::StandaloneImage,
+    &ImageFeature::EphemeralEncryptionKeys,
 ];
 
 const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
@@ -1204,6 +1206,17 @@ pub fn validate_image_features(
     layout: &ImageLayout,
     image_format: Option<&ImageFormat>,
 ) -> Result<()> {
+    // `ephemeral-encryption-keys` only makes sense on top of encrypted storage.
+    if features.contains(&ImageFeature::EphemeralEncryptionKeys)
+        && !features.contains(&ImageFeature::EncryptedStorage)
+    {
+        return error::IncompatibleImageFeaturesSnafu {
+            context: "`ephemeral-encryption-keys = true`",
+            reason: "ephemeral encryption keys require `encrypted-storage = true`".to_string(),
+        }
+        .fail()?;
+    }
+
     let is_eif = matches!(image_format, Some(ImageFormat::Eif));
     // Without `standalone-image` enabled *and* a non-EIF format, every
     // combination is legal (full Bottlerocket image).
@@ -1229,6 +1242,11 @@ pub fn validate_image_features(
         "encrypted storage requires the BOTTLEROCKET-PRIVATE/DATA partitions, which an EIF image does not have".to_string()
     } else {
         "encrypted storage requires the BOTTLEROCKET-PRIVATE/DATA partitions, which are not built when `standalone-image = true`".to_string()
+    };
+    let reason_ephemeral_keys: String = if is_eif {
+        "ephemeral encryption keys require the BOTTLEROCKET-PRIVATE/DATA partitions, which an EIF image does not have".to_string()
+    } else {
+        "ephemeral encryption keys require the BOTTLEROCKET-PRIVATE/DATA partitions, which are not built when `standalone-image = true`".to_string()
     };
     let reason_ipu: String = if is_eif {
         "in-place updates require two banks of OS partitions; an EIF ships a single ROOT-A/HASH-A pair".to_string()
@@ -1264,6 +1282,11 @@ pub fn validate_image_features(
             ImageFeature::EncryptedStorage,
             "encrypted-storage",
             &reason_encrypted_storage,
+        ),
+        (
+            ImageFeature::EphemeralEncryptionKeys,
+            "ephemeral-encryption-keys",
+            &reason_ephemeral_keys,
         ),
         (
             ImageFeature::InPlaceUpdates,
@@ -1331,6 +1354,7 @@ impl TryFrom<String> for ImageFeature {
             "host-containers" => Ok(ImageFeature::HostContainers),
             "external-kmod-development" => Ok(ImageFeature::ExternalKmodDevelopment),
             "encrypted-storage" => Ok(ImageFeature::EncryptedStorage),
+            "ephemeral-encryption-keys" => Ok(ImageFeature::EphemeralEncryptionKeys),
             "standalone-image" => Ok(ImageFeature::StandaloneImage),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
@@ -1373,6 +1397,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::HostContainers => write!(f, "HOST_CONTAINERS"),
             ImageFeature::ExternalKmodDevelopment => write!(f, "EXTERNAL_KMOD_DEVELOPMENT"),
             ImageFeature::EncryptedStorage => write!(f, "ENCRYPTED_STORAGE"),
+            ImageFeature::EphemeralEncryptionKeys => write!(f, "EPHEMERAL_ENCRYPTION_KEYS"),
             ImageFeature::StandaloneImage => write!(f, "STANDALONE_IMAGE"),
         }
     }
@@ -1771,6 +1796,27 @@ name = "test-variant"
         assert!(features.contains(&ImageFeature::InPlaceUpdates));
         assert!(features.contains(&ImageFeature::HostContainers));
         assert!(features.contains(&ImageFeature::ExternalKmodDevelopment));
+    }
+
+    #[test]
+    fn ephemeral_encryption_keys_requires_encrypted_storage() {
+        let layout = ImageLayout::default();
+        let features = HashSet::from([ImageFeature::EphemeralEncryptionKeys]);
+        let err = validate_image_features(&features, &layout, None)
+            .expect_err("must fail without encrypted-storage");
+        let msg = format!("{err}");
+        assert!(msg.contains("ephemeral-encryption-keys"));
+        assert!(msg.contains("encrypted-storage"));
+    }
+
+    #[test]
+    fn ephemeral_encryption_keys_requires_encrypted_storage() {
+        let layout = ImageLayout::default();
+        let features = HashSet::from([
+            ImageFeature::EphemeralEncryptionKeys,
+            ImageFeature::EncryptedStorage,
+        ]);
+        assert!(validate_image_features(&features, &layout, None).is_ok());
     }
 
     #[test]

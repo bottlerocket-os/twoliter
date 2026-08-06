@@ -11,6 +11,7 @@ EROFS_ROOT_PARTITION="no"
 UEFI_SECURE_BOOT="no"
 IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
+EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="no"
 GUEST_IMAGES=""
 
@@ -32,6 +33,7 @@ for opt in "$@"; do
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
+  --with-ephemeral-encryption-keys=*) EPHEMERAL_ENCRYPTION_KEYS="${optarg}" ;;
   --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
   --guest-images=*) GUEST_IMAGES="${optarg}" ;;
   --sbom-package-dir=*) SBOM_PACKAGE_DIR="${optarg}" ;;
@@ -66,6 +68,7 @@ if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
     [UEFI_SECURE_BOOT]="uefi-secure-boot"
     [IN_PLACE_UPDATES]="in-place-updates"
     [ENCRYPTED_STORAGE]="encrypted-storage"
+    [EPHEMERAL_ENCRYPTION_KEYS]="ephemeral-encryption-keys"
   )
   for f in "${!standalone_image_conflicts[@]}"; do
     if [[ "${!f}" == "yes" ]]; then
@@ -500,6 +503,13 @@ else
   printf "%s\n" "ENCRYPTED_STORAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
+# Set ephemeral encryption keys flag
+if [[ "${EPHEMERAL_ENCRYPTION_KEYS}" == "yes" ]]; then
+  printf "%s\n" "EPHEMERAL_ENCRYPTION_KEYS=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+else
+  printf "%s\n" "EPHEMERAL_ENCRYPTION_KEYS=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
+fi
+
 # Set standalone-image flag
 if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
   printf "%s\n" "STANDALONE_IMAGE=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
@@ -633,9 +643,13 @@ echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT
 
 # BOTTLEROCKET-PRIVATE
 if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
-  # Generate bootconfig file for the image.
-  touch "${PRIVATE_MOUNT}/bootconfig.data"
-  bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
+  # Generate bootconfig file for the image. When ephemeral encryption keys are
+  # enabled, bootconfig.data was baked onto the BOOT partition above (PRIVATE is
+  # LUKS-encrypted and grub-unreadable), so skip seeding it here.
+  if [[ "${EPHEMERAL_ENCRYPTION_KEYS}" != "yes" ]]; then
+    touch "${PRIVATE_MOUNT}/bootconfig.data"
+    bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
+  fi
 
   # Targeted toward the current API server implementation.
   # Relative to the ext4 defaults, we:
