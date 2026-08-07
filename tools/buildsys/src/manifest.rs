@@ -183,6 +183,18 @@ The given parameters are inserted at the start of the command line.
 kernel-parameters = [
    "console=ttyS42",
 ]
+```
+
+`eif-pcie-flags` overrides the PCIE flag word written into the EIF header for
+`image-format = "eif"` variants. Accepted as a TOML integer literal (decimal)
+or a `0x`/`0X`-prefixed hex string. Unprefixed strings are rejected to avoid
+ambiguity with the `eif-builder --pcie-flags` CLI (hex-only). When absent,
+`eif-builder`'s built-in default is used. Non-EIF variants ignore this field.
+```ignore
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = 0x340
+```
 
 `image-features` is a map of image feature flags, which can be enabled or disabled. This allows us
 to conditionally use or exclude certain image-level features in variants.
@@ -306,7 +318,7 @@ use crate::BuildType;
 use buildsys_config::EXTERNAL_KIT_METADATA;
 use guppy::graph::{DependencyDirection, PackageGraph, PackageLink, PackageMetadata};
 use guppy::{CargoMetadata, PackageId};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use std::cmp::max;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -629,6 +641,13 @@ impl ManifestInfo {
             .and_then(|b| b.kernel_parameters.as_ref())
     }
 
+    /// Convenience method to return the EIF header PCIE flags override for
+    /// this variant. Only meaningful when `image-format = "eif"`; ignored
+    /// otherwise.
+    pub fn eif_pcie_flags(&self) -> Option<u16> {
+        self.build_variant().and_then(|b| b.eif_pcie_flags)
+    }
+
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         let variant = self.build_variant()?;
@@ -937,6 +956,43 @@ pub enum SensitivityType {
     Flavor,
 }
 
+/// Deserialize `Option<u16>` from a TOML integer (decimal) or a `0x`/`0X`-prefixed
+/// hex string. Unprefixed strings are rejected; see `BuildVariant::eif_pcie_flags`.
+fn deserialize_u16_hex_or_int<'de, D>(deserializer: D) -> std::result::Result<Option<u16>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Int(u64),
+        Str(String),
+    }
+
+    let Some(value) = Option::<Repr>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        Repr::Int(n) => u16::try_from(n).map(Some).map_err(|_| {
+            <D::Error as de::Error>::custom(format!("value {n} does not fit in a u16"))
+        }),
+        Repr::Str(s) => {
+            let trimmed = s.trim();
+            let hex_body = trimmed
+                .strip_prefix("0x")
+                .or_else(|| trimmed.strip_prefix("0X"))
+                .ok_or_else(|| {
+                    <D::Error as de::Error>::custom(format!(
+                        "invalid `eif-pcie-flags` value {s:?}: string form requires a `0x` prefix or an integer literal"
+                    ))
+                })?;
+            u16::from_str_radix(hex_body, 16)
+                .map(Some)
+                .map_err(|e| <D::Error as de::Error>::custom(format!("Invalid hex u16 {s:?}: {e}")))
+        }
+    }
+}
+
 /// Metadata for a `build-variant`.
 ///
 /// `guest-images` is a map from a guest variant's crate name to an absolute install path in
@@ -964,6 +1020,8 @@ pub struct BuildVariant {
     pub supported_arches: Option<HashSet<SupportedArch>>,
     pub kernel_parameters: Option<Vec<String>>,
     pub image_features: Option<HashMap<ImageFeature, bool>>,
+    #[serde(default, deserialize_with = "deserialize_u16_hex_or_int")]
+    pub eif_pcie_flags: Option<u16>,
     /// Map of guest variant crate name -> absolute install path in this variant's root
     /// filesystem.
     pub guest_images: Option<BTreeMap<String, PathBuf>>,
@@ -1873,6 +1931,98 @@ name = "test-variant"
         let msg = format!("{err}");
         assert!(msg.contains("ephemeral-encryption-keys"));
         assert!(msg.contains("encrypted-storage"));
+    }
+
+    #[test]
+    fn eif_pcie_flags_omitted_is_none() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), None);
+    }
+
+    #[test]
+    fn eif_pcie_flags_hex_string_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "0x340"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), Some(0x340));
+    }
+
+    #[test]
+    fn eif_pcie_flags_unprefixed_string_is_rejected() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "340"
+"#;
+        let err = toml::from_str::<ManifestInfo>(toml)
+            .expect_err("unprefixed hex string should be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("0x"),
+            "error should mention the `0x` prefix requirement, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn eif_pcie_flags_uppercase_prefix_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "0X340"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), Some(0x340));
+    }
+
+    #[test]
+    fn eif_pcie_flags_integer_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = 576
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), Some(576));
+    }
+
+    #[test]
+    fn eif_pcie_flags_rejects_overflow() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "0x10000"
+"#;
+        let err = toml::from_str::<ManifestInfo>(toml).expect_err("0x10000 should not fit in u16");
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("u16"),
+            "expected u16 mention in error, got: {msg}"
+        );
     }
 
     #[test]

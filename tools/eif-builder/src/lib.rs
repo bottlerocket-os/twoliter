@@ -59,7 +59,9 @@ pub const SIGNATURE_MAX_SIZE: usize = 32768;
 pub const EIF_HDR_FLAG_PCIE: u16 = 1 << 6;
 pub const EIF_HDR_FLAG_PCIE_VIRTIO: u16 = 1 << 9;
 
-/// Default PCIE flags for sidecar mode.
+/// Default PCIE flags written into the EIF header when no `--pcie-flags`
+/// override is supplied. Override per-variant via
+/// `[package.metadata.build-variant] eif-pcie-flags`.
 pub const DEFAULT_PCIE_FLAGS: u16 = EIF_HDR_FLAG_PCIE | EIF_HDR_FLAG_PCIE_VIRTIO;
 
 /// Default kernel command line for block device boot.

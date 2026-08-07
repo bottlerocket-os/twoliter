@@ -41,7 +41,8 @@ struct Args {
     #[arg(long, default_value_t = 2)]
     cpus: u64,
 
-    /// PCIE flags (hex; `0x` / `0X` prefix optional)
+    /// PCIE flags written into the EIF header (hex; `0x`/`0X` prefix optional).
+    /// See `lib.rs::DEFAULT_PCIE_FLAGS` for the header==launch-flags contract.
     #[arg(long, default_value_t = DEFAULT_PCIE_FLAGS, value_parser = parse_hex_u16)]
     pcie_flags: u16,
 
