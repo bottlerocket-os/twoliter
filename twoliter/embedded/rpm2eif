@@ -361,6 +361,28 @@ ENCRYPTED_STORAGE=false
 STANDALONE_IMAGE=true
 EOF
 
+echo "=== Embedding os-release ==="
+# Append Bottlerocket variant, version, and build metadata to
+# /usr/lib/os-release, mirroring the corresponding block in rpm2img so that
+# EIF-built rootfs images expose the same identifying fields (VARIANT_ID,
+# VERSION_ID, BUILD_ID, VENDOR_NAME, ...) to userspace. Unlike rpm2img, EIF
+# variants have INSTALL_ROOT already pointing at the merged sysroot, so
+# there is no `${ARCH}-bottlerocket-linux-gnu/sys-root` prefix.
+VERSION="${VERSION_ID} (${VARIANT})"
+# shellcheck disable=SC2154 # PROJECT_VENDOR/PRETTY_NAME come from the build env.
+cat <<EOF >>"${INSTALL_ROOT}/usr/lib/os-release"
+VERSION="${VERSION}"
+PRETTY_NAME="${PRETTY_NAME} ${VERSION}"
+VARIANT_ID=${VARIANT}
+VERSION_ID=${VERSION_ID}
+BUILD_ID=${BUILD_ID}
+VENDOR_NAME="${PROJECT_VENDOR}"
+HOME_URL="https://github.com/bottlerocket-os/bottlerocket"
+SUPPORT_URL="https://github.com/bottlerocket-os/bottlerocket/discussions"
+BUG_REPORT_URL="https://github.com/bottlerocket-os/bottlerocket/issues"
+DOCUMENTATION_URL="https://bottlerocket.dev"
+EOF
+
 echo "=== Creating rootfs.erofs ==="
 # Remove only the top-level /boot from rootfs (kernel is shipped separately).
 [[ -d "${INSTALL_ROOT}/boot" ]] && rm -rf "${INSTALL_ROOT}/boot"
