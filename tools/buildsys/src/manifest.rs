@@ -196,6 +196,21 @@ image-format = "eif"
 eif-pcie-flags = 0x340
 ```
 
+`eif-kernel-format` selects the x86_64 kernel format embedded in the EIF
+kernel section. Accepted values:
+
+* `"bzimage"` (default): compressed `vmlinuz` verbatim, for the sidecar
+  Nitro Enclaves in-memory image loader (matches `nitro-cli`).
+* `"vmlinux"`: uncompressed ELF extracted from `vmlinuz`, for a bare-metal
+  Firecracker PVH loader.
+
+Ignored on aarch64 and on non-EIF variants.
+```ignore
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "bzimage"
+```
+
 `image-features` is a map of image feature flags, which can be enabled or disabled. This allows us
 to conditionally use or exclude certain image-level features in variants.
 
@@ -648,6 +663,13 @@ impl ManifestInfo {
         self.build_variant().and_then(|b| b.eif_pcie_flags)
     }
 
+    /// Convenience method to return the x86_64 EIF kernel format override
+    /// for this variant. Only meaningful when `image-format = "eif"` on
+    /// x86_64; ignored otherwise.
+    pub fn eif_kernel_format(&self) -> Option<EifKernelFormat> {
+        self.build_variant().and_then(|b| b.eif_kernel_format)
+    }
+
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         let variant = self.build_variant()?;
@@ -1022,6 +1044,13 @@ pub struct BuildVariant {
     pub image_features: Option<HashMap<ImageFeature, bool>>,
     #[serde(default, deserialize_with = "deserialize_u16_hex_or_int")]
     pub eif_pcie_flags: Option<u16>,
+    /// x86_64 kernel image format that `rpm2eif` embeds in the EIF kernel
+    /// section. Forwarded as the `EIF_KERNEL_FORMAT` build-arg; empty when
+    /// unset, in which case `rpm2eif` applies its default
+    /// ([`EifKernelFormat::Bzimage`]). Ignored on aarch64 and on non-EIF
+    /// variants.
+    #[serde(default)]
+    pub eif_kernel_format: Option<EifKernelFormat>,
     /// Map of guest variant crate name -> absolute install path in this variant's root
     /// filesystem.
     pub guest_images: Option<BTreeMap<String, PathBuf>>,
@@ -1063,6 +1092,28 @@ pub enum ImageFormat {
     Raw,
     Uki,
     Vmdk,
+}
+
+/// x86_64 kernel image format that `rpm2eif` embeds in the EIF kernel
+/// section. TOML values `"bzimage"` and `"vmlinux"`.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EifKernelFormat {
+    /// Compressed `vmlinuz` embedded verbatim
+    Bzimage,
+    /// Uncompressed ELF `vmlinux` extracted from `vmlinuz`
+    Vmlinux,
+}
+
+impl EifKernelFormat {
+    /// String form matching the TOML value and the `EIF_KERNEL_FORMAT`
+    /// build-arg / `--eif-kernel-format` CLI value expected by `rpm2eif`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EifKernelFormat::Bzimage => "bzimage",
+            EifKernelFormat::Vmlinux => "vmlinux",
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Copy, Clone)]
@@ -2022,6 +2073,74 @@ eif-pcie-flags = "0x10000"
         assert!(
             msg.to_lowercase().contains("u16"),
             "expected u16 mention in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn eif_kernel_format_omitted_is_none() {
+        // Omitted field returns None so buildsys emits an empty ARG and
+        // rpm2eif applies its own default.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_kernel_format(), None);
+    }
+
+    #[test]
+    fn eif_kernel_format_bzimage_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "bzimage"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_kernel_format(), Some(EifKernelFormat::Bzimage));
+        assert_eq!(info.eif_kernel_format().unwrap().as_str(), "bzimage");
+    }
+
+    #[test]
+    fn eif_kernel_format_vmlinux_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "vmlinux"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_kernel_format(), Some(EifKernelFormat::Vmlinux));
+        assert_eq!(info.eif_kernel_format().unwrap().as_str(), "vmlinux");
+    }
+
+    #[test]
+    fn eif_kernel_format_unknown_is_rejected() {
+        // Unrecognized values must fail at parse time rather than silently
+        // falling through to the default.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "elf"
+"#;
+        let err = toml::from_str::<ManifestInfo>(toml)
+            .expect_err("unknown eif-kernel-format value should be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("elf")
+                || msg.to_lowercase().contains("variant")
+                || msg.to_lowercase().contains("unknown"),
+            "error should mention the bad value, got: {msg}"
         );
     }
 

@@ -6,9 +6,9 @@
 #   - {name}-disk.img: GPT disk with ROOT-A (erofs) + HASH-A (verity) partitions
 #   - {name}-kernel: bare kernel for direct Firecracker boot. On aarch64 this
 #     is a flat PE arm64 `Image` (any EFI zboot wrapper has been unwrapped and
-#     decompressed); on x86_64 it is an uncompressed ELF `vmlinux` suitable
-#     for PVH boot. Byte-identical to what the .eif embeds in its kernel
-#     section.
+#     decompressed); on x86_64 the format is selected by --eif-kernel-format
+#     (default `bzimage`; `vmlinux` selects an uncompressed ELF). Byte-identical
+#     to what the .eif embeds in its kernel section.
 
 set -euo pipefail
 shopt -qs failglob
@@ -48,6 +48,10 @@ Optional:
     --with-ephemeral-encryption-keys=yes  Rejected: EIF has no PRIVATE/DATA.
     --with-standalone-image=yes           Required (default). Any value other than
                                           'yes' is rejected.
+    --eif-kernel-format=FMT               x86_64 EIF kernel image format. Accepted
+                                          values: 'bzimage' (default) or
+                                          'vmlinux' (uncompressed ELF).
+                                          Ignored on aarch64.
 
 The rejected flags are accepted by the argument parser (so the Dockerfile can
 pass the same flag set to rpm2eif and rpm2img) and then validated against a
@@ -74,6 +78,10 @@ IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
 EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="yes"
+# x86_64 EIF kernel format. Defaults to `bzimage` when neither the CLI flag
+# nor the `EIF_KERNEL_FORMAT` env var (set by buildsys from the variant's
+# `[package.metadata.build-variant] eif-kernel-format`) is provided.
+EIF_KERNEL_FORMAT="${EIF_KERNEL_FORMAT:-bzimage}"
 
 for arg in "$@"; do
     case "${arg}" in
@@ -89,6 +97,7 @@ for arg in "$@"; do
         --with-encrypted-storage=*) ENCRYPTED_STORAGE="${arg#*=}" ;;
         --with-ephemeral-encryption-keys=*) EPHEMERAL_ENCRYPTION_KEYS="${arg#*=}" ;;
         --with-standalone-image=*) STANDALONE_IMAGE="${arg#*=}" ;;
+        --eif-kernel-format=*) EIF_KERNEL_FORMAT="${arg#*=}" ;;
         *) echo "Unknown argument: ${arg}"; usage ;;
     esac
 done
@@ -151,6 +160,14 @@ if ! [[ "${OS_IMAGE_SIZE_GIB}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: --os-image-size-gib='${OS_IMAGE_SIZE_GIB}' is not a non-negative integer" >&2
     exit 1
 fi
+
+case "${EIF_KERNEL_FORMAT}" in
+    bzimage|vmlinux) ;;
+    *)
+        echo "ERROR: --eif-kernel-format='${EIF_KERNEL_FORMAT}' is not one of {bzimage, vmlinux}" >&2
+        exit 1
+        ;;
+esac
 
 # Required environment variables (provided by buildsys / the Dockerfile).
 : "${VERSION_ID:?VERSION_ID must be set}"
@@ -248,11 +265,17 @@ extract_vmlinux() {
 echo "=== Extracting kernel ==="
 # Kernel format is architecture-dependent:
 #
-#   x86_64: the sidecar EIF is booted by a custom Firecracker-based launcher
-#   that uses PVH boot, which requires an uncompressed ELF kernel (vmlinux).
-#   Older Bottlerocket kernel RPMs shipped both a bare vmlinux and a compressed
-#   vmlinuz; newer ones (kernel-kit 6.18+) only ship vmlinuz. Prefer a bare
-#   vmlinux when available; otherwise carve the ELF out of vmlinuz.
+#   x86_64: the sidecar EIF is booted by the Nitro Enclaves in-memory image
+#   loader, which validates `BZIMAGE_HEADER_MAGIC` in the EIF kernel section
+#   and boots via the bzImage protocol (same as every `nitro-cli`-built EIF).
+#   That means the correct format to embed is the compressed `vmlinuz` from
+#   the RPM, verbatim. This is the default and what --eif-kernel-format=bzimage
+#   selects.
+#
+#   --eif-kernel-format=vmlinux selects an uncompressed ELF `vmlinux`
+#   (extracted from `vmlinuz` if the RPM does not ship a bare ELF), for
+#   consumers that use a bare-metal Firecracker PVH loader instead of the
+#   sidecar loader.
 #
 #   aarch64: Firecracker does not implement PVH on arm64. It boots via the
 #   arm64 Linux boot protocol, which takes a flat PE-wrapped kernel Image
@@ -261,7 +284,8 @@ echo "=== Extracting kernel ==="
 #   stub around a zstd- or gzip-compressed inner Image); Firecracker's PE
 #   loader does not understand the zboot wrapper. We hand vmlinuz to
 #   eif-builder as-is; it detects the zboot header and unwraps to the flat
-#   Image before embedding it in the EIF kernel section.
+#   Image before embedding it in the EIF kernel section. --eif-kernel-format
+#   is ignored on aarch64 (only one format is valid).
 mapfile -t KERNELS < <(find "${INSTALL_ROOT}" -name 'vmlinux' | sort)
 mapfile -t VMLINUZ < <(find "${INSTALL_ROOT}" -name 'vmlinuz' | sort)
 KERNEL_QUERY_PATH=""
@@ -277,34 +301,52 @@ case "${ARCH}" in
         fi
         KERNEL="${VMLINUZ[0]}"
         KERNEL_QUERY_PATH="${KERNEL#${INSTALL_ROOT}}"
-        echo "Kernel: ${KERNEL} (arm64 Image, no ELF extraction)"
+        echo "Kernel: ${KERNEL} (arm64 Image, no ELF extraction; --eif-kernel-format ignored on ${ARCH})"
         ;;
     x86_64|amd64)
-        if (( ${#KERNELS[@]} == 1 )); then
-            KERNEL="${KERNELS[0]}"
-            KERNEL_QUERY_PATH="${KERNEL#${INSTALL_ROOT}}"
-            echo "Kernel: ${KERNEL}"
-        elif (( ${#KERNELS[@]} > 1 )); then
-            echo "ERROR: expected at most one vmlinux, found ${#KERNELS[@]}" >&2
-            exit 1
-        else
-            if (( ${#VMLINUZ[@]} != 1 )); then
-                echo "ERROR: no vmlinux and expected exactly one vmlinuz, found ${#VMLINUZ[@]}" >&2
-                exit 1
-            fi
-            echo "No bare vmlinux; extracting from ${VMLINUZ[0]}"
-            EXTRACTED_KERNEL="$(mktemp)"
-            if ! extract_vmlinux "${VMLINUZ[0]}" "${EXTRACTED_KERNEL}"; then
-                echo "ERROR: failed to extract vmlinux ELF from ${VMLINUZ[0]}" >&2
-                exit 1
-            fi
-            KERNEL="${EXTRACTED_KERNEL}"
-            # Point --whatprovides at the RPM-owned vmlinuz, not our tempfile: the
-            # extracted ELF is not tracked in the rpm database and the query would
-            # otherwise return "unknown".
-            KERNEL_QUERY_PATH="${VMLINUZ[0]#${INSTALL_ROOT}}"
-            echo "Kernel: ${KERNEL} (from ${VMLINUZ[0]})"
-        fi
+        case "${EIF_KERNEL_FORMAT}" in
+            bzimage)
+                # bzImage path: hand the RPM-shipped compressed vmlinuz to
+                # eif-builder unchanged. Any bare `vmlinux` found under
+                # INSTALL_ROOT is not what the enclave loader expects, so
+                # it's ignored regardless of whether the RPM shipped one.
+                if (( ${#VMLINUZ[@]} != 1 )); then
+                    echo "ERROR: expected exactly one vmlinuz on ${ARCH}, found ${#VMLINUZ[@]}" >&2
+                    exit 1
+                fi
+                KERNEL="${VMLINUZ[0]}"
+                KERNEL_QUERY_PATH="${KERNEL#${INSTALL_ROOT}}"
+                echo "Kernel: ${KERNEL} (bzImage, no extraction)"
+                ;;
+            vmlinux)
+                # ships one; otherwise carve an ELF out of `vmlinuz`.
+                if (( ${#KERNELS[@]} == 1 )); then
+                    KERNEL="${KERNELS[0]}"
+                    KERNEL_QUERY_PATH="${KERNEL#${INSTALL_ROOT}}"
+                    echo "Kernel: ${KERNEL} (PVH ELF vmlinux)"
+                elif (( ${#KERNELS[@]} > 1 )); then
+                    echo "ERROR: expected at most one vmlinux, found ${#KERNELS[@]}" >&2
+                    exit 1
+                else
+                    if (( ${#VMLINUZ[@]} != 1 )); then
+                        echo "ERROR: no vmlinux and expected exactly one vmlinuz, found ${#VMLINUZ[@]}" >&2
+                        exit 1
+                    fi
+                    echo "No bare vmlinux; extracting from ${VMLINUZ[0]}"
+                    EXTRACTED_KERNEL="$(mktemp)"
+                    if ! extract_vmlinux "${VMLINUZ[0]}" "${EXTRACTED_KERNEL}"; then
+                        echo "ERROR: failed to extract vmlinux ELF from ${VMLINUZ[0]}" >&2
+                        exit 1
+                    fi
+                    KERNEL="${EXTRACTED_KERNEL}"
+                    # Point --whatprovides at the RPM-owned vmlinuz, not our tempfile: the
+                    # extracted ELF is not tracked in the rpm database and the query would
+                    # otherwise return "unknown".
+                    KERNEL_QUERY_PATH="${VMLINUZ[0]#${INSTALL_ROOT}}"
+                    echo "Kernel: ${KERNEL} (PVH ELF vmlinux from ${VMLINUZ[0]})"
+                fi
+                ;;
+        esac
         ;;
     *)
         echo "ERROR: unsupported ARCH=${ARCH}" >&2
