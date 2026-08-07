@@ -369,6 +369,14 @@ ARG KERNEL_PARAMETERS
 # non-EIF variants. See the header==launch-flags contract in
 # `tools/eif-builder/src/lib.rs`.
 ARG EIF_PCIE_FLAGS
+# EIF_KERNEL_FORMAT: variant-authored x86_64 EIF kernel format
+# (`bzimage`|`vmlinux`). Sourced from `[package.metadata.build-variant]
+# eif-kernel-format`. Empty when unset, in which case `rpm2eif` applies its
+# built-in default (bzImage — the sidecar Nitro Enclaves in-memory image
+# loader boots via the bzImage protocol, validating `BZIMAGE_HEADER_MAGIC`).
+# Ignored on aarch64. See buildsys `BuildVariant::eif_kernel_format` for
+# the rationale on keeping this selectable.
+ARG EIF_KERNEL_FORMAT
 ARG XFS_DATA_PARTITION
 ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
@@ -392,6 +400,7 @@ ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
     KERNEL_PARAMETERS=${KERNEL_PARAMETERS} \
     EIF_PCIE_FLAGS=${EIF_PCIE_FLAGS} \
+    EIF_KERNEL_FORMAT=${EIF_KERNEL_FORMAT} \
     TWOLITER_VERSION=${TWOLITER_VERSION}
 WORKDIR /root
 
@@ -439,6 +448,7 @@ RUN --mount=target=/host \
         ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
         ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
         ${ENCRYPTED_STORAGE:+--with-encrypted-storage=yes} \
+        ${EIF_KERNEL_FORMAT:+--eif-kernel-format=${EIF_KERNEL_FORMAT}} \
         --with-standalone-image="${STANDALONE_IMAGE:-no}" ; \
     else \
       /host/build/tools/rpm2img \

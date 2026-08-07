@@ -10,9 +10,15 @@
 //! RPMs ship `vmlinuz` as an EFI zboot image, so we have to unwrap it here
 //! before handing it to Firecracker.
 //!
-//! On x86_64 no pre-processing is needed: the caller supplies an uncompressed
-//! ELF `vmlinux` (extracted from `vmlinuz` upstream in `rpm2eif`) and PVH boot
-//! consumes it directly.
+//! On x86_64 no pre-processing is needed: eif-builder passes the input bytes
+//! through unchanged and it is `rpm2eif`'s job (per its `--eif-kernel-format`
+//! flag) to pick the correct format for the downstream loader. The sidecar
+//! Nitro Enclaves in-memory image loader validates `BZIMAGE_HEADER_MAGIC`
+//! and boots via the bzImage protocol, so `rpm2eif` embeds the RPM-shipped
+//! `vmlinuz` (compressed bzImage) by default. A bare-metal Firecracker PVH
+//! loader consumes an uncompressed ELF `vmlinux` instead, which `rpm2eif`
+//! selects with `--eif-kernel-format=vmlinux`. Either format round-trips
+//! cleanly through this pass-through.
 
 use std::io::Read;
 
@@ -194,8 +200,10 @@ fn unwrap_zboot(data: &[u8]) -> Result<Vec<u8>, KernelPrepError> {
 
 /// Prepare a raw kernel image for embedding in the EIF kernel section.
 ///
-/// For `x86_64`, returns the input verbatim: the caller is expected to have
-/// supplied an uncompressed ELF `vmlinux` for PVH boot.
+/// For `x86_64`, returns the input verbatim. `rpm2eif` picks the format
+/// (`vmlinuz` bzImage for the sidecar Nitro Enclaves loader, or an ELF
+/// `vmlinux` for a bare-metal PVH loader) via `--eif-kernel-format`; both
+/// are pass-through here.
 ///
 /// For `aarch64`, if the input is an EFI zboot image (`MZ` + `"zimg"`),
 /// extracts and decompresses the inner arm64 `Image`. Otherwise the input is
@@ -303,7 +311,9 @@ mod tests {
     #[test]
     fn x86_pass_through() {
         // On x86 we don't touch the bytes even if they're pure garbage: the
-        // caller is responsible for handing us an ELF vmlinux.
+        // caller (rpm2eif, per --eif-kernel-format) is responsible for
+        // handing us either a bzImage vmlinuz or an ELF vmlinux; either is
+        // a pass-through at this layer.
         let data = vec![0xDE, 0xAD, 0xBE, 0xEF];
         let out = prepare_kernel(data.clone(), TargetArch::X86_64).unwrap();
         assert_eq!(out, data);

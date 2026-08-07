@@ -204,6 +204,30 @@ image-format = "eif"
 eif-pcie-flags = 0x340
 ```
 
+`eif-kernel-format` selects the x86_64 kernel image format that `rpm2eif`
+embeds into the EIF kernel section (and publishes as the sidecar
+`${prefix}-kernel` artifact). Accepted values:
+
+* `"bzimage"` (default): use the RPM-shipped compressed `vmlinuz` as-is.
+  The Nitro Enclaves in-memory image loader that boots the sidecar EIF
+  validates `BZIMAGE_HEADER_MAGIC` and boots via the bzImage protocol
+  (same as every `nitro-cli`-built EIF), so this is the correct format
+  for the sidecar path.
+* `"vmlinux"`: extract an uncompressed ELF `vmlinux` from `vmlinuz` and
+  embed that. Only appropriate for a bare-metal Firecracker PVH loader.
+  Kept selectable because Firecracker upstream has shipped conflicting
+  guidance on compressed vs. uncompressed kernels; if a variant author
+  needs to feed a PVH-only loader, this keeps the option available
+  without having to fork `rpm2eif`.
+
+Ignored on aarch64 (only the PE-wrapped `Image` format is valid there)
+and on non-EIF variants.
+```ignore
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "bzimage"
+```
+
 `image-features` is a map of image feature flags, which can be enabled or disabled. This allows us
 to conditionally use or exclude certain image-level features in variants.
 
@@ -656,6 +680,13 @@ impl ManifestInfo {
         self.build_variant().and_then(|b| b.eif_pcie_flags)
     }
 
+    /// Convenience method to return the x86_64 EIF kernel format override
+    /// for this variant. Only meaningful when `image-format = "eif"` on
+    /// x86_64; ignored otherwise.
+    pub fn eif_kernel_format(&self) -> Option<EifKernelFormat> {
+        self.build_variant().and_then(|b| b.eif_kernel_format)
+    }
+
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         let variant = self.build_variant()?;
@@ -1009,9 +1040,9 @@ where
                          (e.g. `832`) for decimal"
                     ))
                 })?;
-            u16::from_str_radix(hex_body, 16).map(Some).map_err(|e| {
-                <D::Error as de::Error>::custom(format!("invalid hex u16 {s:?}: {e}"))
-            })
+            u16::from_str_radix(hex_body, 16)
+                .map(Some)
+                .map_err(|e| <D::Error as de::Error>::custom(format!("invalid hex u16 {s:?}: {e}")))
         }
     }
 }
@@ -1074,6 +1105,23 @@ pub struct BuildVariant {
     /// ```
     #[serde(default, deserialize_with = "deserialize_u16_hex_or_int")]
     pub eif_pcie_flags: Option<u16>,
+    /// x86_64 kernel image format that `rpm2eif` embeds in the EIF kernel
+    /// section (and publishes as the sidecar `${prefix}-kernel` artifact).
+    ///
+    /// Defaults to [`EifKernelFormat::Bzimage`] when unset: the sidecar
+    /// enclave loader validates `BZIMAGE_HEADER_MAGIC` and boots via the
+    /// bzImage protocol, matching every `nitro-cli`-built EIF. Kept
+    /// selectable (rather than a hardcoded constant) because Firecracker
+    /// upstream has flipped between compressed and uncompressed kernels
+    /// more than once, and a bare-metal PVH loader still needs the ELF
+    /// `vmlinux` form.
+    ///
+    /// Ignored on aarch64 (only PE-wrapped `Image` is valid there) and on
+    /// non-EIF variants. Forwarded to `rpm2eif` as the
+    /// `EIF_KERNEL_FORMAT` build-arg (empty string when unset; `rpm2eif`
+    /// applies its own default).
+    #[serde(default)]
+    pub eif_kernel_format: Option<EifKernelFormat>,
     /// Map of guest variant crate name -> absolute install path in this variant's root
     /// filesystem.
     pub guest_images: Option<BTreeMap<String, PathBuf>>,
@@ -1085,13 +1133,42 @@ pub struct BuildVariant {
     pub flavor: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
     Eif,
     Qcow2,
     Raw,
     Vmdk,
+}
+
+/// x86_64 kernel image format that `rpm2eif` embeds in the EIF kernel
+/// section. See [`BuildVariant::eif_kernel_format`] for the rationale on
+/// keeping this selectable rather than pinning one value.
+///
+/// The TOML values `"bzimage"` and `"vmlinux"` are accepted; both are
+/// case-insensitive (via the `lowercase` rename). Ignored on aarch64.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EifKernelFormat {
+    /// Compressed `vmlinuz` embedded verbatim. Matches the boot protocol
+    /// the sidecar Nitro Enclaves in-memory image loader expects (and
+    /// every `nitro-cli`-built EIF).
+    Bzimage,
+    /// Uncompressed ELF `vmlinux` extracted from `vmlinuz`. For a
+    /// bare-metal Firecracker PVH loader.
+    Vmlinux,
+}
+
+impl EifKernelFormat {
+    /// String form matching the TOML value and the `EIF_KERNEL_FORMAT`
+    /// build-arg / `--eif-kernel-format` CLI value expected by `rpm2eif`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EifKernelFormat::Bzimage => "bzimage",
+            EifKernelFormat::Vmlinux => "vmlinux",
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Copy, Clone)]
@@ -1982,12 +2059,83 @@ name = "test-variant"
 image-format = "eif"
 eif-pcie-flags = "0x10000"
 "#;
-        let err = toml::from_str::<ManifestInfo>(toml)
-            .expect_err("0x10000 should not fit in u16");
+        let err = toml::from_str::<ManifestInfo>(toml).expect_err("0x10000 should not fit in u16");
         let msg = format!("{err}");
         assert!(
             msg.to_lowercase().contains("u16"),
             "expected u16 mention in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn eif_kernel_format_omitted_is_none() {
+        // A variant without `eif-kernel-format` returns None, so buildsys
+        // emits the empty ARG and rpm2eif applies its built-in default
+        // (bzImage on x86_64 -- the sidecar Nitro Enclaves loader boot
+        // protocol).
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_kernel_format(), None);
+    }
+
+    #[test]
+    fn eif_kernel_format_bzimage_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "bzimage"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_kernel_format(), Some(EifKernelFormat::Bzimage));
+        assert_eq!(info.eif_kernel_format().unwrap().as_str(), "bzimage");
+    }
+
+    #[test]
+    fn eif_kernel_format_vmlinux_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "vmlinux"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_kernel_format(), Some(EifKernelFormat::Vmlinux));
+        assert_eq!(info.eif_kernel_format().unwrap().as_str(), "vmlinux");
+    }
+
+    #[test]
+    fn eif_kernel_format_unknown_is_rejected() {
+        // An unrecognized value must fail at parse time rather than falling
+        // silently through to the default; the rpm2eif side also validates
+        // the flag, but catching typos here gives variant authors a
+        // per-manifest error instead of a container-build failure.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-kernel-format = "elf"
+"#;
+        let err = toml::from_str::<ManifestInfo>(toml)
+            .expect_err("unknown eif-kernel-format value should be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("elf")
+                || msg.to_lowercase().contains("variant")
+                || msg.to_lowercase().contains("unknown"),
+            "error should mention the bad value, got: {msg}"
         );
     }
 
