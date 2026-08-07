@@ -79,7 +79,7 @@ A `docker build` command installs everything into an image file.
 The build host has the following requirements: sufficient versions of Docker, buildx, Cargo, Cargo Make and a few tools like lz4.
 The root of the Bottlerocket git repo is mounted and artifacts are created in `.cargo` and `build` directories.
 
-Certain custom tools for building, testing and publishing Bottlerocket ([buildsys], [pubsys], and [testsys]) are compiled from source during a Bottlerocket build.
+Certain custom tools for building and publishing Bottlerocket ([buildsys] and [pubsys]) are compiled from source during a Bottlerocket build.
 These are built using the host-installed Rust toolchain (not the SDK toolchain).
 Once these are built, they are used elsewhere in the build process.
 Buildsys, for example, is the tool that launches container build environments from `build.rs` scripts.
@@ -89,7 +89,6 @@ Buildsys, for example, is the tool that launches container build environments fr
 [bottlerocket-sdk]: https://github.com/bottlerocket-os/bottlerocket-sdk
 [buildsys]: https://github.com/bottlerocket-os/bottlerocket/blob/3af909865c4da765f4afc787aaf5f50eea5c3989/tools/buildsys/Cargo.toml#L2
 [pubsys]: https://github.com/bottlerocket-os/bottlerocket/blob/3af909865c4da765f4afc787aaf5f50eea5c3989/tools/pubsys/Cargo.toml#L2
-[testsys]: https://github.com/bottlerocket-os/bottlerocket/blob/3af909865c4da765f4afc787aaf5f50eea5c3989/tools/testsys/Cargo.toml#L2
 
 ### Enhancing the Build System
 
@@ -280,7 +279,7 @@ These will not be available and need to be added to the Bottlerocket SDK:
 
 The existing build system relies on certain binaries, scripts and static files, such as
 
-- buildsys, pubsys, testsys, etc.
+- buildsys, pubsys, etc.
 - rpm2img, the Dockerfiles, and Makefile.toml
 
 These tools and files will be embedded into the Twoliter binary and  installed on-the-fly when Twoliter runs.
@@ -579,15 +578,6 @@ Because `repack-variant` skips package builds entirely, it is significantly fast
 Common publishing steps such as `cargo make repo` and `cargo make ami` will be hoisted to Twoliter.
 For example, `twoliter build repo` and `twoliter build ami` will invoke these commands.
 It is possible that the majority of `Makefile.toml` entrypoints need to be made available in Twoliter.
-
-## Testing
-
-Testing with testsys will require additional follow-up design beyond the scope of this document.
-Areas that need to be considered:
-
-- Custom configurations for variants that testsys is not aware of.
-- Custom test and resource agents.
-- Facilitating setup of the testsys cluster.
 
 ## Signing Keys
 

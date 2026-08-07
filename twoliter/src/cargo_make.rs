@@ -166,9 +166,6 @@ const ENV_VARS: &[&str] = &[
     "AMI_DATA_FILE_SUFFIX",
     "CARGO_MAKE_CARGO_ARGS",
     "CARGO_MAKE_CARGO_LIMIT_JOBS",
-    "CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH",
-    "CARGO_MAKE_TESTSYS_ARGS",
-    "CARGO_MAKE_TESTSYS_KUBECONFIG_ARG",
     "GONOPROXY",
     "GOPRIVATE",
     "GOPROXY",
@@ -200,7 +197,6 @@ fn is_build_system_env(key: impl AsRef<str>) -> bool {
     key.starts_with("BUILDSYS_")
         || key.starts_with("PUBLISH_")
         || key.starts_with("REPO_")
-        || key.starts_with("TESTSYS_")
         || key.starts_with("BOOT_CONFIG")
         || key.starts_with("AWS_")
         || ENV_VARS.contains(&key)
@@ -215,12 +211,8 @@ fn check_for_disallowed_var(key: &str) -> Result<()> {
 
 #[test]
 fn test_is_build_system_env() {
-    assert!(is_build_system_env(
-        "CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH"
-    ));
     assert!(is_build_system_env("BUILDSYS_PRETTY_NAME"));
     assert!(is_build_system_env("PUBLISH_FOO_BAR"));
-    assert!(is_build_system_env("TESTSYS_!"));
     assert!(is_build_system_env("BOOT_CONFIG!"));
     assert!(is_build_system_env("BOOT_CONFIG_INPUT"));
     assert!(is_build_system_env("GO_MODULES"));

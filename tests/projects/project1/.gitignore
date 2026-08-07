@@ -5,6 +5,4 @@
 /keys/
 /roles/
 /sbkeys/
-Test.toml
-testsys.kubeconfig
 Infra.toml

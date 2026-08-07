@@ -122,28 +122,6 @@ AMI_DATA_FILE_SUFFIX = "amis.json"
 # to file. It can be overridden with -e.
 SSM_DATA_FILE_SUFFIX = "ssm-params.json"
 
-# The type of testsys test that should be run.
-# `quick` will run a quick test which usually tests that the instances are reachable.
-# `conformance` will run a certified conformance test, these tests may take up to 3 hrs.
-# `migration` will run an upgrade downgrade test including:
-#    1: an initial `quick` test
-#    2: a migration from TESTSYS_STARTING_VERSION to BUILDSYS_FULL_VERSION
-#    3: a `quick` test on the migrated instances
-#    4: a migration from BUILDSYS_FULL_VERSION back to TESTSYS_STARTING_VERSION
-#    5: a final `quick` test on the downgraded instances
-# TESTSYS_STARTING_IMAGE_ID can be used to provide the correct starting image for migration tests.
-TESTSYS_TEST = "quick"
-# The default path to the testsys cluster's kubeconfig file. This is used for all testsys calls.
-CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH = "${BUILDSYS_ROOT_DIR}/testsys.kubeconfig"
-# The last released version of bottlerocket.
-TESTSYS_STARTING_VERSION = { script = ["git tag --list --sort=version:refname 'v*' | tail -1"] }
-# The commit for the last release of bottlerocket.
-TESTSYS_STARTING_COMMIT = { script = ["git describe --tag ${TESTSYS_STARTING_VERSION} --always --exclude '*' || echo 00000000"] }
-TESTSYS_TESTS_DIR = "${BUILDSYS_ROOT_DIR}/tests"
-TESTSYS_TEST_CONFIG_PATH = "${BUILDSYS_ROOT_DIR}/Test.toml"
-
-TESTSYS_LOG_LEVEL = { script = ["if [ \"${TWOLITER_QUIET}\" = \"1\" ]; then echo warn; else echo info; fi"], condition = { env_not_set = ["TESTSYS_LOG_LEVEL"] } }
-
 [env.development]
 # Certain variables are defined here to allow us to override a component value
 # on the command line.
@@ -201,48 +179,6 @@ VMWARE_VM_NAME_DEFAULT = "${BUILDSYS_NAME}-${BUILDSYS_VARIANT}-${BUILDSYS_ARCH}-
 BOOT_CONFIG_INPUT = "${BUILDSYS_ROOT_DIR}/bootconfig-input"
 # Boot Configuration initrd
 BOOT_CONFIG = "${BUILDSYS_ROOT_DIR}/bootconfig.data"
-
-# Determines the kubeconfig that should be used by testsys. If no kubeconfig was provided and the
-# default kubeconfig location does not exist, use the users default kubeconfig.
-CARGO_MAKE_TESTSYS_KUBECONFIG_ARG = {script = [
-'''
-if ! [ -n "${TESTSYS_KUBECONFIG}" ] && [ -s "${TESTSYS_TESTS_DIR}/testsys.kubeconfig" ] && [ -s "${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}" ];then
-   echo "No kubeconfig was specified and a kubeconfig was found in 2 possible locations: '${TESTSYS_TESTS_DIR}/testsys.kubeconfig' and '${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}'"
-   exit 1
-fi
-if [ -n "${TESTSYS_KUBECONFIG}" ]; then
-   # If the user provides a kubeconfig path it should be used.
-   echo "--kubeconfig ${TESTSYS_KUBECONFIG}"
-elif [ -s "${TESTSYS_TESTS_DIR}/testsys.kubeconfig" ]; then
-   # If the kubeconfig is in the TESTSYS_TESTS_DIR it should be used.
-   echo "--kubeconfig ${TESTSYS_TESTS_DIR}/testsys.kubeconfig"
-elif [ -s "${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}" ]; then
-   # If the default kubeconfig exists it should be used.
-   echo "--kubeconfig ${CARGO_MAKE_DEFAULT_TESTSYS_KUBECONFIG_PATH}"
-fi
-'''
-]}
-
-# Args that will be passed into all testsys invocations.
-CARGO_MAKE_TESTSYS_ARGS = "${CARGO_MAKE_TESTSYS_KUBECONFIG_ARG}"
-
-TESTSYS_TEST_CONFIG_PATH = { script = [
-'''
-if [ -s "${TESTSYS_TEST_CONFIG_PATH}" ] && [ -s "${TESTSYS_TESTS_DIR}/Test.toml" ];then
-   echo "There can only be 1 config file. 2 config files were found: '${TESTSYS_TEST_CONFIG_PATH}' and '${TESTSYS_TESTS_DIR}/Test.toml'"
-   exit 1
-fi
-if [ -s "${TESTSYS_TEST_CONFIG_PATH}" ]; then
-   # If the config path exists
-   echo "${TESTSYS_TEST_CONFIG_PATH}"
-elif [ -s "${TESTSYS_TESTS_DIR}/Test.toml" ]; then
-   # If the test config is in the TESTSYS_TESTS_DIR it should be used.
-   echo "${TESTSYS_TESTS_DIR}/Test.toml"
-else
-   echo "${TESTSYS_TEST_CONFIG_PATH}"
-fi
-'''
-] }
 
 # These are variables that are not meant to be set by users of `twoliter make`. These are intended
 # to be set only by Twoliter itself when it invokes `cargo make`.
@@ -1885,129 +1821,6 @@ script = [
     '''
     rm -rf ${CARGO_HOME}
     '''
-]
-
-[tasks.setup-test]
-script = [
-    '''
-    set -eu
-    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} install
-    '''
-]
-
-# This task is used to test bottlerocket build artifacts. By default the region first listed in Infra.toml
-# is used for testing; however, `TESTSYS_REGION` can be used to test in a different region.
-[tasks.test]
-script = [
-    '''
-    set -eu
-    ami_input="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-${AMI_DATA_FILE_SUFFIX}"
-    testsys_ami_input=""
-    if [ -s "${ami_input}" ]; then
-      testsys_ami_input="--ami-input ${ami_input}"
-    fi
-    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    # The ami that is selected from `amis.json` is determined by `TESTSYS_REGION` if set; otherwise,
-    # it is the first region listed in `Infra.toml` (for aws variants).
-    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} run ${TESTSYS_TEST} \
-      ${testsys_ami_input} \
-      ${TESTSYS_AWS_SECRET_NAME:+--secret ${TESTSYS_AWS_SECRET_NAME}} \
-      ${@}
-    '''
-]
-
-# This task will clear all tests from the testsys cluster.
-# To delete all passed tests use `cargo make clean-test --passed`
-# To delete all failed tests use `cargo make clean-test --failed`
-# To delete all incomplete tests use `cargo make clean-test --running`
-[tasks.clean-test]
-script = [
-    '''
-    set -eu
-    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test ${@}
-    '''
-]
-
-# This task will clear all tests and resources from the testsys cluster.
-[tasks.reset-test]
-script = [
-    '''
-    set -eu
-    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete ${@}
-    '''
-]
-
-# This task will clear a specific test by name and its resources from the testsys cluster.
-[tasks.reset-single-test]
-script = [
-    '''
-    set -eu
-    export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-    testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} delete --test-name ${@}
-    '''
-]
-
-# This task will clear all testsys components from the testsys cluster.
-[tasks.uninstall-test]
-script = [
-   '''
-   set -eu
-   export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} uninstall
-   '''
-]
-
-# This task will clear all testsys components from the testsys cluster.
-[tasks.purge-test]
-dependencies = ["reset-test","uninstall-test"]
-
-# This task will call watch on the `status` testsys command to show the results of all tests.
-# To see all passed tests use `cargo make watch-test --passed`
-# To see all failed tests use `cargo make watch-test --failed`
-# To see all incomplete tests use `cargo make watch-test --running`
-[tasks.watch-test]
-script = [
-   '''
-   set -eu
-   export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   watch -- testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status --test ${@}
-   '''
-]
-
-# This task will call watch on the `status` testsys command to show the results of all tests and
-# resources.
-# To see all incomplete crds use `cargo make watch-test-all --running`
-[tasks.watch-test-all]
-script = [
-   '''
-   set -eu
-   export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   watch -- testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} status ${@}
-   '''
-]
-
-# This task will retrieve testsys logs from a test. You can add `--follow` to continue to receive
-# logs as they come in.
-[tasks.log-test]
-script = [
-   '''
-   set -eu
-   export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} logs --test ${@}
-   '''
-]
-
-# This task is useful for using the current tree's testsys without symlinks
-[tasks.testsys]
-script = [
-   '''
-   set -eu
-   export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
-   testsys --log-level=${TESTSYS_LOG_LEVEL} ${CARGO_MAKE_TESTSYS_ARGS} ${@}
-   '''
 ]
 
 [tasks.default]

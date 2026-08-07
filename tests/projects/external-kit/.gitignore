@@ -5,8 +5,6 @@
 /keys/
 /roles/
 /sbkeys/
-Test.toml
-testsys.kubeconfig
 Infra.toml
 Twoliter.lock
 Twoliter.override

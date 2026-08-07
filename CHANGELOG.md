@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+* `testsys` is now officially deprecated and removed from the twoliter binary. ([#697])
+
+[#697]: https://github.com/bottlerocket-os/twoliter/pull/697
+
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.1...HEAD
 
 ## [0.22.1] - 2026-08-03
