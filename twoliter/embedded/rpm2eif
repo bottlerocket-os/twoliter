@@ -540,6 +540,18 @@ if ! discover_eif_signer_args sign_args; then
     exit 1
 fi
 
+# Variant-authored EIF header PCIE flags, forwarded from
+# `[package.metadata.build-variant] eif-pcie-flags` via buildsys ->
+# build.Dockerfile ARG. When unset, we omit `--pcie-flags` so eif-builder
+# applies its built-in `DEFAULT_PCIE_FLAGS`. Contract: the value in the EIF
+# header MUST match the PCIE flags the sidecar shim passes to the hypervisor
+# at launch (`header == launch-flags`, enforced by the hypervisor). See
+# `tools/eif-builder/src/lib.rs::DEFAULT_PCIE_FLAGS`.
+pcie_flags_args=()
+if [[ -n "${EIF_PCIE_FLAGS:-}" ]]; then
+    pcie_flags_args=(--pcie-flags "${EIF_PCIE_FLAGS}")
+fi
+
 /host/build/tools/eif-builder \
     --kernel "${KERNEL_LOCAL}" \
     --cmdline "${KERNEL_CMDLINE}" \
@@ -550,6 +562,7 @@ fi
     --image-version "${VERSION_ID}" \
     --build-time "${BUILD_TIME_RFC3339}" \
     --out-prepared-kernel "${PREPARED_KERNEL_TMP}" \
+    "${pcie_flags_args[@]}" \
     "${sign_args[@]}"
 
 echo "=== Generating SBOMs ==="

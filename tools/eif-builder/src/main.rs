@@ -43,7 +43,12 @@ struct Args {
     #[arg(long, default_value_t = 2)]
     cpus: u64,
 
-    /// PCIE flags (hex; `0x` / `0X` prefix optional)
+    /// PCIE flags written into the EIF header (hex; `0x` / `0X` prefix
+    /// optional). Must match the PCIE flag word the sidecar shim passes to
+    /// the hypervisor at launch; the hypervisor enforces `header ==
+    /// launch-flags`. Variants normally author this via
+    /// `[package.metadata.build-variant] eif-pcie-flags`; see
+    /// `lib.rs::DEFAULT_PCIE_FLAGS` for the full contract.
     #[arg(long, default_value_t = DEFAULT_PCIE_FLAGS, value_parser = parse_hex_u16)]
     pcie_flags: u16,
 

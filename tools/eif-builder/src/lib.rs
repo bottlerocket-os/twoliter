@@ -66,7 +66,31 @@ pub const SIGNATURE_MAX_SIZE: usize = 32768;
 pub const EIF_HDR_FLAG_PCIE: u16 = 1 << 6;
 pub const EIF_HDR_FLAG_PCIE_VIRTIO: u16 = 1 << 9;
 
-/// Default PCIE flags for sidecar mode.
+/// Default PCIE flags baked into the EIF header when no `--pcie-flags`
+/// override is supplied on the `eif-builder` CLI.
+///
+/// # header == launch-flags contract
+///
+/// The PCIE flag word written into the EIF header **must** match the PCIE
+/// flags the sidecar shim passes to the hypervisor when it launches the
+/// enclave. The hypervisor enforces this equality: a mismatch fails launch /
+/// attestation. There is no negotiation, and no runtime derivation on the
+/// host side today — both ends are authored independently, and it is the
+/// build's responsibility to keep them in sync.
+///
+/// This default is the minimum viable value (PCIE + PCIE_VIRTIO) that a
+/// bare sidecar EIF needs to boot. Any variant whose shim uses a different
+/// launch-flag word must override it, either via `--pcie-flags` on the CLI
+/// or, preferably, via `[package.metadata.build-variant] eif-pcie-flags` in
+/// the variant's `Cargo.toml`, which the buildsys → `rpm2eif` / `eif2eif`
+/// pipeline forwards to `--pcie-flags` on both first-build and repack. See
+/// `tools/buildsys/src/manifest.rs::BuildVariant::eif_pcie_flags`.
+///
+/// Longer-term plan: have the shim derive its launch flags from the header
+/// directly (host echoes, hypervisor enforces). That removes the coupling
+/// and this default becomes truly authoritative rather than
+/// coincidentally-agreed. The `--pcie-flags` knob is still needed as the
+/// per-variant authoring surface for the header value itself.
 pub const DEFAULT_PCIE_FLAGS: u16 = EIF_HDR_FLAG_PCIE | EIF_HDR_FLAG_PCIE_VIRTIO;
 
 /// Default kernel command line for block device boot.

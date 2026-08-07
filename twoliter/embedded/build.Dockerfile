@@ -361,6 +361,14 @@ ARG PARTITION_PLAN
 ARG OS_IMAGE_PUBLISH_SIZE_GIB
 ARG DATA_IMAGE_PUBLISH_SIZE_GIB
 ARG KERNEL_PARAMETERS
+# EIF_PCIE_FLAGS: variant-authored EIF header PCIE flags (hex, no `0x` prefix,
+# e.g. "340"). Sourced from `[package.metadata.build-variant] eif-pcie-flags`.
+# Empty when the variant does not set it, in which case `rpm2eif` omits
+# `--pcie-flags` on the `eif-builder` CLI and `eif-builder`'s built-in
+# `DEFAULT_PCIE_FLAGS` (`0x240`, PCIE|PCIE_VIRTIO) is used. Ignored for
+# non-EIF variants. See the header==launch-flags contract in
+# `tools/eif-builder/src/lib.rs`.
+ARG EIF_PCIE_FLAGS
 ARG XFS_DATA_PARTITION
 ARG EROFS_ROOT_PARTITION
 ARG UEFI_SECURE_BOOT
@@ -383,6 +391,7 @@ ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP} \
     PRETTY_NAME=${PRETTY_NAME} IMAGE_NAME=${IMAGE_NAME} \
     KERNEL_PARAMETERS=${KERNEL_PARAMETERS} \
+    EIF_PCIE_FLAGS=${EIF_PCIE_FLAGS} \
     TWOLITER_VERSION=${TWOLITER_VERSION}
 WORKDIR /root
 
@@ -579,6 +588,12 @@ ARG TWOLITER_VERSION=""
 # directly (grub.cfg carries per-variant params), but plumbing it here keeps
 # the EIF-repack cmdline identical to what rpm2eif emitted at first build.
 ARG KERNEL_PARAMETERS=""
+# EIF_PCIE_FLAGS: variant-authored EIF header PCIE flags (hex, no `0x` prefix).
+# Consumed by `eif2eif` for `image-format = "eif"` variants so the rebuilt EIF
+# header matches what `rpm2eif` emitted at first build. Empty defers to
+# `eif-builder`'s `DEFAULT_PCIE_FLAGS`. See build stage above and the
+# header==launch-flags contract in `tools/eif-builder/src/lib.rs`.
+ARG EIF_PCIE_FLAGS=""
 
 # ARG values are substituted into the RUN command line but are NOT injected
 # into the RUN process environment. Both `img2img` and `eif2eif` source
@@ -589,7 +604,8 @@ ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
     VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
     TWOLITER_VERSION=${TWOLITER_VERSION} \
     IMAGE_NAME=${IMAGE_NAME} VARIANT_NAME=${VARIANT_NAME} ARCH=${ARCH} \
-    KERNEL_PARAMETERS=${KERNEL_PARAMETERS}
+    KERNEL_PARAMETERS=${KERNEL_PARAMETERS} \
+    EIF_PCIE_FLAGS=${EIF_PCIE_FLAGS}
 WORKDIR /root
 
 USER root
