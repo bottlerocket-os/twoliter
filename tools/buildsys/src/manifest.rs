@@ -183,6 +183,26 @@ The given parameters are inserted at the start of the command line.
 kernel-parameters = [
    "console=ttyS42",
 ]
+```
+
+`eif-pcie-flags` overrides the PCIE flag word written into the EIF header for
+`image-format = "eif"` variants. Accepted as either a TOML integer literal
+(always decimal, per the TOML spec — e.g. `832`) or a `0x`-prefixed hex
+string (`"0x340"`). Unprefixed string forms like `"340"` are rejected to
+avoid ambiguity with the hex convention used on the `eif-builder --pcie-flags`
+CLI, where `340` means `0x340`. Forwarded to `eif-builder --pcie-flags <hex>`.
+When absent, `eif-builder`'s built-in default (`0x240`) is used. Non-EIF
+variants ignore this field.
+
+The header value **must** match the PCIE flags the sidecar shim passes to the
+hypervisor at launch (`header == launch-flags`, enforced by the hypervisor);
+this knob is the authoring surface for that value. See the doc comment on
+`BuildVariant::eif_pcie_flags` for details.
+```ignore
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = 0x340
+```
 
 `image-features` is a map of image feature flags, which can be enabled or disabled. This allows us
 to conditionally use or exclude certain image-level features in variants.
@@ -306,7 +326,7 @@ use crate::BuildType;
 use buildsys_config::EXTERNAL_KIT_METADATA;
 use guppy::graph::{DependencyDirection, PackageGraph, PackageLink, PackageMetadata};
 use guppy::{CargoMetadata, PackageId};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use std::cmp::max;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -629,6 +649,13 @@ impl ManifestInfo {
             .and_then(|b| b.kernel_parameters.as_ref())
     }
 
+    /// Convenience method to return the EIF header PCIE flags override for
+    /// this variant. Only meaningful when `image-format = "eif"`; ignored
+    /// otherwise.
+    pub fn eif_pcie_flags(&self) -> Option<u16> {
+        self.build_variant().and_then(|b| b.eif_pcie_flags)
+    }
+
     /// Convenience method to return the enabled image features for this variant.
     pub fn image_features(&self) -> Option<HashSet<ImageFeature>> {
         let variant = self.build_variant()?;
@@ -937,6 +964,58 @@ pub enum SensitivityType {
     Flavor,
 }
 
+/// Deserialize a `u16` from either a TOML integer literal (`576`, always
+/// decimal per the TOML spec) or a `0x`/`0X`-prefixed hex string (`"0x240"`).
+///
+/// Unprefixed string forms (e.g. `"240"`) are **rejected** rather than
+/// silently interpreted. The rationale: PCIE flag values are conventionally
+/// written in hex on the `eif-builder --pcie-flags` CLI (whose parser is
+/// hex-only, prefix optional) and in the aws-nitro-enclaves-image-format
+/// header definitions. A user copy-pasting a hex value like `340` from those
+/// contexts into `eif-pcie-flags = "340"` almost certainly means `0x340`
+/// (bits 6, 8, 9), not `340` decimal (`0x154`, bits 2, 4, 6, 8). Treating
+/// the unprefixed string as decimal would produce a header/launch-flags
+/// mismatch that only surfaces at enclave launch, which is the exact kind
+/// of silent misconfiguration this knob exists to prevent. Forcing an
+/// explicit base makes the author's intent unambiguous at parse time:
+/// integer form is unambiguously decimal, string form is unambiguously hex.
+fn deserialize_u16_hex_or_int<'de, D>(deserializer: D) -> std::result::Result<Option<u16>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Int(u64),
+        Str(String),
+    }
+
+    let Some(value) = Option::<Repr>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        Repr::Int(n) => u16::try_from(n).map(Some).map_err(|_| {
+            <D::Error as de::Error>::custom(format!("value {n} does not fit in a u16"))
+        }),
+        Repr::Str(s) => {
+            let trimmed = s.trim();
+            let hex_body = trimmed
+                .strip_prefix("0x")
+                .or_else(|| trimmed.strip_prefix("0X"))
+                .ok_or_else(|| {
+                    <D::Error as de::Error>::custom(format!(
+                        "invalid `eif-pcie-flags` value {s:?}: string form requires a `0x` prefix \
+                         (e.g. \"0x340\") to make the base explicit; use a bare integer literal \
+                         (e.g. `832`) for decimal"
+                    ))
+                })?;
+            u16::from_str_radix(hex_body, 16).map(Some).map_err(|e| {
+                <D::Error as de::Error>::custom(format!("invalid hex u16 {s:?}: {e}"))
+            })
+        }
+    }
+}
+
 /// Metadata for a `build-variant`.
 ///
 /// `guest-images` is a map from a guest variant's crate name to an absolute install path in
@@ -964,6 +1043,37 @@ pub struct BuildVariant {
     pub supported_arches: Option<HashSet<SupportedArch>>,
     pub kernel_parameters: Option<Vec<String>>,
     pub image_features: Option<HashMap<ImageFeature, bool>>,
+    /// EIF header PCIE flags override for `image-format = "eif"` variants.
+    ///
+    /// Encoded in the variant Cargo.toml as either a TOML integer literal
+    /// (decimal, e.g. `832`) or a `0x`-prefixed hex string (e.g. `"0x340"`).
+    /// Unprefixed string forms like `"340"` are rejected: the `eif-builder
+    /// --pcie-flags` CLI treats `340` as hex, so silently reading the
+    /// unprefixed string as decimal here would produce a header/launch-flags
+    /// mismatch that only surfaces at enclave launch. Forwarded to
+    /// `eif-builder --pcie-flags <hex>` at rpm2eif / eif2eif time. When
+    /// absent, `eif-builder` uses its built-in `DEFAULT_PCIE_FLAGS`
+    /// (`EIF_HDR_FLAG_PCIE | EIF_HDR_FLAG_PCIE_VIRTIO`, `0x240`). Non-EIF
+    /// variants ignore this field.
+    ///
+    /// Contract: the flags written into the EIF header here **must** match the
+    /// PCIE flags the sidecar shim passes to the hypervisor at launch. The
+    /// hypervisor enforces `header == launch-flags`; a mismatch fails
+    /// attestation / launch. Today the shim's launch flags are hard-coded on
+    /// the shim side, so this knob is what lets a variant author the value
+    /// that keeps the two sides in sync. Once the shim derives its launch
+    /// flags from the header directly (host echoes, hypervisor enforces), the
+    /// coupling goes away — but the knob is still how the header value gets
+    /// authored per-variant.
+    ///
+    /// Example:
+    /// ```ignore
+    /// [package.metadata.build-variant]
+    /// image-format = "eif"
+    /// eif-pcie-flags = 0x340
+    /// ```
+    #[serde(default, deserialize_with = "deserialize_u16_hex_or_int")]
+    pub eif_pcie_flags: Option<u16>,
     /// Map of guest variant crate name -> absolute install path in this variant's root
     /// filesystem.
     pub guest_images: Option<BTreeMap<String, PathBuf>>,
@@ -1775,6 +1885,110 @@ name = "test-variant"
         assert!(features.contains(&ImageFeature::InPlaceUpdates));
         assert!(features.contains(&ImageFeature::HostContainers));
         assert!(features.contains(&ImageFeature::ExternalKmodDevelopment));
+    }
+
+    #[test]
+    fn eif_pcie_flags_omitted_is_none() {
+        // A variant without `eif-pcie-flags` returns None, so buildsys emits
+        // the empty ARG and rpm2eif/eif2eif omit `--pcie-flags`, letting
+        // `eif-builder` apply its `DEFAULT_PCIE_FLAGS`.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), None);
+    }
+
+    #[test]
+    fn eif_pcie_flags_hex_string_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "0x340"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), Some(0x340));
+    }
+
+    #[test]
+    fn eif_pcie_flags_unprefixed_string_is_rejected() {
+        // `"340"` is ambiguous (hex-in-the-CLI-sense vs decimal-in-Rust-sense)
+        // and almost certainly a copy-paste mistake, so we reject it at
+        // parse time with a clear message. The author must write `"0x340"`
+        // for hex or the bare integer `832` for decimal.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "340"
+"#;
+        let err = toml::from_str::<ManifestInfo>(toml)
+            .expect_err("unprefixed hex string should be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("0x"),
+            "error should mention the `0x` prefix requirement, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn eif_pcie_flags_uppercase_prefix_parses() {
+        // `0X` prefix is accepted alongside `0x`, matching eif-builder's own
+        // `--pcie-flags` parser.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "0X340"
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), Some(0x340));
+    }
+
+    #[test]
+    fn eif_pcie_flags_integer_parses() {
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = 576
+"#;
+        let info = manifest_info_from_toml(toml);
+        assert_eq!(info.eif_pcie_flags(), Some(576));
+    }
+
+    #[test]
+    fn eif_pcie_flags_rejects_overflow() {
+        // 0x10000 does not fit in u16; the deserializer surfaces a clear error
+        // rather than silently truncating.
+        let toml = r#"
+[package]
+name = "test-variant"
+
+[package.metadata.build-variant]
+image-format = "eif"
+eif-pcie-flags = "0x10000"
+"#;
+        let err = toml::from_str::<ManifestInfo>(toml)
+            .expect_err("0x10000 should not fit in u16");
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("u16"),
+            "expected u16 mention in error, got: {msg}"
+        );
     }
 
     #[test]
