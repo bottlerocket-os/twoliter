@@ -54,14 +54,21 @@ license-files = [
     { path = "LICENSE", hash = 0x001c7e6c },
 ]
 
+[[licenses.clarify]]
+name = "half:1.8.3"
+expression = "MIT OR Apache-2.0"
+license-files = [
+    { path = "LICENSES/Apache-2.0.txt", hash = 0xc80f59e5 },
+    { path = "LICENSES/MIT.txt", hash = 0xb367c6ad },
+]
+
 [bans]
 # Deny multiple versions or wildcard dependencies.
 multiple-versions = "deny"
 wildcards = "deny"
 
 skip = [
-    # several dependencies are using multiple versions of base64
-    { name = "base64" },
+    { name = "half" },
     # governor and guppy collide bringing two versions of hashbrown and foldhash
     { name = "hashbrown" },
     { name = "foldhash" },

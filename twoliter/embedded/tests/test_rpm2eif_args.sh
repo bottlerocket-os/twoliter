@@ -149,6 +149,24 @@ assert_rejects_with "os-image-size-gib=1.5 rejected" "not a non-negative integer
   "${BASE[@]}" --os-image-size-gib=1.5
 
 echo
+echo "Test 11c: accept --eif-kernel-format=bzimage (default, sidecar loader)"
+assert_passes_validation "eif-kernel-format=bzimage accepted" \
+  "${BASE[@]}" --eif-kernel-format=bzimage
+
+echo
+echo "Test 11d: accept --eif-kernel-format=vmlinux (bare-metal PVH loader)"
+assert_passes_validation "eif-kernel-format=vmlinux accepted" \
+  "${BASE[@]}" --eif-kernel-format=vmlinux
+
+echo
+echo "Test 11e: reject unknown --eif-kernel-format value"
+# A typo like `elf` must fail early: the enclave loader boots via bzImage,
+# so silently falling through to a default would defeat the point of the
+# selector.
+assert_rejects_with "eif-kernel-format=elf rejected" "eif-kernel-format" \
+  "${BASE[@]}" --eif-kernel-format=elf
+
+echo
 echo "Test 12: reject unknown argument"
 assert_rejects_with "unknown arg rejected" "Unknown argument" \
   "${BASE[@]}" --this-flag-does-not-exist=1
