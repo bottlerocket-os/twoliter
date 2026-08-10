@@ -133,7 +133,7 @@ pub(crate) async fn run(args: &Args, check_expirations_args: &CheckExpirationsAr
         })?
         .get(&check_expirations_args.repo)
         .with_context(|| repo_error::MissingConfigSnafu {
-            missing: format!("definition for repo {}", &check_expirations_args.repo),
+            missing: format!("definition for repo {}", check_expirations_args.repo),
         })?;
 
     let repo_urls = repo_urls(

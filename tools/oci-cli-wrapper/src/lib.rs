@@ -91,6 +91,7 @@ impl ImageTool {
     }
 }
 
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ImageToolImpl: std::fmt::Debug + Send + Sync + 'static {
     /// Pull an image archive to disk

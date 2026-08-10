@@ -143,7 +143,7 @@ pub(crate) async fn run(args: &Args, refresh_repo_args: &RefreshRepoArgs) -> Res
         })?
         .get(&refresh_repo_args.repo)
         .context(repo_error::MissingConfigSnafu {
-            missing: format!("definition for repo {}", &refresh_repo_args.repo),
+            missing: format!("definition for repo {}", refresh_repo_args.repo),
         })?;
 
     // Check if we have a signing key defined in Infra.toml; if not, we'll fall back to the

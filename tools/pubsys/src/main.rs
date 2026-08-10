@@ -185,13 +185,14 @@ type BytesResult = StdResult<Bytes, ToughError>;
 
 pub(crate) async fn read_stream(
     stream: impl Stream<Item = BytesResult> + Send,
-) -> StdResult<Vec<u8>, ToughError> {
+) -> StdResult<Vec<u8>, Box<ToughError>> {
     stream
         .try_fold(Vec::new(), |mut acc, bytes| {
             acc.extend(bytes.as_ref());
             std::future::ready(Ok(acc))
         })
         .await
+        .map_err(Box::new)
 }
 
 mod error {

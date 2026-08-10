@@ -653,7 +653,6 @@ mod error {
         GrantImageAccess {
             thing: String,
             region: String,
-            #[snafu(source(from(AwsSdkError<ModifyImageAttributeError>, Box::new)))]
             source: Box<AwsSdkError<ModifyImageAttributeError>>,
         },
 

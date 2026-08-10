@@ -193,7 +193,8 @@ pub(crate) mod error {
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: AwsSdkError<DescribeImagesError>,
+            #[snafu(source(from(AwsSdkError<DescribeImagesError>, Box::new)))]
+            source: Box<AwsSdkError<DescribeImagesError>>,
         },
 
         #[snafu(display(
@@ -205,7 +206,8 @@ pub(crate) mod error {
         GetLaunchPermissions {
             region: String,
             image_id: String,
-            source: crate::aws::ami::launch_permissions::Error,
+            #[snafu(source(from(crate::aws::ami::launch_permissions::Error, Box::new)))]
+            source: Box<crate::aws::ami::launch_permissions::Error>,
         },
 
         #[snafu(display("Missing field in image: {}", missing))]

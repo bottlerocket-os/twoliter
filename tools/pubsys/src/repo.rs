@@ -810,10 +810,7 @@ mod error {
         },
 
         #[snafu(display("Error reading bytes from stream: {}", source))]
-        Stream {
-            #[snafu(source(from(tough::error::Error, Box::new)))]
-            source: Box<tough::error::Error>,
-        },
+        Stream { source: Box<tough::error::Error> },
 
         #[snafu(display("Failed to create temporary file: {}", source))]
         TempFile { source: io::Error },

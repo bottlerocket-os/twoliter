@@ -236,7 +236,7 @@ fn run_docker_tool(
         .context(error::CommandStartSnafu)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("{}", &stdout);
+    println!("{}", stdout);
     ensure!(
         output.status.success(),
         error::DockerExecutionSnafu {

@@ -33,4 +33,3 @@ reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent erro
 [[disallowed-types]]
 path = "aws_sdk_sts::error::SdkError"
 reason = "Use error_utils::AwsSdkError wrapper instead to ensure consistent error formatting"
-

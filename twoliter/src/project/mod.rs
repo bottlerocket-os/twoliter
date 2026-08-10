@@ -103,6 +103,7 @@ impl Project<Unlocked> {
 
     /// Recursively search for a file named `Twoliter.toml` starting in `dir`. If it is not found,
     /// move up (i.e. `cd ..`) until it is found. Return an error if there is no parent directory.
+    #[allow(clippy::double_must_use)]
     #[async_recursion]
     pub(crate) async fn find_and_load<P>(dir: P) -> Result<Self>
     where
@@ -220,7 +221,7 @@ impl<L: ProjectLock> Project<L> {
     ) -> Result<ProjectImage> {
         let vendor = self
             .vendor_for(image)
-            .with_context(|| format!("Could not find defined vendor for image '{:?}'", &image))?;
+            .with_context(|| format!("Could not find defined vendor for image '{:?}'", image))?;
 
         Ok(ProjectImage {
             image: Image::from_vended_artifact(image),
@@ -611,6 +612,7 @@ impl UnvalidatedProject {
 }
 
 /// Marker trait that dictates what artifacts have been validated in the lock.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub(crate) trait ProjectLock: Sized + Debug + Send + Sync + 'static {
     /// Loads the project lock for the given project.

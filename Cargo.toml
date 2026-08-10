@@ -217,4 +217,4 @@ lto = "fat"
 codegen-units = 1
 
 [workspace.lints.clippy]
-disallowed-methods = "deny"
+disallowed_methods = "deny"

@@ -309,7 +309,8 @@ mod error {
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: AwsSdkError<DescribeImagesError>,
+            #[snafu(source(from(AwsSdkError<DescribeImagesError>, Box::new)))]
+            source: Box<AwsSdkError<DescribeImagesError>>,
         },
 
         #[snafu(display("Image response in {} did not include image ID", region))]
@@ -321,7 +322,8 @@ mod error {
         #[snafu(display("Failed to register image in {}: {}", region, source))]
         RegisterImage {
             region: String,
-            source: AwsSdkError<RegisterImageError>,
+            #[snafu(source(from(AwsSdkError<RegisterImageError>, Box::new)))]
+            source: Box<AwsSdkError<RegisterImageError>>,
         },
 
         #[snafu(display("Failed to create progress bar: {}", source))]

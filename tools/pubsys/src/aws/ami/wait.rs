@@ -112,7 +112,8 @@ mod error {
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: AwsSdkError<DescribeImagesError>,
+            #[snafu(source(from(AwsSdkError<DescribeImagesError>, Box::new)))]
+            source: Box<AwsSdkError<DescribeImagesError>>,
         },
 
         #[snafu(display(

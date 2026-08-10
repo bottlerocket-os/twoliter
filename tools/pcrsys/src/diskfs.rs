@@ -63,7 +63,7 @@ fn extract_efi_file<R: Read + Seek>(
         }
     }
 
-    whatever!("none of {:?} found in /EFI/BOOT/", names)
+    whatever!("none of {:?} found in /EFI/BOOT/", names);
 }
 
 /// Extract vmlinuz from BOOT-A partition using ext4-view.
