@@ -77,7 +77,7 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
         write_bin("pubsys", twoliter_tool_pubsys::PUBSYS.reader(), &dir, mtime),
     ];
 
-    try_join_all(write_tasks.into_iter()).await?;
+    try_join_all(write_tasks).await?;
 
     // Apply the mtime to the directory now that the writes are done.
     set_file_mtime(dir, mtime).context(format!("Unable to set mtime for '{}'", dir.display()))?;

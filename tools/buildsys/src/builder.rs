@@ -849,7 +849,7 @@ fn docker(args: &[String], retry: Retry) -> Result<Output> {
             .context(error::CommandStartSnafu)?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        println!("{}", &stdout);
+        println!("{}", stdout);
         if output.status.success() {
             return Ok(output);
         }

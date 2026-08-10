@@ -361,7 +361,7 @@ impl Manifest {
         let ids = [&id];
         let query = self
             .graph
-            .query_forward(ids.into_iter())
+            .query_forward(ids)
             .context(error::CargoPackageQuerySnafuSnafu { id })?;
         let package_set = query.resolve_with_fn(|_, link| {
             let to = link.to();
@@ -386,7 +386,7 @@ impl Manifest {
         let ids = [&id];
         let query = self
             .graph
-            .query_forward(ids.into_iter())
+            .query_forward(ids)
             .context(error::CargoPackageQuerySnafuSnafu { id })?;
         let package_set = query.resolve();
         let mut kits: Vec<String> = package_set
@@ -447,7 +447,7 @@ impl Manifest {
         let ids = [&id];
         let query = self
             .graph
-            .query_forward(ids.into_iter())
+            .query_forward(ids)
             .context(error::CargoPackageQuerySnafuSnafu { id: id.clone() })?;
         let package_set = query.resolve_with_fn(|_, link| is_valid_dep(host_name, &link));
         let reachable_variants: HashSet<String> = package_set

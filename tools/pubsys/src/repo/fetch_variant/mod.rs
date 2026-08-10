@@ -186,7 +186,7 @@ pub(crate) async fn run(args: &Args, fetch_variant_args: &FetchVariantArgs) -> R
         })?
         .get(&fetch_variant_args.repo)
         .context(repo_error::MissingConfigSnafu {
-            missing: format!("definition for repo {}", &fetch_variant_args.repo),
+            missing: format!("definition for repo {}", fetch_variant_args.repo),
         })?;
 
     let repo_urls = repo_urls(
@@ -200,7 +200,7 @@ pub(crate) async fn run(args: &Args, fetch_variant_args: &FetchVariantArgs) -> R
 
     let version_full = format!(
         "{}-{}",
-        &fetch_variant_args.version, &fetch_variant_args.build
+        fetch_variant_args.version, fetch_variant_args.build
     );
     let mut versioned_outdir = fetch_variant_args.outdir.clone();
     versioned_outdir.push(version_full);
@@ -249,7 +249,8 @@ mod error {
 
         #[snafu(display("Invalid target name: {}", source))]
         InvalidTargetName {
-            source: tough::error::Error,
+            #[snafu(source(from(tough::error::Error, Box::new)))]
+            source: Box<tough::error::Error>,
         },
 
         #[snafu(display("Invalid output directory '{}'", path.display()))]
@@ -282,7 +283,8 @@ mod error {
 
         #[snafu(display("Failed to save target: {}", source))]
         SaveTarget {
-            source: tough::error::Error,
+            #[snafu(source(from(tough::error::Error, Box::new)))]
+            source: Box<tough::error::Error>,
         },
     }
 }

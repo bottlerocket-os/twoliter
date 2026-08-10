@@ -111,7 +111,7 @@ fn get_section_data<'a>(pe_data: &'a [u8], name: &str) -> Result<&'a [u8]> {
         }
     }
 
-    whatever!("section '{name}' not found")
+    whatever!("section '{name}' not found");
 }
 
 #[cfg(test)]

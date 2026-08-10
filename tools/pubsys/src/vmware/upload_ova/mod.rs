@@ -104,17 +104,17 @@ pub(crate) async fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
 
     info!(
         "Uploading to datacenters: {}",
-        &upload_datacenters.join(", ")
+        upload_datacenters.join(", ")
     );
     for dc in upload_datacenters {
-        debug!("Building config for {}", &dc);
+        debug!("Building config for {}", dc);
         // If any specific configuration exists for this datacenter, retrieve it from VMware
         // config.  Then build out a complete datacenter config with all values necessary to
         // interact with VMware.  Environment variables trump all others, so start with those, then
         // fill in any missing items with datacenter-specific configuration and any common
         // configuration.
         let dc_config = vmware.datacenter.get(dc);
-        trace!("{} config: {:?}", &dc, &dc_config);
+        trace!("{} config: {:?}", dc, dc_config);
         let datacenter: Datacenter = dc_env
             .take_missing_from(dc_config)
             .take_missing_from(dc_common)
@@ -138,17 +138,17 @@ pub(crate) async fn run(args: &Args, upload_args: &UploadArgs) -> Result<()> {
                 action: "write",
                 path: import_spec.path(),
             })?;
-        trace!("Import spec: {}", &rendered_spec);
+        trace!("Import spec: {}", rendered_spec);
 
         if upload_args.mark_as_template {
             info!(
                 "Uploading OVA to datacenter '{}' as template with name: '{}'",
-                &dc, &upload_args.name
+                dc, upload_args.name
             );
         } else {
             info!(
                 "Uploading OVA to datacenter '{}' with name '{}'",
-                &dc, &upload_args.name
+                dc, upload_args.name
             );
         }
 

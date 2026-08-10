@@ -322,7 +322,10 @@ mod error {
         EmptySource { version: String },
 
         #[snafu(display("Failed to fetch parameters from SSM: {}", source))]
-        FetchSsm { source: ssm::Error },
+        FetchSsm {
+            #[snafu(source(from(ssm::Error, Box::new)))]
+            source: Box<ssm::Error>,
+        },
 
         #[snafu(display("Failed to find templates: {}", source))]
         FindTemplates { source: template::Error },
@@ -334,10 +337,16 @@ mod error {
         RenderTemplates { source: template::Error },
 
         #[snafu(display("Failed to set SSM parameters: {}", source))]
-        SetSsm { source: ssm::Error },
+        SetSsm {
+            #[snafu(source(from(ssm::Error, Box::new)))]
+            source: Box<ssm::Error>,
+        },
 
         #[snafu(display("Failed to validate SSM parameters: {}", source))]
-        ValidateSsm { source: ssm::Error },
+        ValidateSsm {
+            #[snafu(source(from(ssm::Error, Box::new)))]
+            source: Box<ssm::Error>,
+        },
 
         #[snafu(display(
             "Failed to parse existing SSM parameters at path {:?}: {}",
@@ -345,14 +354,16 @@ mod error {
             source,
         ))]
         ParseExistingSsmParameters {
-            source: validate_ssm::error::Error,
+            #[snafu(source(from(validate_ssm::error::Error, Box::new)))]
+            source: Box<validate_ssm::error::Error>,
             path: PathBuf,
         },
 
         #[snafu(display("Failed to write rendered SSM parameters to {}: {}", path.display(), source))]
         WriteRenderedSsmParameters {
             path: PathBuf,
-            source: crate::aws::ssm::Error,
+            #[snafu(source(from(crate::aws::ssm::Error, Box::new)))]
+            source: Box<crate::aws::ssm::Error>,
         },
     }
 }

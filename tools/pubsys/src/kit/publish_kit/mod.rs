@@ -77,7 +77,7 @@ async fn publish_kit(
         let docker_arch =
             DockerArchitecture::try_from(arch).context(error::InvalidArchitectureSnafu { arch })?;
 
-        let kit_filename = format!("{}-{}-{}-{}.tar", &kit_name, &kit_version, &build_id, arch);
+        let kit_filename = format!("{}-{}-{}-{}.tar", kit_name, kit_version, build_id, arch);
         let path = kit_path.join(&kit_filename);
 
         if !path.exists() {
@@ -87,12 +87,12 @@ async fn publish_kit(
 
         let arch_specific_target_uri = format!(
             "{}/{}:{}-{}-{}",
-            vendor_registry_uri, repository_target, &kit_version, &build_id, arch
+            vendor_registry_uri, repository_target, kit_version, build_id, arch
         );
 
         info!(
             "Pushing kit image for platform {} to {}",
-            arch, &arch_specific_target_uri
+            arch, arch_specific_target_uri
         );
 
         image_tool
@@ -109,7 +109,7 @@ async fn publish_kit(
 
     let target_uri = format!("{vendor_registry_uri}/{repository_target}:{kit_version}");
 
-    info!("Pushing kit to {}", &target_uri);
+    info!("Pushing kit to {}", target_uri);
 
     image_tool
         .push_multi_platform_manifest(platform_images, &target_uri)

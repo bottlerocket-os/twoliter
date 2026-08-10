@@ -139,7 +139,7 @@ pub(crate) async fn run(args: &Args, validate_repo_args: &ValidateRepoArgs) -> R
         })?
         .get(&validate_repo_args.repo)
         .context(repo_error::MissingConfigSnafu {
-            missing: format!("definition for repo {}", &validate_repo_args.repo),
+            missing: format!("definition for repo {}", validate_repo_args.repo),
         })?;
 
     let repo_urls = repo_urls(
@@ -173,7 +173,7 @@ mod error {
         },
 
         #[snafu(display("Error reading bytes from stream: {}", source))]
-        Stream { source: tough::error::Error },
+        Stream { source: Box<tough::error::Error> },
 
         #[snafu(display("Failed to download and write target '{}': {}", target, source))]
         TargetDownload { target: String, source: io::Error },

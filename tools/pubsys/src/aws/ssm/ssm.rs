@@ -507,7 +507,8 @@ pub(crate) mod error {
         #[snafu(display("Failed to fetch SSM parameters in {}: {}", region, source))]
         GetParameters {
             region: String,
-            source: AwsSdkError<GetParametersError>,
+            #[snafu(source(from(AwsSdkError<GetParametersError>, Box::new)))]
+            source: Box<AwsSdkError<GetParametersError>>,
         },
 
         #[snafu(display(
@@ -519,7 +520,8 @@ pub(crate) mod error {
         GetParametersByPath {
             path: String,
             region: String,
-            source: AwsSdkError<GetParametersByPathError>,
+            #[snafu(source(from(AwsSdkError<GetParametersByPathError>, Box::new)))]
+            source: Box<AwsSdkError<GetParametersByPathError>>,
         },
 
         #[snafu(display("Missing field in parameter in {}: {}", region, field))]

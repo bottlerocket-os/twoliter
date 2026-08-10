@@ -462,7 +462,7 @@ pub(crate) async fn modify_image(
     operation: &OperationType,
     image_id: &str,
     ec2_client: &Ec2Client,
-) -> std::result::Result<ModifyImageAttributeOutput, AwsSdkError<ModifyImageAttributeError>> {
+) -> std::result::Result<ModifyImageAttributeOutput, Box<AwsSdkError<ModifyImageAttributeError>>> {
     ec2_client
         .modify_image_attribute()
         .set_attribute(Some(
@@ -484,6 +484,7 @@ pub(crate) async fn modify_image(
         .set_image_id(Some(image_id.to_string()))
         .send()
         .map_err(AwsSdkError::from)
+        .map_err(Box::new)
         .await
 }
 
@@ -512,7 +513,10 @@ pub(crate) async fn modify_regional_images(
     #[allow(clippy::type_complexity)]
     let responses: Vec<(
         (String, String),
-        std::result::Result<ModifyImageAttributeOutput, AwsSdkError<ModifyImageAttributeError>>,
+        std::result::Result<
+            ModifyImageAttributeOutput,
+            Box<AwsSdkError<ModifyImageAttributeError>>,
+        >,
     )> = request_stream.collect().await;
 
     // Count up successes and failures so we can give a clear total in the final error message.
@@ -600,13 +604,15 @@ mod error {
         DescribeImageAttribute {
             image_id: String,
             region: String,
-            source: crate::aws::ami::launch_permissions::Error,
+            #[snafu(source(from(crate::aws::ami::launch_permissions::Error, Box::new)))]
+            source: Box<crate::aws::ami::launch_permissions::Error>,
         },
 
         #[snafu(display("Failed to describe images in {}: {}", region, source))]
         DescribeImages {
             region: String,
-            source: AwsSdkError<DescribeImagesError>,
+            #[snafu(source(from(AwsSdkError<DescribeImagesError>, Box::new)))]
+            source: Box<AwsSdkError<DescribeImagesError>>,
         },
 
         #[snafu(display("Failed to deserialize input from '{}': {}", path.display(), source))]
@@ -649,7 +655,8 @@ mod error {
         ModifyImageAttribute {
             snapshot_id: String,
             region: String,
-            source: AwsSdkError<ModifySnapshotAttributeError>,
+            #[snafu(source(from(AwsSdkError<ModifySnapshotAttributeError>, Box::new)))]
+            source: Box<AwsSdkError<ModifySnapshotAttributeError>>,
         },
 
         #[snafu(display(
@@ -689,7 +696,8 @@ mod error {
         WaitAmi {
             id: String,
             region: String,
-            source: ami::wait::Error,
+            #[snafu(source(from(ami::wait::Error, Box::new)))]
+            source: Box<ami::wait::Error>,
         },
     }
 

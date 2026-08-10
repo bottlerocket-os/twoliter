@@ -32,7 +32,7 @@ impl CommandLine {
             error::OperationFailedSnafu {
                 message: format!(
                     "[{debug_cmd}]: status: {} stderr: {} stdout: {}",
-                    &output.status,
+                    output.status,
                     String::from_utf8_lossy(&output.stderr),
                     String::from_utf8_lossy(&output.stdout)
                 ),
