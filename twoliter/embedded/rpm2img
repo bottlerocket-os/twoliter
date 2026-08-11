@@ -691,6 +691,12 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
     sign_systemd_boot "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
   fi
+
+  # The kernel is now embedded in the UKI's .linux PE section, so the
+  # standalone kernel image is no longer needed and must not be shipped.
+  # The .vmlinuz.hmac file is left in place, as it is still copied into
+  # the boot partition below.
+  rm -f "${BOOT_MOUNT}/vmlinuz"
 fi
 
 # write GRUB config (skip for UKI mode which uses systemd-boot)
@@ -783,8 +789,6 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
   mmd -i "${BOOT_IMAGE}" ::/EFI
   mmd -i "${BOOT_IMAGE}" ::/EFI/Linux
   mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" ::/EFI/Linux/
-  # Also copy vmlinuz for potential recovery/debugging
-  mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" ::/
   # Copy HMAC file if present
   if [[ -f "${BOOT_MOUNT}/.vmlinuz.hmac" ]]; then
     mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" ::/
