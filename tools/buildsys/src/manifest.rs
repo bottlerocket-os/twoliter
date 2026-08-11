@@ -115,8 +115,8 @@ included-packages = ["release"]
 ```
 
 `image-format` is the desired format for the built images.
-This can be `raw` (the default), `vmdk`, `qcow2`, or `eif`
-(AWS Nitro Enclaves Image Format).
+This can be `raw` (the default), `vmdk`, `qcow2`, `eif`
+(AWS Nitro Enclaves Image Format), or `uki` (Unified Kernel Image).
 
 When `image-format = "eif"`, the image pipeline switches to `rpm2eif`,
 which produces a dm-verity-protected, single-bank sidecar EIF plus a
@@ -975,12 +975,35 @@ pub struct BuildVariant {
     pub flavor: Option<String>,
 }
 
+/// The image format for a variant, i.e. `image-format` in the manifest.
+///
+/// This is deliberately *not* an [`ImageFeature`]: the format is a single
+/// exclusive choice, not a set of independently toggled features. That
+/// separation is preserved at runtime, where the built image carries
+/// `/usr/share/bottlerocket/image-format.env` alongside (and separate from)
+/// `/usr/share/bottlerocket/image-features.env`. Like `image-features.env`,
+/// `image-format.env` is written unconditionally for every image format, so a
+/// consumer never has to treat file absence as meaningful:
+///
+/// | Key            | Values                                | Notes                                    |
+/// |----------------|---------------------------------------|------------------------------------------|
+/// | `IMAGE_FORMAT` | `raw`, `qcow2`, `vmdk`, `eif`, `uki`  | The lowercase manifest value.            |
+/// | `UKI_IMAGE`    | `true` / `false`                      | Convenience boolean for `IMAGE_FORMAT=uki`. |
+///
+/// Mind the value convention, which matches `image-features.env`: the build
+/// scripts pass the format around as a `yes`/`no` shell variable (e.g.
+/// `--with-uki-image=yes`, `UKI_IMAGE="yes"` in `twoliter/embedded/rpm2img`),
+/// but the runtime file uses `true`/`false` so it is parseable by
+/// configuration loaders. The `yes`/`no` spelling must not leak into the
+/// runtime file. See `twoliter/embedded/rpm2img` and
+/// `twoliter/embedded/rpm2eif` for the writers.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
     Eif,
     Qcow2,
     Raw,
+    Uki,
     Vmdk,
 }
 
@@ -1206,21 +1229,60 @@ pub fn validate_image_features(
     layout: &ImageLayout,
     image_format: Option<&ImageFormat>,
 ) -> Result<()> {
-    // `ephemeral-encryption-keys` only makes sense on top of encrypted storage.
-    if features.contains(&ImageFeature::EphemeralEncryptionKeys)
-        && !features.contains(&ImageFeature::EncryptedStorage)
-    {
-        return error::IncompatibleImageFeaturesSnafu {
-            context: "`ephemeral-encryption-keys = true`",
-            reason: "ephemeral encryption keys require `encrypted-storage = true`".to_string(),
+    let is_eif = matches!(image_format, Some(ImageFormat::Eif));
+    let is_uki = matches!(image_format, Some(ImageFormat::Uki));
+
+    // Conflicts that apply regardless of `standalone-image`/EIF/UKI status.
+    // Accumulated into `conflict_messages` (rather than returned
+    // immediately) so that every conflict is reported together in a single
+    // error, matching the "report all conflicts once" contract used by the
+    // `standalone-image`/EIF checks below.
+    let mut conflict_messages: Vec<String> = Vec::new();
+
+    // `ephemeral-encryption-keys` only makes sense on top of encrypted
+    // storage, and (since bootconfig.data can only be safely placed on the
+    // UKI's BOOT partition, not on a GRUB-readable PRIVATE partition) is
+    // only supported on `image-format = "uki"`.
+    if features.contains(&ImageFeature::EphemeralEncryptionKeys) {
+        if !features.contains(&ImageFeature::EncryptedStorage) {
+            conflict_messages.push(
+                "`ephemeral-encryption-keys`: ephemeral encryption keys require \
+                 `encrypted-storage = true`"
+                    .to_string(),
+            );
         }
-        .fail()?;
+        if !is_uki {
+            conflict_messages.push(
+                "`ephemeral-encryption-keys`: ephemeral encryption keys are only \
+                 supported with `image-format = \"uki\"`; GRUB cannot read \
+                 bootconfig.data from the LUKS-encrypted PRIVATE partition"
+                    .to_string(),
+            );
+        }
     }
 
-    let is_eif = matches!(image_format, Some(ImageFormat::Eif));
-    // Without `standalone-image` enabled *and* a non-EIF format, every
-    // combination is legal (full Bottlerocket image).
+    // UKI images have no B partition set, so in-place updates are impossible.
+    if is_uki && features.contains(&ImageFeature::InPlaceUpdates) {
+        conflict_messages.push(
+            "`in-place-updates`: in-place updates require two banks of OS \
+             partitions (A/B); a UKI image has no B partition set"
+                .to_string(),
+        );
+    }
+
+    // Without `standalone-image` enabled *and* a non-EIF format, the
+    // remaining checks below (which are all scoped to `standalone-image`/EIF)
+    // don't apply; report whatever was collected above, if anything.
     if !features.contains(&ImageFeature::StandaloneImage) && !is_eif {
+        if !conflict_messages.is_empty() {
+            let context = if is_uki {
+                "`image-format = \"uki\"`"
+            } else {
+                "the requested image features"
+            };
+            let reason = format!("\n  - {}", conflict_messages.join("\n  - "));
+            return error::IncompatibleImageFeaturesSnafu { context, reason }.fail()?;
+        }
         return Ok(());
     }
 
@@ -1304,11 +1366,12 @@ pub fn validate_image_features(
     // complete list in a single build cycle, rather than playing whack-a-mole.
     // Use the kebab-case manifest key in messages to match the TOML the user
     // wrote and the error messages produced by the shell-side validators.
-    let mut conflict_messages: Vec<String> = conflicts
-        .iter()
-        .filter(|(feature, _, _)| features.contains(feature))
-        .map(|(_, name, reason)| format!("`{name}`: {reason}"))
-        .collect();
+    conflict_messages.extend(
+        conflicts
+            .iter()
+            .filter(|(feature, _, _)| features.contains(feature))
+            .map(|(_, name, reason)| format!("`{name}`: {reason}")),
+    );
 
     // EIF requires standalone-image to be present in the feature set.
     if is_eif && !features.contains(&ImageFeature::StandaloneImage) {
@@ -1384,6 +1447,9 @@ impl TryFrom<String> for ImageFeature {
 /// value directly to `--with-standalone-image=`. See
 /// `tools/buildsys/src/builder.rs`, `twoliter/embedded/build.Dockerfile`,
 /// and `twoliter/embedded/rpm2img` for the conversions between layers.
+///
+/// The image *format* is not a feature and is not recorded here; it is written
+/// to a separate runtime file, `image-format.env`. See [`ImageFormat`].
 impl fmt::Display for ImageFeature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1810,16 +1876,6 @@ name = "test-variant"
     }
 
     #[test]
-    fn ephemeral_encryption_keys_requires_encrypted_storage() {
-        let layout = ImageLayout::default();
-        let features = HashSet::from([
-            ImageFeature::EphemeralEncryptionKeys,
-            ImageFeature::EncryptedStorage,
-        ]);
-        assert!(validate_image_features(&features, &layout, None).is_ok());
-    }
-
-    #[test]
     fn image_features_omitted_uses_default_image() {
         // A variant that omits the `[image-features]` section entirely
         // produces the standard Bottlerocket image: `standalone-image` is NOT
@@ -2104,6 +2160,98 @@ image-format = "eif"
         assert!(matches!(resolved.partition_plan, PartitionPlan::Unified));
     }
 
+    // ---------------------------------------------------------------------
+    // `image-format = "uki"` validation tests.
+    //
+    // UKI images have no B partition set, so in-place updates are
+    // incompatible. Other feature combinations remain legal.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn uki_format_rejects_in_place_updates() {
+        // `in-place-updates` requires two banks of OS partitions (A/B); a
+        // UKI image has no B partition set.
+        let layout = ImageLayout::default();
+        let features = HashSet::from([ImageFeature::InPlaceUpdates]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Uki))
+            .expect_err("UKI + in-place-updates must fail validation");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("image-format = \"uki\""),
+            "wrong prefix: {msg}"
+        );
+        assert!(
+            msg.contains("in-place-updates"),
+            "missing feature name: {msg}"
+        );
+    }
+
+    #[test]
+    fn uki_format_without_in_place_updates_passes() {
+        // A UKI variant without in-place-updates should validate fine.
+        let layout = ImageLayout::default();
+        let features = HashSet::from([ImageFeature::UefiSecureBoot]);
+        validate_image_features(&features, &layout, Some(&ImageFormat::Uki))
+            .expect("UKI without in-place-updates should validate");
+    }
+
+    #[test]
+    fn raw_format_with_in_place_updates_passes() {
+        // `image-format = "raw"` (the default) must still allow in-place
+        // updates — only UKI restricts them.
+        let layout = ImageLayout::default();
+        let features = HashSet::from([ImageFeature::InPlaceUpdates]);
+        validate_image_features(&features, &layout, Some(&ImageFormat::Raw))
+            .expect("raw + in-place-updates should validate");
+    }
+
+    #[test]
+    fn ephemeral_encryption_keys_requires_uki_format() {
+        // Ephemeral encryption keys are only supported on UKI images: GRUB
+        // cannot read `bootconfig.data` from the LUKS-encrypted PRIVATE
+        // partition.
+        let layout = ImageLayout::default();
+        let features = HashSet::from([
+            ImageFeature::EphemeralEncryptionKeys,
+            ImageFeature::EncryptedStorage,
+        ]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Raw))
+            .expect_err("ephemeral-encryption-keys without image-format=uki must fail");
+        let msg = format!("{err}");
+        assert!(msg.contains("ephemeral-encryption-keys"), "message: {msg}");
+        assert!(msg.contains("uki"), "message: {msg}");
+    }
+
+    #[test]
+    fn ephemeral_encryption_keys_with_uki_and_encrypted_storage_passes() {
+        let layout = ImageLayout::default();
+        let features = HashSet::from([
+            ImageFeature::EphemeralEncryptionKeys,
+            ImageFeature::EncryptedStorage,
+        ]);
+        validate_image_features(&features, &layout, Some(&ImageFormat::Uki))
+            .expect("UKI + ephemeral-encryption-keys + encrypted-storage should validate");
+    }
+
+    #[test]
+    fn uki_and_ephemeral_encryption_keys_and_in_place_updates_reports_all_conflicts() {
+        // A UKI variant with both `in-place-updates` and
+        // `ephemeral-encryption-keys` (missing `encrypted-storage`) must
+        // report every conflict in a single error, not just the first one
+        // encountered.
+        let layout = ImageLayout::default();
+        let features = HashSet::from([
+            ImageFeature::InPlaceUpdates,
+            ImageFeature::EphemeralEncryptionKeys,
+        ]);
+        let err = validate_image_features(&features, &layout, Some(&ImageFormat::Uki))
+            .expect_err("UKI + in-place-updates + ephemeral-encryption-keys must fail");
+        let msg = format!("{err}");
+        assert!(msg.contains("in-place-updates"), "message: {msg}");
+        assert!(msg.contains("ephemeral-encryption-keys"), "message: {msg}");
+        assert!(msg.contains("encrypted-storage"), "message: {msg}");
+    }
+
     /// `build_type()` returns `BuildType::Variant` and `guest_images()` round-trips when the
     /// manifest carries a `[package.metadata.build-variant]` section with `guest-images`.
     #[test]
@@ -2264,6 +2412,7 @@ version = "0.1.0"
             Some(&ImageFormat::Raw),
             Some(&ImageFormat::Qcow2),
             Some(&ImageFormat::Vmdk),
+            Some(&ImageFormat::Uki),
         ] {
             validate_guest_image_entries("host-variant", &map, fmt).unwrap_or_else(|e| {
                 panic!("image-format {fmt:?} must accept guest-images, got error: {e}")

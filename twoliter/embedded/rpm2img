@@ -13,6 +13,7 @@ IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
 EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="no"
+UKI_IMAGE="no"
 GUEST_IMAGES=""
 
 for opt in "$@"; do
@@ -35,6 +36,7 @@ for opt in "$@"; do
   --with-encrypted-storage=*) ENCRYPTED_STORAGE="${optarg}" ;;
   --with-ephemeral-encryption-keys=*) EPHEMERAL_ENCRYPTION_KEYS="${optarg}" ;;
   --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
+  --with-uki-image=*) UKI_IMAGE="${optarg}" ;;
   --guest-images=*) GUEST_IMAGES="${optarg}" ;;
   --sbom-package-dir=*) SBOM_PACKAGE_DIR="${optarg}" ;;
   *)
@@ -80,6 +82,16 @@ if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
     echo "\`standalone-image = true\` is incompatible with 'partition-plan=split'" >&2
     exit 1
   fi
+fi
+
+if [[ "${UKI_IMAGE}" == "yes" && "${IN_PLACE_UPDATES}" == "yes" ]]; then
+  echo "\`image-format = \"uki\"\` is incompatible with 'in-place-updates'" >&2
+  exit 1
+fi
+
+if [[ "${EPHEMERAL_ENCRYPTION_KEYS}" == "yes" && "${UKI_IMAGE}" != "yes" ]]; then
+  echo "'ephemeral-encryption-keys' is only supported with \`image-format = \"uki\"\`" >&2
+  exit 1
 fi
 
 # Store output artifacts in a versioned directory.
@@ -151,7 +163,7 @@ set_partition_sizes \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
   partsize partoff "${STANDALONE_IMAGE}"
 set_partition_labels partlabel
-set_partition_types parttype
+set_partition_types parttype "${UKI_IMAGE}"
 set_partition_uuids partguid "${PARTITION_PLAN}"
 
 declare -a partitions
@@ -196,6 +208,17 @@ for part in "${partitions[@]}"; do
 done
 
 sgdisk --clear "${partargs[@]}" --sort --print "${OS_IMAGE}"
+
+# For UKI images (single-bank only; in-place-updates is disallowed for UKI_IMAGE,
+# see the check above), BOOT-A's PARTUUID is fixed for the life of the image and
+# is known immediately after partitioning. Capture it now so it can be baked
+# into the .cmdline PE section - systemd-stub does not expand shell variables
+# the way GRUB's gptprio.next does, so a literal "$boot_uuid" placeholder would
+# otherwise reach the kernel unexpanded.
+BOOT_PARTUUID=""
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  BOOT_PARTUUID="$(get_partition_uuid "${OS_IMAGE}" "${partlabel["BOOT-A"]}")"
+fi
 
 # Partition the separate data disk, if we're using the split layout.
 if [[ "${STANDALONE_IMAGE}" == "no" && "${PARTITION_PLAN}" == "split" ]]; then
@@ -396,7 +419,7 @@ fi
 # Clean up rpmdb.
 rm -rf "${ROOT_MOUNT}"/var/lib
 
-if [[ "${ARCH}" == "x86_64" ]]; then
+if [[ "${ARCH}" == "x86_64" && "${UKI_IMAGE}" == "no" ]]; then
   # MBR and BIOS-BOOT
   echo "(hd0) ${OS_IMAGE}" >"${ROOT_MOUNT}/boot/grub/device.map"
   grub-bios-setup \
@@ -410,29 +433,78 @@ if [[ "${ARCH}" == "x86_64" ]]; then
 fi
 
 # We also need an EFI partition, formatted FAT32 with the
-# EFI binary at the correct path, e.g. /efi/boot. The grub
-# package has placed the image in /boot/efi/EFI/BOOT.
+# EFI binary at the correct path, e.g. /efi/boot. The bootloader
+# packages (shim, and grub or systemd-boot depending on the image
+# format) have placed their binaries in /boot/efi/EFI/BOOT.
 mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
 
 pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
-shims=(boot*.efi)
-shim="${shims[0]}"
-grubs=(grub*.efi)
-grub="${grubs[0]}"
+
+# The shim package builds one shim per bootloader it can chain-load, and the
+# `uki-image` / `no-uki-image` capabilities ensure that exactly one flavor is
+# installed. The grub-chaining shim is installed at the platform-defined
+# default boot path, where older image builds expect to find it, while other
+# flavors are installed under a bootloader-specific name and have to be moved
+# into place.
+case "${ARCH}" in
+x86_64) efi_arch="x64" ;;
+aarch64) efi_arch="aa64" ;;
+*)
+  echo "unsupported architecture: ${ARCH}" >&2
+  exit 1
+  ;;
+esac
+shim="boot${efi_arch}.efi"
+
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  shim_flavor="shim-systemd-boot${efi_arch}.efi"
+  if [[ ! -e "${shim_flavor}" ]]; then
+    echo "no systemd-boot shim '${shim_flavor}' on the EFI system partition" >&2
+    exit 1
+  fi
+  mv "${shim_flavor}" "${shim}"
+elif [[ ! -e "${shim}" ]]; then
+  echo "no shim '${shim}' on the EFI system partition" >&2
+  exit 1
+fi
+
 mokms=(mm*.efi)
 mokm="${mokms[0]}"
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-  # Do the setup required for `pesign` and `gpg` signing and
-  # verification to "just work", regardless of which type of
-  # signing profile we have.
-  sbsetup_signing_profile
 
-  sign_shim "${shim}"
-  sign_mokm "${mokm}"
-  sign_grub "${grub}"
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # UKI mode: shim chain-loads systemd-boot, which is installed next to it
+  # and discovers UKIs on the XBOOTLDR partition.
+  systemd_boots=(systemd-boot*.efi)
+  systemd_boot="${systemd_boots[0]}"
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    # Do the setup required for `pesign` and `gpg` signing and
+    # verification to "just work", regardless of which type of
+    # signing profile we have.
+    sbsetup_signing_profile
+
+    sign_shim "${shim}"
+    sign_mokm "${mokm}"
+    sign_systemd_boot "${systemd_boot}"
+  else
+    zero_shim "${shim}"
+  fi
 else
-  zero_shim "${shim}"
-  unembed_grub "${grub}"
+  # GRUB mode: shim chain-loads grub.
+  grubs=(grub*.efi)
+  grub="${grubs[0]}"
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    # Do the setup required for `pesign` and `gpg` signing and
+    # verification to "just work", regardless of which type of
+    # signing profile we have.
+    sbsetup_signing_profile
+
+    sign_shim "${shim}"
+    sign_mokm "${mokm}"
+    sign_grub "${grub}"
+  else
+    zero_shim "${shim}"
+    unembed_grub "${grub}"
+  fi
 fi
 popd >/dev/null
 
@@ -441,6 +513,11 @@ mkfs.vfat -I -S 512 "${EFI_IMAGE}" $((partsize["EFI-A"] * 1024))
 mmd -i "${EFI_IMAGE}" ::/EFI
 mmd -i "${EFI_IMAGE}" ::/EFI/BOOT
 mcopy -i "${EFI_IMAGE}" "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # Only systemd-boot consumes `\loader\loader.conf`, and only from the volume
+  # it was loaded from, which is this EFI system partition.
+  provide_loader_config "${EFI_IMAGE}" "${EFI_MOUNT}"
+fi
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   # Make the signing certificate available on the EFI system partition so it
   # can be imported through the firmware setup UI on bare metal systems.
@@ -517,6 +594,22 @@ else
   printf "%s\n" "STANDALONE_IMAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-features.env"
 fi
 
+# Set the image format flags. `image-format` is a separate manifest field from
+# `image-features`, so it gets its own file rather than being folded into
+# `image-features.env` above. Runtime consumers need this signal -- e.g.
+# `prepare-boot.service`, which must not run A/B partition-set logic on a UKI
+# image that has no A/B state. Written unconditionally, mirroring
+# `image-features.env`, so a consumer never has to treat file absence as
+# meaningful. Note the value conversion: `UKI_IMAGE` is `yes`/`no` in the build
+# scripts, but the runtime file uses `true`/`false`.
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  printf "%s\n" "IMAGE_FORMAT=uki" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-format.env"
+  printf "%s\n" "UKI_IMAGE=true" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-format.env"
+else
+  printf "%s\n" "IMAGE_FORMAT=${OUTPUT_FMT}" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-format.env"
+  printf "%s\n" "UKI_IMAGE=false" >>"${ROOT_MOUNT}/${SYS_ROOT}/usr/share/bottlerocket/image-format.env"
+fi
+
 # BOTTLEROCKET-ROOT-A
 if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
   mkfs_root_erofs "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${SELINUX_FILE_CONTEXTS}"
@@ -542,41 +635,96 @@ fi
 
 # BOTTLEROCKET-VERITY-A
 declare -a DM_VERITY_ROOT
-generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize["HASH-A"]}" \
-  DM_VERITY_ROOT
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize["HASH-A"]}" \
+    DM_VERITY_ROOT "${BOOT_PARTUUID}"
+else
+  generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" "${partsize["HASH-A"]}" \
+    DM_VERITY_ROOT
+fi
 dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
 
-# write GRUB config
-# Include the parameters that support Boot Config. Stripped-down images
-# (`standalone-image = true`) have no PRIVATE partition to hold
-# bootconfig.data, so omit these entries entirely.
-if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
-  BOOTCONFIG='bootconfig'
-  INITRD="initrd (\$private)/bootconfig.data"
-else
-  BOOTCONFIG=''
-  INITRD=''
+# Assemble UKI with ukify if UKI_IMAGE mode
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # Find systemd-stub from uki-stub package
+  mapfile -t stub_files < <(find "${ROOT_MOUNT}" -name "linux*.efi.stub" -type f 2>/dev/null)
+  if [[ ${#stub_files[@]} -eq 0 ]]; then
+    echo "systemd-stub EFI not found in ROOT_MOUNT" >&2
+    exit 1
+  fi
+  stub_efi="${stub_files[0]}"
+
+  # Get kernel version from /lib/modules
+  kver_dir=$(find "${ROOT_MOUNT}/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%P
+' | head -1)
+  if [[ -z "${kver_dir}" ]]; then
+    echo "kernel version directory not found" >&2
+    exit 1
+  fi
+
+  # Build cmdline EXACTLY mirroring grub.cfg
+  # bootconfig is not yet supported for UKI images: there is no mechanism to
+  # attach the runtime-generated bootconfig.data blob as with GRUB's `initrd`
+  # directive, so requesting it only produces a kernel warning at boot.
+  uki_bootconfig=""
+
+  # The escaped quotes around the verity table are intentional: the kernel's
+  # dm-mod.create= value contains spaces, so the literal quote characters must
+  # be part of the command line itself (this mirrors grub.cfg).
+  # shellcheck disable=SC2016
+  uki_cmdline="${KERNEL_PARAMETERS} ${uki_bootconfig} root=/dev/dm-0 rootwait ro raid=noautodetect random.trust_cpu=on selinux=1 enforcing=1 dm-mod.create=\"${DM_VERITY_ROOT[*]}\" -- systemd.log_target=journal-or-kmsg systemd.log_color=0 systemd.show_status=true"
+
+  # Create EFI/Linux directory for UKI
+  mkdir -p "${BOOT_MOUNT}/EFI/Linux"
+
+  # Build UKI with ukify
+  # Note: bootconfig initrd is handled at runtime via PRIVATE partition
+  ukify build \
+    --stub "${stub_efi}" \
+    --linux "${BOOT_MOUNT}/vmlinuz" \
+    --uname "${kver_dir}" \
+    --cmdline "${uki_cmdline}" \
+    --os-release "@${ROOT_MOUNT}/${SYS_ROOT}/usr/lib/os-release" \
+    --output "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
+
+  # Sign UKI with do_sign if secure boot enabled
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    sign_systemd_boot "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
+  fi
 fi
 
-# If UEFI_SECURE_BOOT is set, disable interactive edits. Otherwise the intended
-# kernel command line parameters could be changed if the boot fails. Disable
-# signature checking as well, since grub.cfg will have already been verified
-# before we reach this point. bootconfig.data is generated at runtime and can't
-# be signed with a trusted key, so continuing to check signatures would prevent
-# it from being read. If boot fails, trigger an automatic reboot, since nothing
-# can be changed for troubleshooting purposes.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-  echo 'set superusers=""' >"${BOOT_MOUNT}/grub/grub.cfg"
-  echo 'set check_signatures="no"' >>"${BOOT_MOUNT}/grub/grub.cfg"
-  FALLBACK=$'   echo "rebooting in 30 seconds..."\n'
-  FALLBACK+=$'   sleep 30\n'
-  FALLBACK+=$'   reboot\n'
-else
-  FALLBACK=""
-fi
+# write GRUB config (skip for UKI mode which uses systemd-boot)
+if [[ "${UKI_IMAGE}" != "yes" ]]; then
+  # Include the parameters that support Boot Config. Stripped-down images
+  # (`standalone-image = true`) have no PRIVATE partition to hold
+  # bootconfig.data, so omit these entries entirely.
+  if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
+    BOOTCONFIG='bootconfig'
+    INITRD="initrd (\$private)/bootconfig.data"
+  else
+    BOOTCONFIG=''
+    INITRD=''
+  fi
 
-# shellcheck disable=SC2154 # Some variables are defined by the environment.
-cat <<EOF >>"${BOOT_MOUNT}/grub/grub.cfg"
+  # If UEFI_SECURE_BOOT is set, disable interactive edits. Otherwise the intended
+  # kernel command line parameters could be changed if the boot fails. Disable
+  # signature checking as well, since grub.cfg will have already been verified
+  # before we reach this point. bootconfig.data is generated at runtime and can't
+  # be signed with a trusted key, so continuing to check signatures would prevent
+  # it from being read. If boot fails, trigger an automatic reboot, since nothing
+  # can be changed for troubleshooting purposes.
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    echo 'set superusers=""' >"${BOOT_MOUNT}/grub/grub.cfg"
+    echo 'set check_signatures="no"' >>"${BOOT_MOUNT}/grub/grub.cfg"
+    FALLBACK=$'   echo "rebooting in 30 seconds..."\n'
+    FALLBACK+=$'   sleep 30\n'
+    FALLBACK+=$'   reboot\n'
+  else
+    FALLBACK=""
+  fi
+
+  # shellcheck disable=SC2154 # Some variables are defined by the environment.
+  cat <<EOF >>"${BOOT_MOUNT}/grub/grub.cfg"
 set default="0"
 set timeout="0"
 set dm_verity_root="${DM_VERITY_ROOT[*]}"
@@ -600,8 +748,9 @@ menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
 }
 EOF
 
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-  sign_grubcfg "${BOOT_MOUNT}/grub/grub.cfg"
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    sign_grubcfg "${BOOT_MOUNT}/grub/grub.cfg"
+  fi
 fi
 
 # Combine any bootconfig snippets in /boot for later use, then clean up.
@@ -625,18 +774,49 @@ if [[ ! -s "${BOOTCONFIG_INPUT}" ]]; then
 fi
 
 # BOTTLEROCKET-BOOT-A
-mkdir -p "${BOOT_MOUNT}/lost+found"
-chmod -R go-rwx "${BOOT_MOUNT}"
-BOOT_LABELS=$(setfiles -n -d -F -m -r "${BOOT_MOUNT}" \
-  "${SELINUX_FILE_CONTEXTS}" "${BOOT_MOUNT}" |
-  awk -v root="${BOOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
-mkfs.ext4 -O ^has_journal -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}M"
-echo "${BOOT_LABELS}" | debugfs -w -f - "${BOOT_IMAGE}"
-resize2fs -M "${BOOT_IMAGE}"
-dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # UKI boot partition is FAT for systemd-boot Type 2 discovery
+  chmod -R go-rwx "${BOOT_MOUNT}"
+  dd if=/dev/zero of="${BOOT_IMAGE}" bs=1M count="${partsize["BOOT-A"]}"
+  mkfs.vfat -I -S 512 "${BOOT_IMAGE}" $((partsize["BOOT-A"] * 1024))
+  # Create EFI/Linux directory and copy UKI
+  mmd -i "${BOOT_IMAGE}" ::/EFI
+  mmd -i "${BOOT_IMAGE}" ::/EFI/Linux
+  mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" ::/EFI/Linux/
+  # Also copy vmlinuz for potential recovery/debugging
+  mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" ::/
+  # Copy HMAC file if present
+  if [[ -f "${BOOT_MOUNT}/.vmlinuz.hmac" ]]; then
+    mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" ::/
+  fi
+  dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
 
-# Report BOOT partition usage
-boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
+  # Report BOOT partition usage for vfat (use file size as approximation)
+  boot_used=$(stat -c %s "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi")
+  boot_total=$((partsize["BOOT-A"] * 1024 * 1024))
+  boot_remaining=$((boot_total - boot_used))
+  boot_percent=$((boot_used * 100 / boot_total))
+  boot_usage=$(jq -n \
+    --arg partition "BOOT-A" \
+    --argjson bytes_total "${boot_total}" \
+    --argjson bytes_used "${boot_used}" \
+    --argjson bytes_remaining "${boot_remaining}" \
+    --argjson percentage_bytes "${boot_percent}" \
+    '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}')
+else
+  mkdir -p "${BOOT_MOUNT}/lost+found"
+  chmod -R go-rwx "${BOOT_MOUNT}"
+  BOOT_LABELS=$(setfiles -n -d -F -m -r "${BOOT_MOUNT}" \
+    "${SELINUX_FILE_CONTEXTS}" "${BOOT_MOUNT}" |
+    awk -v root="${BOOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
+  mkfs.ext4 -O ^has_journal -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}M"
+  echo "${BOOT_LABELS}" | debugfs -w -f - "${BOOT_IMAGE}"
+  resize2fs -M "${BOOT_IMAGE}"
+  dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
+
+  # Report BOOT partition usage
+  boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
+fi
 
 # Combine usage data into final JSON
 echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
@@ -661,7 +841,10 @@ if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
 fi
 
 # Predict PCR values after all partitions are written.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+# Skipped for UKI images: pcrsys currently assumes an ext4 BOOT-A partition
+# (for reading grub.cfg/vmlinuz), but UKI images use a FAT BOOT-A partition,
+# so PCR prediction would fail here.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
   "${0%/*}/pcrsys" disk \
     --image "${OS_IMAGE}" \
     --efi-vars "${SBKEYS}/efi-vars.json" \
@@ -735,6 +918,14 @@ elif [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
     compress_image "vmdk" "data_image" "${OUTPUT_DIR}"
     symlink_image "vmdk" "data_image" "${OUTPUT_DIR}"
   fi
+elif [[ "${OUTPUT_FMT}" == "uki" ]]; then
+  # UKI uses raw disk format (uki refers to boot layout, not disk format)
+  compress_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  symlink_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  if [[ -s "${DATA_IMAGE}" ]]; then
+    compress_image "img.lz4" "data_image" "${OUTPUT_DIR}"
+    symlink_image "img.lz4" "data_image" "${OUTPUT_DIR}"
+  fi
 fi
 
 # Now create the OVA if needed.
@@ -750,11 +941,20 @@ if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
   symlink_image "ova" "os_image" "${OUTPUT_DIR}"
 fi
 
-compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+# BOOT-A is FAT for UKI images (see the UKI_IMAGE branch above), and ext4 otherwise.
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  compress_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
+else
+  compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+fi
 compress_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 compress_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
-symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  symlink_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
+else
+  symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+fi
 symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 symlink_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 

@@ -25,6 +25,7 @@ IMAGE_ARTIFACT_SUFFIXES=(
   "qcow2"
   "vmdk"
   "ova"
+  "fat.lz4"
   "ext4.lz4"
   "verity.lz4"
   "eif"
@@ -71,7 +72,7 @@ sanity_checks() {
   fi
 
   case "${output_fmt}" in
-  raw | qcow2 | vmdk) ;;
+  raw | qcow2 | vmdk | uki) ;;
   *)
     echo "unexpected image output format '${output_fmt}'" >&2
     exit 1
@@ -236,6 +237,12 @@ stage_images() {
   os_image="$(pwd)/${OS_IMAGE_NAME}.img"
   case "${output_fmt}" in
   raw)
+    decompress_image "img.lz4" "os_image" "${input_dir}"
+    data_image="${input_dir}/${DATA_IMAGE_NAME}.img.lz4"
+    ;;
+  uki)
+    # "uki" describes the boot layout, not the disk container, so the artifacts
+    # on disk are the same as for "raw". This matches how `rpm2img` writes them.
     decompress_image "img.lz4" "os_image" "${input_dir}"
     data_image="${input_dir}/${DATA_IMAGE_NAME}.img.lz4"
     ;;
@@ -457,13 +464,46 @@ get_erofs_usage() {
     '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}'
 }
 
+# Read back the real GPT unique partition GUID for a named partition from an
+# already-partitioned image. Must be called after sgdisk has created the
+# partition table (so the UUID exists to read).
+get_partition_uuid() {
+  local image part_label
+  image="${1:?}"
+  part_label="${2:?}"
+
+  local partitions part_info name p
+  partitions="$(sgdisk --print "${image}" | awk 'END {print $1}')"
+  for p in $(seq 1 "${partitions}"); do
+    part_info="$(sgdisk -i "${p}" "${image}")"
+    name="$(awk -F"'" '/Partition name:/{print $2}' <<<"${part_info}")"
+    if [[ "${name}" == "${part_label}" ]]; then
+      awk -F': ' '/Partition unique GUID:/{print $2}' <<<"${part_info}"
+      return 0
+    fi
+  done
+  echo "get_partition_uuid: partition '${part_label}' not found in ${image}" >&2
+  return 1
+}
+
 generate_verity_root() {
-  local root_image verity_image veritypart_mib
+  local root_image verity_image veritypart_mib boot_partuuid
   local -n dm_verity_root
   root_image="${1:?}"
   verity_image="${2:?}"
   veritypart_mib="${3:?}"
   dm_verity_root="${4:?}"
+  # Optional: the real PARTUUID of the BOOT partition. When omitted we emit the
+  # literal `$boot_uuid` placeholder, which GRUB expands at boot time via
+  # `gptprio.next`. Callers that build images without GRUB (e.g. UKI) must pass
+  # the real UUID, since nothing will expand the placeholder for them.
+  boot_partuuid="${5:-\$boot_uuid}"
+
+  if [[ "${boot_partuuid}" != '$boot_uuid' && \
+        ! "${boot_partuuid}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+    echo "generate_verity_root: invalid boot_partuuid '${boot_partuuid}'" >&2
+    return 1
+  fi
 
   truncate -s "${veritypart_mib}M" "${verity_image}"
 
@@ -493,8 +533,8 @@ generate_verity_root() {
     "${verity_data_512b_blocks}"
     "verity"
     "${VERITY_VERSION}"
-    "PARTUUID=\$boot_uuid/PARTNROFF=1"
-    "PARTUUID=\$boot_uuid/PARTNROFF=2"
+    "PARTUUID=${boot_partuuid}/PARTNROFF=1"
+    "PARTUUID=${boot_partuuid}/PARTNROFF=2"
     "${VERITY_DATA_BLOCK_SIZE}"
     "${VERITY_HASH_BLOCK_SIZE}"
     "${verity_data_4k_blocks}"
@@ -692,12 +732,49 @@ provide_certs() {
   mcopy -i "${efi_image}" -ov "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
 }
 
+# Copy the systemd-boot configuration onto the EFI system partition.
+#
+# systemd-boot reads exactly one configuration file, `/loader/loader.conf`, and
+# only from the volume it was itself loaded from. That is the EFI system
+# partition; the XBOOTLDR partition is scanned for boot entries only. The
+# systemd-boot package therefore installs the file under /boot/efi/loader, which
+# lands in the ESP staging directory along with the rest of that tree, but the
+# `*.efi` glob used to copy the loader binaries does not pick it up, so it needs
+# its own directory and copy here.
+#
+# A missing configuration file is not fatal: systemd-boot falls back to its
+# compiled-in defaults, which still boot the image. Warn instead of failing the
+# whole image build, since the rest of the ESP is intact.
+provide_loader_config() {
+  local efi_image efi_mount loader_config
+  efi_image="${1:?}"
+  efi_mount="${2:?}"
+  loader_config="${efi_mount}/loader/loader.conf"
+
+  if [[ ! -f "${loader_config}" ]]; then
+    echo "no systemd-boot configuration found at ${loader_config}," \
+      "so systemd-boot will use its compiled-in defaults" >&2
+    return 0
+  fi
+
+  mmd -i "${efi_image}" ::/loader
+  mcopy -i "${efi_image}" -ov "${loader_config}" ::/loader
+}
+
 sign_vmlinuz() {
   local vmlinuz
   vmlinuz="${1:?}"
 
   undo_sign "${vmlinuz}"
   do_sign "${vmlinuz}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+}
+
+sign_systemd_boot() {
+  local loader
+  loader="${1:?}"
+
+  undo_sign "${loader}"
+  do_sign "${loader}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
 }
 
 generate_hmac() {
