@@ -742,9 +742,9 @@ provide_certs() {
 # `*.efi` glob used to copy the loader binaries does not pick it up, so it needs
 # its own directory and copy here.
 #
-# A missing configuration file is not fatal: systemd-boot falls back to its
-# compiled-in defaults, which still boot the image. Warn instead of failing the
-# whole image build, since the rest of the ESP is intact.
+# A missing configuration file is treated as a build error: the file is
+# expected to be present whenever this function is called, so a missing file
+# indicates a packaging problem rather than an intentionally absent config.
 provide_loader_config() {
   local efi_image efi_mount loader_config
   efi_image="${1:?}"
@@ -752,9 +752,8 @@ provide_loader_config() {
   loader_config="${efi_mount}/loader/loader.conf"
 
   if [[ ! -f "${loader_config}" ]]; then
-    echo "no systemd-boot configuration found at ${loader_config}," \
-      "so systemd-boot will use its compiled-in defaults" >&2
-    return 0
+    echo "no systemd-boot configuration found at ${loader_config}" >&2
+    exit 1
   fi
 
   mmd -i "${efi_image}" ::/loader
