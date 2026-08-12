@@ -1129,7 +1129,10 @@ pub enum ImageFeature {
     StandaloneImage,
 }
 
-const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[&ImageFeature::EncryptedStorage];
+const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[
+    &ImageFeature::EncryptedStorage,
+    &ImageFeature::StandaloneImage,
+];
 
 const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::GrubSetPrivateVar,
