@@ -14,13 +14,16 @@ IN_PLACE_UPDATES="no"
 # standalone-image validation below treats it consistently with rpm2img.
 # If a future change adds a flag for it, the validation below will already
 # enforce mutual exclusion when `standalone-image = true`.
+# Referenced indirectly via `${!f}` in the standalone-image conflict loop.
+# shellcheck disable=SC2034
 ENCRYPTED_STORAGE="no"
+# shellcheck disable=SC2034
 EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="no"
 UKI_IMAGE="no"
 
 for opt in "$@"; do
-  optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
+  optarg="$(expr "${opt}" : '[^=]*=\(.*\)' || echo '')"
   case "${opt}" in
   --input-dir=*) INPUT_DIR="${optarg}" ;;
   --output-dir=*) OUTPUT_DIR="${optarg}" ;;
@@ -36,6 +39,7 @@ for opt in "$@"; do
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
   --with-uki-image=*) UKI_IMAGE="${optarg}" ;;
+  --guest-images=*) ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1

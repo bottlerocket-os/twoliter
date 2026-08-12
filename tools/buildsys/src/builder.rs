@@ -324,6 +324,10 @@ struct RepackVariantBuildArgs {
     variant_platform: String,
     version_build: String,
     version_image: String,
+    /// Newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples for host
+    /// variants that embed guest images and, on repack, need to resign the guest EIFs found
+    /// under those install paths. Mirrors `VariantBuildArgs::guest_images`.
+    guest_images: String,
 }
 
 impl RepackVariantBuildArgs {
@@ -346,6 +350,14 @@ impl RepackVariantBuildArgs {
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
+        args.build_arg("GUEST_IMAGES", &self.guest_images);
+
+        // TWOLITER_VERSION mirrors what VariantBuildArgs plumbs through so
+        // `eif2eif` can embed it into EIF metadata (BuildMetadata.BuildToolVersion).
+        args.build_arg(
+            "TWOLITER_VERSION",
+            std::env::var("TWOLITER_VERSION").unwrap_or_default(),
+        );
 
         for image_feature in self.image_features.iter() {
             let value = if matches!(image_feature, ImageFeature::StandaloneImage) {
@@ -598,29 +610,31 @@ impl DockerBuild {
     }
 
     /// Create a new `DockerBuild` that can repackage a variant image.
-    pub(crate) fn repack_variant(args: RepackVariantArgs, manifest: &Manifest) -> Result<Self> {
+    ///
+    /// `guest_images` is the resolved list of guest variants declared by the
+    /// host under `[package.metadata.build-variant.guest-images]`, whose
+    /// `*.eif` files `img2img` must resign before rebuilding host verity.
+    /// Empty for an EIF variant or a host that declares no guests.
+    pub(crate) fn repack_variant(
+        args: RepackVariantArgs,
+        manifest: &Manifest,
+        guest_images: Vec<(String, std::path::PathBuf)>,
+    ) -> Result<Self> {
         let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let features = manifest.info().image_features().unwrap_or_default();
-        // Repack is implemented by `img2img`. Handle every format explicitly so
-        // that a newly added one cannot reach the repack path without someone
-        // deciding whether `img2img` can actually handle it.
+        // Exhaustive match so a newly added image format cannot reach the
+        // repack path without being explicitly routed to `img2img` or `eif2eif`.
         match manifest.info().image_format() {
-            // `img2img` has no EIF support. Fail fast here so users get a clear
-            // error instead of a cryptic failure deep inside the Dockerfile
-            // build.
-            Some(ImageFormat::Eif) => return error::EifRepackUnsupportedSnafu.fail(),
-            // UKI repack is supported (along with the other listed formats).
-            // `img2img` extracts the FAT boot partition with mtools, rebuilds
-            // `EFI/Linux/bottlerocket.efi` from the sections of the existing
-            // UKI so that the kernel command line carries the new dm-verity
-            // root hash, and recreates the partition. See `repack_uki` in
-            // `twoliter/embedded/img2img`.
-            Some(ImageFormat::Raw | ImageFormat::Qcow2 | ImageFormat::Vmdk | ImageFormat::Uki)
+            Some(
+                ImageFormat::Eif
+                | ImageFormat::Raw
+                | ImageFormat::Qcow2
+                | ImageFormat::Vmdk
+                | ImageFormat::Uki,
+            )
             | None => {}
         }
 
-        // Repack has already rejected EIF above, so `image_format` is always
-        // non-EIF here; pass it through anyway for defense-in-depth.
         let image_format = manifest.info().image_format();
         let image_layout = resolved_image_layout(&raw_layout, &features, image_format);
         // Defense in depth: re-run the image feature validator here so that
@@ -688,6 +702,18 @@ impl DockerBuild {
                 variant_platform,
                 version_build: args.version_build,
                 version_image: args.version_image,
+                guest_images: guest_images
+                    .iter()
+                    .map(|(guest, install_path)| {
+                        format!(
+                            "{guest}:{install_path}:build/images/{arch}-{guest}/{version_full}",
+                            install_path = install_path.display(),
+                            arch = args.common.arch,
+                            version_full = args.common.version_full,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             }),
             secrets_args: secrets_args()?,
         })

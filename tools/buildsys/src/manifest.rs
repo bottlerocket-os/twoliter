@@ -1296,7 +1296,7 @@ pub fn validate_image_features(
         "`standalone-image = true`"
     };
     let reason_secure_boot: String = if is_eif {
-        "secure boot is not supported by the EIF pipeline; `rpm2eif` does not sign shim/grub/vmlinuz".to_string()
+        "secure boot is not supported by the EIF pipeline; `rpm2eif` does not sign shim/grub/vmlinuz (EIF signing over PCR0 is orthogonal and driven by Infra.toml [eif])".to_string()
     } else {
         "secure boot relies on signed first-party artifacts that are not present when `standalone-image = true`".to_string()
     };
