@@ -306,11 +306,15 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
     check_arch_support(manifest.info(), args.common.arch);
     validate_standalone_image_or_warn(manifest.info())?;
 
+    let guest_images = manifest
+        .guest_image_variant_deps()
+        .context(error::ManifestParseSnafu)?;
+
     if args.common.cicd_hack {
         return Ok(());
     }
 
-    DockerBuild::repack_variant(args, &manifest)
+    DockerBuild::repack_variant(args, &manifest, guest_images)
         .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)

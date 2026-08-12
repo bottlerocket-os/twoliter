@@ -1129,10 +1129,7 @@ pub enum ImageFeature {
     StandaloneImage,
 }
 
-const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[
-    &ImageFeature::EncryptedStorage,
-    &ImageFeature::StandaloneImage,
-];
+const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[&ImageFeature::EncryptedStorage];
 
 const DEPRECATED_IMAGE_FEATURES: &[&ImageFeature] = &[
     &ImageFeature::GrubSetPrivateVar,
@@ -1221,7 +1218,14 @@ pub fn validate_image_features(
         "`standalone-image = true`"
     };
     let reason_secure_boot: String = if is_eif {
-        "secure boot is not supported by the EIF pipeline; `rpm2eif` does not sign shim/grub/vmlinuz".to_string()
+        // Note: EIF *signing* (a COSE_Sign1 over PCR0 embedded in an
+        // `EifSectionSignature`) is orthogonal to UEFI Secure Boot. The
+        // former is enabled automatically by `rpm2eif` when Infra.toml
+        // carries an `[eif]` section (backed by either a local PEM key
+        // or a KMS key id). The latter -- signing shim/grub/vmlinuz as
+        // PE Authenticode -- has no place in the EIF pipeline and is
+        // still rejected here.
+        "secure boot is not supported by the EIF pipeline; `rpm2eif` does not sign shim/grub/vmlinuz (EIF signing over PCR0 is orthogonal and driven by Infra.toml [eif])".to_string()
     } else {
         "secure boot relies on signed first-party artifacts that are not present when `standalone-image = true`".to_string()
     };

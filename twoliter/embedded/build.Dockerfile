@@ -572,8 +572,24 @@ ARG UEFI_SECURE_BOOT
 ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
 ARG STANDALONE_IMAGE
+ARG GUEST_IMAGES=""
+ARG TWOLITER_VERSION=""
+# KERNEL_PARAMETERS is variant-declared cmdline glue that `eif2eif` embeds
+# into the rebuilt EIF's kernel command line. `img2img` does not consume it
+# directly (grub.cfg carries per-variant params), but plumbing it here keeps
+# the EIF-repack cmdline identical to what rpm2eif emitted at first build.
+ARG KERNEL_PARAMETERS=""
+
+# ARG values are substituted into the RUN command line but are NOT injected
+# into the RUN process environment. Both `img2img` and `eif2eif` source
+# `imghelper`, which does `${IMAGE_NAME:?}` at source-time and needs these
+# in the environment. Forward everything into ENV in a single block so a
+# future edit adding a variable can't skew the two halves.
 ENV VARIANT=${VARIANT_NAME} VARIANT_PLATFORM=${VARIANT_PLATFORM} \
-    VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID}
+    VERSION_ID=${VERSION_ID} BUILD_ID=${BUILD_ID} \
+    TWOLITER_VERSION=${TWOLITER_VERSION} \
+    IMAGE_NAME=${IMAGE_NAME} VARIANT_NAME=${VARIANT_NAME} ARCH=${ARCH} \
+    KERNEL_PARAMETERS=${KERNEL_PARAMETERS}
 WORKDIR /root
 
 USER root
@@ -591,26 +607,40 @@ RUN --mount=target=/host \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
     --mount=type=secret,id=efi-vars.json,target=/root/sbkeys/efi-vars.json \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \
+    --mount=type=secret,id=eif-signing.crt,target=/root/eif/signing.crt \
+    --mount=type=secret,id=eif-signing.key,target=/root/eif/signing.key \
+    --mount=type=secret,id=eif-kms-key-id.env,target=/root/eif/kms-key-id \
+    --mount=type=secret,id=eif-kms-region.env,target=/root/eif/kms-region \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
     --mount=type=secret,id=aws-session-token.env,target=/root/.aws/aws-session-token.env \
     /host/build/tools/pipesys link --fd-socket "${BYPASS_SOCKET}" --target /bypass && \
     /host/build/tools/pipesys link --fd-socket "${OUTPUT_SOCKET}" --target /output && \
     rm -rf /output/* && \
-    /host/build/tools/img2img \
-      --input-dir="/bypass/build/images/${ARCH}-${VARIANT_NAME}/${VERSION_ID}-${BUILD_ID}" \
-      --output-dir=/output \
-      --output-fmt="${IMAGE_FORMAT}" \
-      --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
-      --data-image-size-gib="${DATA_IMAGE_SIZE_GIB}" \
-      --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
-      --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
-      --partition-plan="${PARTITION_PLAN}" \
-      --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
-      ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
-      ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
-      ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
-      --with-standalone-image="${STANDALONE_IMAGE:-no}" && \
+    if [[ "${IMAGE_FORMAT}" == "eif" ]]; then \
+      /host/build/tools/eif2eif \
+        --input-dir="/bypass/build/images/${ARCH}-${VARIANT_NAME}/${VERSION_ID}-${BUILD_ID}" \
+        --output-dir=/output \
+        --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
+        ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
+        --with-standalone-image="${STANDALONE_IMAGE:-no}" ; \
+    else \
+      /host/build/tools/img2img \
+        --input-dir="/bypass/build/images/${ARCH}-${VARIANT_NAME}/${VERSION_ID}-${BUILD_ID}" \
+        --output-dir=/output \
+        --output-fmt="${IMAGE_FORMAT}" \
+        --os-image-size-gib="${OS_IMAGE_SIZE_GIB}" \
+        --data-image-size-gib="${DATA_IMAGE_SIZE_GIB}" \
+        --os-image-publish-size-gib="${OS_IMAGE_PUBLISH_SIZE_GIB}" \
+        --data-image-publish-size-gib="${DATA_IMAGE_PUBLISH_SIZE_GIB}" \
+        --partition-plan="${PARTITION_PLAN}" \
+        --ovf-template="/bypass/variants/${VARIANT_NAME}/template.ovf" \
+        ${EROFS_ROOT_PARTITION:+--with-erofs-root-partition=yes} \
+        ${UEFI_SECURE_BOOT:+--with-uefi-secure-boot=yes} \
+        ${IN_PLACE_UPDATES:+--with-in-place-updates=yes} \
+        --with-standalone-image="${STANDALONE_IMAGE:-no}" \
+        --guest-images="${GUEST_IMAGES}" ; \
+    fi && \
     chown -R "${BUILDER_UID}:${BUILDER_UID}" /output/ && \
     rm /output && \
     rm /bypass && \

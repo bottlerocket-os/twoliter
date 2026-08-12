@@ -1,0 +1,380 @@
+#!/usr/bin/env bash
+# eif2eif - repack an EIF variant's disk image + EIF sidecar with fresh
+# rootfs edits (CA bundle, root.json), new erofs ROOT-A, new dm-verity
+# HASH-A, and a re-signed EIF whose kernel cmdline pins the new verity
+# root hash.
+#
+# Produces (mirroring rpm2eif's output shape):
+#   - {prefix}.eif        newly rebuilt, signed if Infra.toml [eif] is configured
+#   - {prefix}-disk.img   GPT disk with new ROOT-A + HASH-A
+#   - {prefix}-kernel     copied byte-for-byte from the input (unchanged)
+#   - latest.eif, latest-disk.img, latest-kernel symlinks
+#
+# Contract vs. `img2img`:
+#   - Same CLI shape (input-dir, output-dir, feature flags). `--guest-images`
+#     is accepted for parity but ignored (an EIF variant has no rootfs to
+#     resign guests inside — its rootfs is the enclave's own).
+#   - IMAGE_FORMAT/OUTPUT_FMT is not "raw"/"qcow2"/"vmdk"; we ignore whatever
+#     is passed and produce the EIF-native artifact set.
+#   - Because the kernel cmdline changes (new dm-verity root hash), PCR0
+#     changes, and we cannot use `eif-builder resign`: we do a full
+#     `eif-builder build` here. `resign` is used only for guest EIFs inside
+#     a *host* repack (see img2img).
+
+set -eux -o pipefail
+shopt -qs failglob
+
+# ---------- CLI parse ----------
+
+INPUT_DIR=""
+OUTPUT_DIR=""
+OS_IMAGE_SIZE_GIB="0"
+# Feature flags: EIF's fixed profile is enforced (parity with rpm2eif).
+EROFS_ROOT_PARTITION="yes"
+UEFI_SECURE_BOOT="no"
+IN_PLACE_UPDATES="no"
+ENCRYPTED_STORAGE="no"
+STANDALONE_IMAGE="yes"
+# Accepted but ignored: an EIF variant is a "leaf" — it has no guests inside
+# its own rootfs. See docstring above.
+GUEST_IMAGES=""
+
+for opt in "$@"; do
+  optarg="$(expr "${opt}" : '[^=]*=\(.*\)' || echo '')"
+  case "${opt}" in
+    --input-dir=*)                    INPUT_DIR="${optarg}" ;;
+    --output-dir=*)                   OUTPUT_DIR="${optarg}" ;;
+    --output-fmt=*)                   : ;;   # accepted, ignored (EIF is EIF)
+    --os-image-size-gib=*)            OS_IMAGE_SIZE_GIB="${optarg}" ;;
+    --data-image-size-gib=*)          : ;;
+    --os-image-publish-size-gib=*)    : ;;
+    --data-image-publish-size-gib=*)  : ;;
+    --partition-plan=*)               : ;;
+    --ovf-template=*)                 : ;;
+    --with-erofs-root-partition=*)    EROFS_ROOT_PARTITION="${optarg}" ;;
+    --with-uefi-secure-boot=*)        UEFI_SECURE_BOOT="${optarg}" ;;
+    --with-in-place-updates=*)        IN_PLACE_UPDATES="${optarg}" ;;
+    --with-encrypted-storage=*)       ENCRYPTED_STORAGE="${optarg}" ;;
+    --with-standalone-image=*)        STANDALONE_IMAGE="${optarg}" ;;
+    --guest-images=*)                 GUEST_IMAGES="${optarg}" ;;
+    *)
+      echo "eif2eif: unexpected arg: ${opt}" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "${INPUT_DIR}" || -z "${OUTPUT_DIR}" ]]; then
+  echo "eif2eif: --input-dir and --output-dir are required" >&2
+  exit 1
+fi
+
+# Same EIF-only feature-profile enforcement as rpm2eif. Keep in sync with
+# `validate_image_features` in tools/buildsys/src/manifest.rs.
+declare -A eif_flag_allowlist=(
+  [EROFS_ROOT_PARTITION]="yes"
+  [UEFI_SECURE_BOOT]="no"
+  [IN_PLACE_UPDATES]="no"
+  [ENCRYPTED_STORAGE]="no"
+  [STANDALONE_IMAGE]="yes"
+)
+eif_flag_errors=0
+for flag in "${!eif_flag_allowlist[@]}"; do
+  want="${eif_flag_allowlist[${flag}]}"
+  have="${!flag}"
+  if [[ "${have}" != "${want}" ]]; then
+    echo "eif2eif: image-format='eif' requires ${flag}='${want}' (got '${have}')" >&2
+    eif_flag_errors=$((eif_flag_errors + 1))
+  fi
+done
+(( eif_flag_errors == 0 )) || exit 1
+
+if ! [[ "${OS_IMAGE_SIZE_GIB}" =~ ^[0-9]+$ ]]; then
+  echo "eif2eif: --os-image-size-gib='${OS_IMAGE_SIZE_GIB}' is not a non-negative integer" >&2
+  exit 1
+fi
+
+# Required env vars (provided by buildsys / the Dockerfile).
+: "${VERSION_ID:?VERSION_ID must be set}"
+: "${BUILD_ID:?BUILD_ID must be set}"
+: "${IMAGE_NAME:?IMAGE_NAME must be set}"
+: "${VARIANT_NAME:?VARIANT_NAME must be set}"
+: "${ARCH:?ARCH must be set}"
+
+# ---------- Helpers ----------
+
+. "${0%/*}/imghelper"          # install_ca_certs, install_root_json, mkfs_root_erofs,
+                               # generate_verity_root, check_image_size, ...
+. "${0%/*}/partyplanner"       # BOTTLEROCKET_{ROOT,HASH}_TYPECODE, set_eif_partition_sizes
+. "${0%/*}/eif-sign-helper"    # discover_eif_signer_args
+
+# ---------- Working environment ----------
+
+WORKDIR="$(mktemp -d)"
+trap '[[ -d "${WORKDIR}" ]] && rm -rf "${WORKDIR}"' EXIT
+pushd "${WORKDIR}" >/dev/null
+
+OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
+mkdir -p "${OUTPUT_DIR}"
+
+# ---------- Locate input artifacts ----------
+
+# rpm2eif writes its outputs into a versioned subdirectory. Whatever
+# directory was passed in via --input-dir is expected to be that
+# versioned dir (buildsys resolves the path).
+#
+# Use `nullglob` so an empty match returns an empty array rather than the
+# literal pattern (bash's default). That makes the `${#a[@]}` check below
+# meaningful — without it, `${#a[@]}` is always >= 1 because the unexpanded
+# pattern occupies the array.
+shopt -u failglob
+shopt -s nullglob
+disk_imgs=( "${INPUT_DIR}"/*-disk.img )
+eif_files=( "${INPUT_DIR}"/*.eif )
+kernels=(   "${INPUT_DIR}"/*-kernel )
+shopt -u nullglob
+shopt -s failglob
+
+for arr in disk_imgs eif_files kernels; do
+  declare -n a="${arr}"
+  if (( ${#a[@]} == 0 )); then
+    echo "eif2eif: no matching input in ${INPUT_DIR} for ${arr}" >&2
+    exit 1
+  fi
+  unset -n a
+done
+
+# Skip stable-name symlinks (`latest.eif`, `latest-disk.img`, ...) so we
+# operate on the versioned artifacts and avoid clobbering by editing
+# through a symlink.
+pick_versioned() {
+  local -n src="$1"
+  local -n dst="$2"
+  dst=()
+  local f
+  for f in "${src[@]}"; do
+    [[ -L "${f}" ]] && continue
+    dst+=("${f}")
+  done
+}
+declare -a INPUT_DISKS INPUT_EIFS INPUT_KERNELS
+pick_versioned disk_imgs INPUT_DISKS
+pick_versioned eif_files INPUT_EIFS
+pick_versioned kernels    INPUT_KERNELS
+
+if (( ${#INPUT_DISKS[@]} != 1 )); then
+  echo "eif2eif: expected exactly one -disk.img in ${INPUT_DIR}, found ${#INPUT_DISKS[@]}" >&2
+  exit 1
+fi
+if (( ${#INPUT_EIFS[@]} != 1 )); then
+  echo "eif2eif: expected exactly one .eif in ${INPUT_DIR}, found ${#INPUT_EIFS[@]}" >&2
+  exit 1
+fi
+if (( ${#INPUT_KERNELS[@]} != 1 )); then
+  echo "eif2eif: expected exactly one -kernel in ${INPUT_DIR}, found ${#INPUT_KERNELS[@]}" >&2
+  exit 1
+fi
+
+INPUT_DISK="${INPUT_DISKS[0]}"
+INPUT_EIF="${INPUT_EIFS[0]}"
+INPUT_KERNEL="${INPUT_KERNELS[0]}"
+
+# ---------- Extract ROOT-A from input disk ----------
+
+# rpm2eif produced a 2-partition GPT: ROOT-A (erofs) at partition 1,
+# HASH-A (dm-verity) at partition 2. Read the current geometry.
+declare -A imgsize imgoff
+get_partition_sizes "${INPUT_DISK}" "" imgsize imgoff
+
+for part in ROOT-A HASH-A; do
+  if [[ -z "${imgsize[${part}]:-}" || -z "${imgoff[${part}]:-}" ]]; then
+    echo "eif2eif: input disk is missing ${part} partition" >&2
+    exit 1
+  fi
+done
+
+ROOT_MOUNT="${WORKDIR}/rootfs"
+mkdir -p "${ROOT_MOUNT}"
+ROOTFS_IN="${WORKDIR}/root-in.erofs"
+dd if="${INPUT_DISK}" of="${ROOTFS_IN}" \
+  count="${imgsize[ROOT-A]}" bs=1M skip="${imgoff[ROOT-A]}" status=none
+
+# Validate the filesystem type before we try to extract.
+fs_type="$(blkid -c /dev/null -o value -s TYPE "${ROOTFS_IN}")"
+if [[ "${fs_type}" != "erofs" ]]; then
+  echo "eif2eif: input ROOT-A is '${fs_type}', expected 'erofs'" >&2
+  exit 1
+fi
+
+fsck.erofs --extract="${ROOT_MOUNT}" "${ROOTFS_IN}"
+touch -r "${ROOTFS_IN}" "${ROOT_MOUNT}"
+rm -f "${ROOTFS_IN}"
+
+# ---------- Replace CA bundle and root.json ----------
+
+install_ca_certs "${ROOT_MOUNT}"
+install_root_json "${ROOT_MOUNT}"
+
+# ---------- Rebuild ROOT-A (erofs) ----------
+
+SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/etc/selinux/fortified/contexts/files/file_contexts"
+ROOTFS_OUT="${WORKDIR}/root-out.erofs"
+mkfs_root_erofs "${ROOT_MOUNT}" "${ROOTFS_OUT}" "${SELINUX_FILE_CONTEXTS}"
+
+# ---------- Generate new dm-verity HASH-A ----------
+
+ROOTFS_SIZE="$(stat -c %s "${ROOTFS_OUT}")"
+ROOTFS_MIB="$(( (ROOTFS_SIZE + 1048575) / 1048576 ))"
+VERITY_MIB="$(( (ROOTFS_MIB / 64) + 4 ))"
+
+VERITY_OUT="${WORKDIR}/hash-out.verity"
+declare -a DM_VERITY_ROOT
+generate_verity_root "${ROOTFS_OUT}" "${VERITY_OUT}" "${VERITY_MIB}" DM_VERITY_ROOT
+
+VERITY_DATA_SECTORS="${DM_VERITY_ROOT[1]}"
+VERITY_DATA_BLOCKS="${DM_VERITY_ROOT[8]}"
+VERITY_ROOT_HASH="${DM_VERITY_ROOT[11]}"
+VERITY_SALT="${DM_VERITY_ROOT[12]}"
+
+# Validate before we bake them into the kernel cmdline.
+[[ "${VERITY_ROOT_HASH}" =~ ^[0-9a-f]{64}$ ]] \
+  || { echo "eif2eif: bad verity root hash: ${VERITY_ROOT_HASH}" >&2; exit 1; }
+[[ "${VERITY_SALT}" =~ ^[0-9a-f]+$ ]] \
+  || { echo "eif2eif: bad verity salt: ${VERITY_SALT}" >&2; exit 1; }
+[[ "${VERITY_DATA_SECTORS}" =~ ^[0-9]+$ ]] \
+  || { echo "eif2eif: bad verity data sectors" >&2; exit 1; }
+[[ "${VERITY_DATA_BLOCKS}" =~ ^[0-9]+$ ]] \
+  || { echo "eif2eif: bad verity data blocks" >&2; exit 1; }
+
+# ---------- Build fresh GPT ----------
+
+target_mib=0
+if (( OS_IMAGE_SIZE_GIB > 0 )); then
+  target_mib=$(( OS_IMAGE_SIZE_GIB * 1024 ))
+fi
+declare -A eif_partsize eif_partoff
+set_eif_partition_sizes "${ROOTFS_MIB}" "${VERITY_MIB}" \
+  eif_partsize eif_partoff "${target_mib}"
+
+ROOT_OFF_MIB="${eif_partoff[ROOT-A]}"
+ROOT_SIZE_MIB="${eif_partsize[ROOT-A]}"
+HASH_OFF_MIB="${eif_partoff[HASH-A]}"
+HASH_SIZE_MIB="${eif_partsize[HASH-A]}"
+DISK_SIZE_MIB="$(( HASH_OFF_MIB + HASH_SIZE_MIB + 1 ))"
+
+DISK_OUT="${WORKDIR}/disk-out.img"
+truncate -s "${DISK_SIZE_MIB}M" "${DISK_OUT}"
+sgdisk -Z "${DISK_OUT}" >/dev/null
+
+check_image_size "${ROOTFS_OUT}" "${ROOT_SIZE_MIB}"
+check_image_size "${VERITY_OUT}" "${HASH_SIZE_MIB}"
+
+ROOT_START="$(( ROOT_OFF_MIB * 2048 ))"
+ROOT_END="$(( (ROOT_OFF_MIB + ROOT_SIZE_MIB) * 2048 - 1 ))"
+HASH_START="$(( HASH_OFF_MIB * 2048 ))"
+HASH_END="$(( (HASH_OFF_MIB + HASH_SIZE_MIB) * 2048 - 1 ))"
+
+sgdisk \
+  --new=1:${ROOT_START}:${ROOT_END} --typecode=1:${BOTTLEROCKET_ROOT_TYPECODE} --change-name=1:ROOT-A \
+  --new=2:${HASH_START}:${HASH_END} --typecode=2:${BOTTLEROCKET_HASH_TYPECODE} --change-name=2:HASH-A \
+  "${DISK_OUT}"
+
+dd if="${ROOTFS_OUT}" of="${DISK_OUT}" conv=notrunc bs=1M seek="${ROOT_OFF_MIB}" status=none
+dd if="${VERITY_OUT}" of="${DISK_OUT}" conv=notrunc bs=1M seek="${HASH_OFF_MIB}" status=none
+sgdisk -v "${DISK_OUT}"
+
+# ---------- Build new EIF ----------
+
+DM_CREATE="dm-mod.create=\"root,,,ro,0 ${VERITY_DATA_SECTORS} verity 1 /dev/vda1 /dev/vda2 4096 4096 ${VERITY_DATA_BLOCKS} 1 sha256 ${VERITY_ROOT_HASH} ${VERITY_SALT} 2 restart_on_corruption ignore_zero_blocks\""
+KERNEL_CMDLINE="root=/dev/dm-0 ro rootwait console=ttyS0 initcall_blacklist=i8042_init ${DM_CREATE}${KERNEL_PARAMETERS:+ ${KERNEL_PARAMETERS}}"
+
+# The kernel cmdline changes (new verity root hash), so PCR0 changes, so a
+# `resign` is not enough — we must run a full `eif-builder build`. We feed
+# it the *already-prepared* kernel from the input `-kernel` sidecar: those
+# bytes are exactly what the input EIF embedded, so the new EIF has the
+# same kernel section as the input.
+sign_args=()
+if ! discover_eif_signer_args sign_args; then
+  exit 1
+fi
+
+EIF_OUT="${WORKDIR}/out.eif"
+
+# Carry METADATA identity fields forward from the input EIF.
+#
+# rpm2eif populates KernelVersion / ImageVersion / BuildTime from the source
+# build's own inputs (RPM db, VERSION_ID, BUILD_ID_TIMESTAMP). eif2eif has
+# none of those to query at this point — the rootfs has been extracted and
+# rebuilt, but the RPM db lookup happens well before this script runs, and
+# we can't derive the original build's timestamp from any current-run state.
+# So we read them out of the input EIF's METADATA section via
+# `eif-builder describe` and forward them verbatim. This makes a repacked
+# EIF's provenance identify the *original* build, not the repack run —
+# which is what a consumer inspecting `ImageVersion` / `BuildTime` would
+# reasonably expect: a repack changes the disk layout (dm-verity), not the
+# release identity.
+#
+# `jq -r` prints "null" for a missing key and the literal string for
+# present-but-empty. Both map to "unknown" via the sentinel logic below,
+# matching rpm2eif's fallback for missing information.
+#
+# `describe` prints a single JSON blob to stdout with no stderr output on
+# success, so it is safe to consume directly.
+INPUT_METADATA_JSON="$(/host/build/tools/eif-builder describe --input "${INPUT_EIF}" --compact)"
+
+read_metadata_field() {
+  local path="${1:?}"
+  local fallback="${2:?}"
+  local value
+  value="$(jq -r "${path} // \"${fallback}\"" <<<"${INPUT_METADATA_JSON}")"
+  if [[ -z "${value}" || "${value}" == "null" ]]; then
+    value="${fallback}"
+  fi
+  printf '%s' "${value}"
+}
+
+INPUT_KERNEL_VERSION="$(read_metadata_field '.metadata.BuildMetadata.KernelVersion' 'unknown')"
+INPUT_IMAGE_VERSION="$(read_metadata_field '.metadata.ImageVersion' '')"
+INPUT_BUILD_TIME="$(read_metadata_field '.metadata.BuildMetadata.BuildTime' '')"
+
+# `eif-builder build` runs `prepare_kernel` on --kernel unconditionally.
+# ${INPUT_KERNEL} here is the already-prepared kernel (rpm2eif emitted the
+# post-zboot-unwrap flat Image on arm64 / vmlinux on x86_64), so
+# `prepare_kernel` must be idempotent on this input for the resulting
+# EIF's KERNEL section to match what the original build embedded:
+#   - x86_64: pass-through (identity).
+#   - arm64: `prepare_kernel` sees a flat PE Image (MZ + ARM\x64), which
+#     is already the target format; the zboot-unwrap path does not fire.
+# See `tools/eif-builder/src/kernel.rs` for the branches. If a future
+# change makes `prepare_kernel` non-idempotent (e.g. inserting padding),
+# the -kernel sidecar this script emits and the KERNEL section embedded
+# in the new .eif will drift — audit this call site accordingly.
+/host/build/tools/eif-builder \
+  --kernel "${INPUT_KERNEL}" \
+  --cmdline "${KERNEL_CMDLINE}" \
+  --output "${EIF_OUT}" \
+  --arch "${ARCH}" \
+  --build-tool-version "${TWOLITER_VERSION:-}" \
+  --kernel-version "${INPUT_KERNEL_VERSION}" \
+  --image-version "${INPUT_IMAGE_VERSION}" \
+  --build-time "${INPUT_BUILD_TIME}" \
+  "${sign_args[@]}"
+
+# ---------- Emit artifacts ----------
+
+ARTIFACT_PREFIX="${IMAGE_NAME}-${VARIANT_NAME}-${ARCH}-${VERSION_ID}-${BUILD_ID}"
+cp "${INPUT_KERNEL}" "${OUTPUT_DIR}/${ARTIFACT_PREFIX}-kernel"
+cp "${EIF_OUT}"      "${OUTPUT_DIR}/${ARTIFACT_PREFIX}.eif"
+cp "${DISK_OUT}"     "${OUTPUT_DIR}/${ARTIFACT_PREFIX}-disk.img"
+
+ln -snf "${ARTIFACT_PREFIX}.eif"      "${OUTPUT_DIR}/latest.eif"
+ln -snf "${ARTIFACT_PREFIX}-disk.img" "${OUTPUT_DIR}/latest-disk.img"
+ln -snf "${ARTIFACT_PREFIX}-kernel"   "${OUTPUT_DIR}/latest-kernel"
+
+popd >/dev/null
+
+# Ensure final ownership matches buildsys expectations.
+find "${OUTPUT_DIR}" -maxdepth 1 -type f -print -exec chown 1000:1000 {} \;
+
+echo "=== eif2eif complete ==="
+ls -lh "${OUTPUT_DIR}/"

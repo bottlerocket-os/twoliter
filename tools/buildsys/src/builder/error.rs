@@ -139,9 +139,6 @@ pub(crate) enum Error {
         source: semver::Error,
         version_str: String,
     },
-
-    #[snafu(display("Repacking is not supported for image-format = \"eif\""))]
-    EifRepackUnsupported,
 }
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
