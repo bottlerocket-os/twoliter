@@ -2622,6 +2622,7 @@ dependencies = [
  "tokio",
  "toml",
  "twoliter",
+ "walkdir",
  "which",
 ]
 

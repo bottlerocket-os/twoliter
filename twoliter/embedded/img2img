@@ -15,6 +15,11 @@ IN_PLACE_UPDATES="no"
 # already enforce mutual exclusion when `standalone-image = true`.
 ENCRYPTED_STORAGE="no"
 STANDALONE_IMAGE="no"
+# Newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples,
+# matching the shape rpm2img gets. On repack, we do NOT re-copy the guest
+# images (they are already in the rootfs from the original build); we only
+# walk each install_path under ${ROOT_MOUNT} and resign any `*.eif` we find.
+GUEST_IMAGES=""
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -32,6 +37,7 @@ for opt in "$@"; do
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
+  --guest-images=*) GUEST_IMAGES="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -114,6 +120,12 @@ write_partition() {
 # Import the image helper functions.
 # shellcheck source=imghelper
 . "${0%/*}/imghelper"
+
+# Import the eif signer-args discovery helper. Used by the guest-EIF resign
+# loop below to pick the same Infra.toml [eif] profile that rpm2eif / eif2eif
+# use, so a host repack re-signs its guest EIFs with the same key/backend.
+# shellcheck source=eif-sign-helper
+. "${0%/*}/eif-sign-helper"
 
 # Validate that the values for the args are sane.
 sanity_checks \
@@ -243,6 +255,82 @@ install_ca_certs "${ROOT_MOUNT}"
 
 # Install 'root.json'.
 install_root_json "${ROOT_MOUNT}"
+
+# ---- Resign guest EIFs, if this variant embeds any ----
+#
+# When the host manifest declares `[[package.metadata.build-variant.guest-images]]`
+# entries, buildsys passes them through as `--guest-images` with the same
+# `<guest>:<install_path>:<host_image_dir>` shape rpm2img gets. On repack
+# we do *not* re-copy the guest artifacts (they were already staged into
+# the rootfs at build time); we only walk each install_path under
+# ${ROOT_MOUNT} and re-sign any `*.eif` we find, so the new host-repack
+# artifacts continue to reflect the current Infra.toml [eif] profile.
+#
+# When no [eif] profile is configured we skip the resign and log once —
+# matching img2img's existing "no UEFI SB profile ⇒ skip signing" behavior
+# and rpm2eif's "no signing.crt ⇒ unsigned" behavior. This keeps repack
+# usable on stripped-down local dev flows without an Infra.toml.
+if [[ -n "${GUEST_IMAGES}" ]]; then
+  # Fail hard rather than silently skip: an operator who declared
+  # `[[guest-images]]` in the manifest expects those EIFs to be resigned
+  # (otherwise there is no reason to invoke repack against a host that
+  # embeds them). The current implementation walks the extracted `${ROOT_MOUNT}`
+  # directory tree, which only exists in the erofs path — for an ext4
+  # rootfs, edits go through `debugfs_replace` and there is no live tree
+  # to `find` under. Adding an ext4-path implementation is possible (see
+  # plan Approach A) but out of scope here. Fail loudly so a future ext4
+  # host+guest combination shows up as a concrete task rather than a
+  # silently-broken build.
+  if [[ "${EROFS_ROOT_PARTITION}" != "yes" ]]; then
+    echo "img2img: --guest-images is set but rootfs is not erofs; guest-EIF resign is only implemented for erofs rootfs. Enable erofs-root-partition on the host variant or drop the guest-images declaration." >&2
+    exit 1
+  fi
+  guest_resign_args=()
+  if ! discover_eif_signer_args guest_resign_args; then
+    # Fires only when the signing.crt secret is mounted but neither
+    # signing.key nor a non-empty kms-key-id file is — which means the
+    # buildsys → buildkit secret plumbing is inconsistent with Infra.toml
+    # [eif].signing_key. Propagate the failure just as rpm2eif does; the
+    # operator asked for signing (cert is present) but the setup is
+    # incomplete, and silently leaving guest EIFs unsigned would be
+    # surprising.
+    exit 1
+  fi
+  if (( ${#guest_resign_args[@]} == 0 )); then
+    echo "img2img: no EIF signing profile present (Infra.toml [eif] not configured); leaving guest EIFs unchanged" >&2
+  else
+    # Iterate the newline-delimited list. Each entry is
+    # `<guest>:<install_path>:<host_image_dir>`; we only care about
+    # <install_path> here.
+    while IFS= read -r entry; do
+      [[ -n "${entry}" ]] || continue
+      # Split on `:`. The install path is the middle field.
+      IFS=':' read -r _guest install_path _host_dir <<<"${entry}"
+      if [[ -z "${install_path}" ]]; then
+        echo "img2img: malformed --guest-images entry (missing install_path): ${entry}" >&2
+        exit 1
+      fi
+      # `install_path` is host-absolute (starts with `/`); glob it under
+      # ${ROOT_MOUNT}. Suppress `failglob` for the duration of the check
+      # because a host that embeds no `.eif`s (e.g. only qcow2 guests) is a
+      # normal case.
+      shopt -u failglob
+      eif_files=( "${ROOT_MOUNT}${install_path}"/*.eif )
+      shopt -s failglob
+      # `failglob` off + empty match leaves the literal pattern, so filter
+      # it out explicitly.
+      for eif in "${eif_files[@]}"; do
+        [[ -f "${eif}" ]] || continue
+        echo "img2img: resigning guest EIF ${eif#"${ROOT_MOUNT}"}"
+        /host/build/tools/eif-builder resign \
+          --input "${eif}" \
+          --output "${eif}.resigned" \
+          "${guest_resign_args[@]}"
+        mv "${eif}.resigned" "${eif}"
+      done
+    done <<<"${GUEST_IMAGES}"
+  fi
+fi
 
 ###############################################################################
 # Section 4: update root partition and root verity
