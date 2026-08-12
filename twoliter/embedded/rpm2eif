@@ -16,8 +16,11 @@ shopt -qs failglob
 # Source imghelper for generate_verity_root and related functions.
 # Source partyplanner for the Bottlerocket-standard partition type GUIDs; this
 # keeps the sidecar disk-image layout in sync with rpm2img and img2img.
+# Source eif-sign-helper for the shared Infra.toml [eif] → eif-builder CLI
+# arg discovery (see the helper's header for the mount-path contract).
 . "${0%/*}/imghelper"
 . "${0%/*}/partyplanner"
+. "${0%/*}/eif-sign-helper"
 
 usage() {
     cat <<EOF
@@ -500,6 +503,21 @@ if [[ "${BUILD_ID_TIMESTAMP:-}" =~ ^[0-9]+$ ]]; then
     BUILD_TIME_RFC3339="$(date -u -d "@${BUILD_ID_TIMESTAMP}" +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
+# Discover the EIF signing profile mounted by buildsys from Infra.toml [eif]
+# and pass the appropriate signing flags to eif-builder. Delegated to
+# `eif-sign-helper::discover_eif_signer_args` so the eif2eif / img2img
+# resign paths share the exact same behavior. See the helper's header for
+# the mount-path contract and the four possible profile shapes.
+#
+# EIF still does not do UEFI Secure Boot -- rpm2eif does not sign
+# shim/grub/vmlinuz -- but the EIF *itself* now carries an
+# `EifSectionSignature` over PCR0 when [eif] is configured, so
+# `nitro-cli describe-eif` reports it as signed and PCR8 is populated.
+sign_args=()
+if ! discover_eif_signer_args sign_args; then
+    exit 1
+fi
+
 /host/build/tools/eif-builder \
     --kernel "${KERNEL_LOCAL}" \
     --cmdline "${KERNEL_CMDLINE}" \
@@ -509,7 +527,8 @@ fi
     --kernel-version "${KERNEL_VERSION}" \
     --image-version "${VERSION_ID}" \
     --build-time "${BUILD_TIME_RFC3339}" \
-    --out-prepared-kernel "${PREPARED_KERNEL_TMP}"
+    --out-prepared-kernel "${PREPARED_KERNEL_TMP}" \
+    "${sign_args[@]}"
 
 echo "=== Generating SBOMs ==="
 # Mirror rpm2img: generate SBOMs over the variant RPMs and merge with the

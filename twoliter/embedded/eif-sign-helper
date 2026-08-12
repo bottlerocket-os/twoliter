@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# eif-sign-helper - translate the EIF signing profile mounted by buildsys
+# (via Infra.toml's [eif] section) into the CLI flag tuple that `eif-builder`
+# (both `build` and `resign`) accepts.
+#
+# This file is *sourced* by rpm2eif, eif2eif, and img2img; do not `exec` it.
+# It defines a single function and performs no top-level side effects.
+#
+# Contract:
+#
+#   discover_eif_signer_args OUT_ARRAY_NAME
+#
+# Fills the caller's array (bash nameref) with an ordered list of
+# `--signing-cert …`, `--signing-key …` (local backend) or
+# `--kms-key-id …` (KMS backend) arguments suitable for either
+#   `eif-builder --arch … ${OUT_ARRAY[@]}` (build)
+# or
+#   `eif-builder resign --input … --output … ${OUT_ARRAY[@]}` (resign).
+#
+# Return codes:
+#
+#   0  Profile detected (array may be empty when no [eif] section is
+#      configured in Infra.toml; callers use "empty array ⇒ produce an
+#      unsigned artifact").
+#   1  A cert was mounted but neither a key nor a KMS key id was — the
+#      Infra.toml is inconsistent, or the buildkit secret plumbing dropped
+#      one of the two inputs. A diagnostic is emitted to stderr; the caller
+#      should propagate the failure.
+#
+# Environment:
+#
+#   EIF_SIGNING_DIR  Directory carrying the mounted signing artifacts.
+#                    Defaults to `/root/eif`, matching build.Dockerfile's
+#                    `--mount=type=secret,target=/root/eif/...` layout.
+#                    Overridable so the accompanying test can point the
+#                    helper at a synthesized fixture dir.
+#
+#   EIF_AWS_DIR      Directory carrying the mounted AWS credential env
+#                    files (`aws-access-key-id.env`,
+#                    `aws-secret-access-key.env`,
+#                    `aws-session-token.env`). Defaults to
+#                    `${HOME:-/root}/.aws`. Only consulted on the KMS
+#                    backend; ignored for the local-key path.
+#
+# Discovery order:
+#
+#   1. No `${EIF_SIGNING_DIR}/signing.crt`  →  empty array, return 0
+#      (unsigned; the operator did not add an `[eif]` section to
+#      Infra.toml, or no Infra.toml was passed to twoliter/buildsys).
+#   2. `signing.crt` + `signing.key` (both non-empty on disk):
+#      local backend → --signing-cert + --signing-key.
+#   3. `signing.crt` + `kms-key-id` (non-empty file whose contents are
+#      the KMS key id/ARN/alias):
+#      KMS backend   → --kms-key-id + --signing-cert (+ --region when a
+#      non-empty `kms-region` sidecar file is present). This also
+#      exports AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+#      AWS_SESSION_TOKEN into the caller's environment from the AWS
+#      credential env files that buildsys mounts alongside the signing
+#      profile, because `eif-builder`'s `aws-config::from_env()` needs
+#      them exported (mounting alone puts the files on disk but leaves
+#      the env unset). Without this, KMS Sign hard-fails with a
+#      credentials-not-found error on the first call — every non-EC2
+#      build host would break, and even EC2 build hosts break because
+#      the buildkit container does not have IMDS.
+#   4. Cert but neither backend: hard error (rc 1). This case does not
+#      occur through the normal `Infra.toml [eif]` path — buildsys
+#      pre-validates both cert and backend before mounting — so hitting
+#      it indicates broken build plumbing rather than an operator
+#      configuration mistake, and we refuse rather than silently
+#      producing an unsigned artifact when the operator asked for
+#      signing.
+#
+# History: previously this helper autodetected against `~/sbkeys/code-sign.*`
+# and `~/.config/aws-kms-pkcs11/config.json`, reusing the UEFI Secure Boot
+# code-signing key for EIF as well. That conflated three separate concerns
+# (Nitro-hypervisor trust vs. UEFI-firmware db trust; EC-only vs. typically
+# RSA; distinct rotation cadences), and made it impossible for a maintainer
+# to run one build with sbkeys signing but an EIF signed by a different key.
+# The dedicated `[eif]` section in Infra.toml replaces that autodetect.
+
+discover_eif_signer_args() {
+  local -n _out=${1:?discover_eif_signer_args: OUT_ARRAY_NAME required}
+  # Reset to empty in case the caller passed a pre-populated array.
+  _out=()
+
+  local dir="${EIF_SIGNING_DIR:-/root/eif}"
+  local cert="${dir}/signing.crt"
+  local key="${dir}/signing.key"
+  local kms_key_id_file="${dir}/kms-key-id"
+  local kms_region_file="${dir}/kms-region"
+
+  # Case 1: no cert at all → no signing profile ([eif] absent from
+  # Infra.toml, or no Infra.toml was passed to buildsys).
+  if [[ ! -s "${cert}" ]]; then
+    return 0
+  fi
+
+  # Case 2: local key backend.
+  if [[ -s "${key}" ]]; then
+    echo "eif-sign-helper: local backend, cert=${cert}" >&2
+    _out=(
+      --signing-cert "${cert}"
+      --signing-key  "${key}"
+    )
+    return 0
+  fi
+
+  # Case 3: KMS backend. The buildkit env-source secret mount produces a
+  # file whose contents are exactly the env var's value (no trailing
+  # newline injection). Strip any incidental whitespace defensively.
+  if [[ -s "${kms_key_id_file}" ]]; then
+    local key_id
+    key_id="$(tr -d '[:space:]' <"${kms_key_id_file}")"
+    if [[ -z "${key_id}" ]]; then
+      echo "eif-sign-helper: ${kms_key_id_file} is empty after stripping whitespace" >&2
+      return 1
+    fi
+    _out=(
+      --kms-key-id   "${key_id}"
+      --signing-cert "${cert}"
+    )
+    # Optional --region: buildsys mounts a `kms-region` sidecar when
+    # Infra.toml `[eif].signing_key.kms.region` is set. Missing or empty
+    # file means "let the SDK's ambient chain resolve it" — the
+    # `KmsSigner` will hard-fail on the first Sign call if the chain is
+    # empty, which is the expected diagnostic (region is a config
+    # concern; better a loud SDK error than a silent fallback).
+    local region=""
+    if [[ -s "${kms_region_file}" ]]; then
+      region="$(tr -d '[:space:]' <"${kms_region_file}")"
+    fi
+    if [[ -n "${region}" ]]; then
+      _out+=(--region "${region}")
+    fi
+
+    # Export the AWS credential env from the mounted `.env` files so
+    # `aws-config::from_env()` inside `eif-builder` can pick them up.
+    # Mounting alone (buildkit `--mount=type=secret,id=aws-*.env`) puts
+    # the file on disk at ${EIF_AWS_DIR}/aws-*.env but leaves the env
+    # unset. Only the KMS path needs credentials; local-key builds do
+    # not touch AWS.
+    local aws_dir="${EIF_AWS_DIR:-${HOME:-/root}/.aws}"
+    local var val
+    for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+      # Buildsys mounts each credential at
+      # `${aws_dir}/aws-<lowercase-dashed-name>.env` (see build.Dockerfile
+      # `aws-access-key-id.env` / `aws-secret-access-key.env` /
+      # `aws-session-token.env`). Skip absent/empty files silently: a
+      # session-token file is only mounted when the operator's STS
+      # profile uses temporary credentials.
+      val="${var,,}"
+      val="${aws_dir}/${val//_/-}.env"
+      [[ -s "${val}" ]] || continue
+      export "${var}=$(<"${val}")"
+    done
+
+    echo "eif-sign-helper: KMS backend, key=${key_id}, region=${region:-<ambient>}" >&2
+    return 0
+  fi
+
+  # Case 4: cert but no backend. Should not happen through Infra.toml [eif]
+  # — buildsys validates both sides before mounting. If we get here, the
+  # build's secret plumbing is broken (e.g. buildkit didn't receive the
+  # env source, or a stale layer cached an incomplete profile). Fail loudly
+  # rather than downgrade to unsigned, because the presence of the cert
+  # means the operator did ask for signing.
+  echo "eif-sign-helper: ${cert} is present but neither ${key} nor ${kms_key_id_file} is; refusing to build an unsigned EIF (check Infra.toml [eif].signing_key and buildkit secret plumbing)" >&2
+  return 1
+}
