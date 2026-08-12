@@ -406,6 +406,10 @@ RUN --mount=target=/host \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
     --mount=type=secret,id=efi-vars.json,target=/root/sbkeys/efi-vars.json \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \
+    --mount=type=secret,id=eif-signing.crt,target=/root/eif/signing.crt \
+    --mount=type=secret,id=eif-signing.key,target=/root/eif/signing.key \
+    --mount=type=secret,id=eif-kms-key-id.env,target=/root/eif/kms-key-id \
+    --mount=type=secret,id=eif-kms-region.env,target=/root/eif/kms-region \
     --mount=type=secret,id=aws-access-key-id.env,target=/root/.aws/aws-access-key-id.env \
     --mount=type=secret,id=aws-secret-access-key.env,target=/root/.aws/aws-secret-access-key.env \
     --mount=type=secret,id=aws-session-token.env,target=/root/.aws/aws-session-token.env \

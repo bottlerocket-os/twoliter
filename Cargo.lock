@@ -921,6 +921,7 @@ dependencies = [
  "lazy_static",
  "nonzero_ext",
  "pipesys",
+ "pubsys-config",
  "rand 0.9.5",
  "regex",
  "reqwest",

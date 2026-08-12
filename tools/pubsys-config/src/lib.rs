@@ -231,8 +231,14 @@ pub struct EifConfig {
 
 /// Backend for the EIF signing key. Only `file` and `kms` are supported;
 /// these map to `eif-builder`'s `--signing-key` and `--kms-key-id` flags.
+///
+/// The `kms` variant is validated on deserialization: when `key_id` is not
+/// a full KMS ARN (which carries a region), `region` must be set explicitly.
+/// Bare key IDs and `alias/...` names have no embedded region, and the
+/// BuildKit sandbox used by `buildsys` has no ambient AWS region source,
+/// so we reject the config here rather than fail deep inside a KMS call.
 #[allow(non_camel_case_types)]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub enum EifSigningKey {
     file {
@@ -240,8 +246,9 @@ pub enum EifSigningKey {
     },
     kms {
         key_id: String,
-        /// AWS region for the KMS `Sign` call. When `None`, the KMS backend
-        /// resolves the region from the ambient AWS SDK chain (env, profile, IMDS).
+        /// AWS region for the KMS `Sign` call. Required unless `key_id` is
+        /// a full ARN (`arn:<partition>:kms:<region>:...`), in which case
+        /// the region is taken from the ARN.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<String>,
     },
@@ -254,6 +261,66 @@ impl Default for EifSigningKey {
             path: PathBuf::new(),
         }
     }
+}
+
+impl<'de> Deserialize<'de> for EifSigningKey {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Mirror of `EifSigningKey` used solely to derive the raw parse; the
+        // outer impl then runs semantic validation before returning.
+        #[allow(non_camel_case_types)]
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        enum Raw {
+            file {
+                path: PathBuf,
+            },
+            kms {
+                key_id: String,
+                #[serde(default)]
+                region: Option<String>,
+            },
+        }
+
+        match Raw::deserialize(deserializer)? {
+            Raw::file { path } => Ok(EifSigningKey::file { path }),
+            Raw::kms { key_id, region } => {
+                if region.is_none() && !key_id_has_embedded_region(&key_id) {
+                    return Err(serde::de::Error::custom(format!(
+                        "EIF signing key `kms.key_id = {key_id:?}` has no embedded region \
+                         and no `region` was set. `region` is required unless `key_id` is \
+                         a full KMS ARN (`arn:<partition>:kms:<region>:...`), because the \
+                         BuildKit sandbox used to sign EIFs has no ambient AWS region \
+                         source (no AWS_REGION, AWS_DEFAULT_REGION, or AWS config file)."
+                    )));
+                }
+                Ok(EifSigningKey::kms { key_id, region })
+            }
+        }
+    }
+}
+
+/// True when `key_id` is a full KMS ARN with a non-empty region field
+/// (`arn:<partition>:kms:<region>:...`). Bare key IDs, UUIDs, and
+/// `alias/...` names return `false`.
+///
+/// Kept in sync with `eif-builder`'s `region_from_kms_arn`; the two must
+/// agree on what counts as "carries its own region".
+fn key_id_has_embedded_region(key_id: &str) -> bool {
+    let mut parts = key_id.splitn(6, ':');
+    if parts.next() != Some("arn") {
+        return false;
+    }
+    // partition (e.g. `aws`, `aws-us-gov`, `aws-cn`)
+    if parts.next().is_none() {
+        return false;
+    }
+    if parts.next() != Some("kms") {
+        return false;
+    }
+    matches!(parts.next(), Some(region) if !region.is_empty())
 }
 
 /// Represents a Bottlerocket repo's location and the metadata needed to update the repo
@@ -356,25 +423,7 @@ signing_key = { file = { path = "/opt/eif/signing.key" } }
 }
 
 #[test]
-fn eif_config_kms_backend_parses() {
-    let toml_str = r#"
-[eif]
-signing_cert = "/opt/eif/signing.crt"
-signing_key = { kms = { key_id = "alias/my-eif-key" } }
-"#;
-    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
-    let eif = cfg.eif.expect("eif section missing");
-    match eif.signing_key {
-        EifSigningKey::kms { key_id, region } => {
-            assert_eq!(key_id, "alias/my-eif-key");
-            assert_eq!(region, None);
-        }
-        _ => panic!("expected kms backend"),
-    }
-}
-
-#[test]
-fn eif_config_kms_with_region_parses() {
+fn eif_config_kms_alias_with_region_parses() {
     let toml_str = r#"
 [eif]
 signing_cert = "/opt/eif/signing.crt"
@@ -389,6 +438,118 @@ signing_key = { kms = { key_id = "alias/my-eif-key", region = "us-west-2" } }
         }
         _ => panic!("expected kms backend"),
     }
+}
+
+#[test]
+fn eif_config_kms_full_arn_without_region_parses() {
+    // A full KMS ARN carries its own region; no explicit `region` needed.
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "arn:aws:kms:us-east-1:123456789012:key/abcdef01-2345-6789-abcd-ef0123456789" } }
+"#;
+    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
+    let eif = cfg.eif.expect("eif section missing");
+    match eif.signing_key {
+        EifSigningKey::kms { key_id, region } => {
+            assert!(key_id.starts_with("arn:aws:kms:us-east-1:"));
+            assert_eq!(region, None);
+        }
+        _ => panic!("expected kms backend"),
+    }
+}
+
+#[test]
+fn eif_config_kms_alias_without_region_is_rejected() {
+    // Bare alias with no region must be rejected: the BuildKit sandbox
+    // has no ambient region source, so this would fail at KMS-call time.
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "alias/my-eif-key" } }
+"#;
+    let err = toml::from_str::<InfraConfig>(toml_str)
+        .expect_err("kms alias without region must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("region"),
+        "error should mention the missing region, got: {msg}"
+    );
+}
+
+#[test]
+fn eif_config_kms_bare_key_id_without_region_is_rejected() {
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "abcdef01-2345-6789-abcd-ef0123456789" } }
+"#;
+    let err = toml::from_str::<InfraConfig>(toml_str)
+        .expect_err("bare kms key id without region must be rejected");
+    assert!(err.to_string().contains("region"));
+}
+
+#[test]
+fn eif_config_kms_arn_with_empty_region_is_rejected() {
+    // `arn:aws:kms::...` has no region field; treated the same as an alias.
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "arn:aws:kms::123456789012:key/abcdef01" } }
+"#;
+    let err = toml::from_str::<InfraConfig>(toml_str)
+        .expect_err("arn with empty region field must be rejected");
+    assert!(err.to_string().contains("region"));
+}
+
+#[test]
+fn eif_config_kms_partitioned_arn_without_region_parses() {
+    // Non-`aws` partitions (gov, cn) also carry a region in the ARN.
+    let toml_str = r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { kms = { key_id = "arn:aws-us-gov:kms:us-gov-west-1:123456789012:alias/eif" } }
+"#;
+    let cfg: InfraConfig = toml::from_str(toml_str).unwrap();
+    let eif = cfg.eif.expect("eif section missing");
+    match eif.signing_key {
+        EifSigningKey::kms { key_id, region } => {
+            assert!(key_id.contains(":us-gov-west-1:"));
+            assert_eq!(region, None);
+        }
+        _ => panic!("expected kms backend"),
+    }
+}
+
+#[test]
+fn key_id_has_embedded_region_classifier() {
+    // Positive cases: full ARNs across partitions and resource shapes.
+    assert!(key_id_has_embedded_region(
+        "arn:aws:kms:us-east-1:123456789012:key/abcdef01-2345-6789-abcd-ef0123456789"
+    ));
+    assert!(key_id_has_embedded_region(
+        "arn:aws:kms:eu-west-2:123456789012:alias/eif-signing-key"
+    ));
+    assert!(key_id_has_embedded_region(
+        "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/abcdef01"
+    ));
+    assert!(key_id_has_embedded_region(
+        "arn:aws-cn:kms:cn-north-1:123456789012:key/abcdef01"
+    ));
+
+    // Negative cases: bare IDs, aliases, non-KMS ARNs, empty region.
+    assert!(!key_id_has_embedded_region("alias/eif-signing-key"));
+    assert!(!key_id_has_embedded_region(
+        "abcdef01-2345-6789-abcd-ef0123456789"
+    ));
+    assert!(!key_id_has_embedded_region(
+        "arn:aws:iam::123456789012:role/example"
+    ));
+    assert!(!key_id_has_embedded_region("arn:aws:s3:::my-bucket"));
+    assert!(!key_id_has_embedded_region(
+        "arn:aws:kms::123456789012:key/abcdef01"
+    ));
+    assert!(!key_id_has_embedded_region(""));
 }
 
 #[test]
