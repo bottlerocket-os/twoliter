@@ -26,6 +26,15 @@ signing_keys = { file = { path = "/home/user/key.pem" } }
 #signing_keys = { kms = { key_id = "abc-def-123" } }
 #signing_keys = { ssm = { parameter = "/my/parameter" } }
 
+# EIF (Nitro Enclave Image Format) signing for Nitro Enclave variants.
+# Separate trust domain from `signing_keys` (TUF) and `sbkeys` (UEFI SB).
+# Requires an EC key on a NIST P-curve (P-256 / P-384); public key must
+# match `signing_cert`. If omitted, EIF builds are unsigned.
+#[eif]
+#signing_cert = "/home/user/eif-signing.crt"
+#signing_key = { file = { path = "/home/user/eif-signing.key" } }
+#signing_key = { kms = { key_id = "alias/my-eif-key" } }
+
 # If these URLs are uncommented, the repo will be pulled and used as a starting
 # point, and your images (and related files) will be added as a new update in
 # the created repo.  Otherwise, we build a new repo from scratch.
