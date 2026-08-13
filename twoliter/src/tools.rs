@@ -60,6 +60,7 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
             &dir,
             mtime,
         ),
+        write_bin("ukisys", twoliter_tool_ukisys::UKISYS.reader(), &dir, mtime),
         write_bin(
             "eif-builder",
             twoliter_tool_eif_builder::EIF_BUILD_BIN.reader(),
@@ -170,6 +171,7 @@ async fn test_install_tools() {
     assert!(toolsdir.join("pubsys").is_file());
     assert!(toolsdir.join("pubsys-setup").is_file());
     assert!(toolsdir.join("tuftool").is_file());
+    assert!(toolsdir.join("ukisys").is_file());
     assert!(toolsdir.join("unplug").is_file());
 
     // Check that the mtimes match.

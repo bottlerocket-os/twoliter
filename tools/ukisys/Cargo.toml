@@ -1,0 +1,10 @@
+[package]
+name = "ukisys"
+version = "0.1.0"
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+publish = false
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+snafu.workspace = true

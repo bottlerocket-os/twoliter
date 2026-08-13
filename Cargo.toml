@@ -18,6 +18,7 @@ members = [
     "tools/pubsys-setup",
     "tools/serde-templated",
     "tools/serde-templated-derive",
+    "tools/ukisys",
     "tools/unplug",
 
     "tools/update-metadata",
@@ -33,6 +34,7 @@ members = [
     "twoliter/src/tool-crates/pubsys",
     "twoliter/src/tool-crates/pubsys-setup",
     "twoliter/src/tool-crates/tuftool",
+    "twoliter/src/tool-crates/ukisys",
     "twoliter/src/tool-crates/unplug",
     "twoliter/src/tool-crates/eif-builder",
 
@@ -87,8 +89,10 @@ twoliter-tool-pipesys = { version = "0.1", path = "twoliter/src/tool-crates/pipe
 twoliter-tool-pubsys = { version = "0.1", path = "twoliter/src/tool-crates/pubsys" }
 twoliter-tool-pubsys-setup = { version = "0.1", path = "twoliter/src/tool-crates/pubsys-setup" }
 twoliter-tool-tuftool = { version = "0.1", path = "twoliter/src/tool-crates/tuftool" }
+twoliter-tool-ukisys = { version = "0.1", path = "twoliter/src/tool-crates/ukisys" }
 twoliter-tool-unplug = { version = "0.1", path = "twoliter/src/tool-crates/unplug" }
 
+ukisys = { version = "0.1", path = "tools/ukisys", artifact = [ "bin:ukisys" ] }
 unplug = { version = "0.1", path = "tools/unplug", artifact = [ "bin:unplug" ] }
 update-metadata = { version = "0.1", path = "tools/update-metadata" }
 
