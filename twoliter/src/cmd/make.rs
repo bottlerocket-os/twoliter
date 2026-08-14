@@ -62,6 +62,7 @@ impl Make {
         CargoMake::new(&sdk_source)?
             .env("CARGO_HOME", self.cargo_home.display().to_string())
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
+            .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
             .env("TWOLITER_QUIET", if global_opts.quiet { "1" } else { "0" })
             .makefile(makefile_path)
