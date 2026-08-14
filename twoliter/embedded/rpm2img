@@ -535,8 +535,10 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
 fi
 
-# Generate an HMAC for the kernel after signing.
-generate_hmac "${BOOT_MOUNT}/vmlinuz"
+if [[ "${UKI_IMAGE}" != "yes" ]]; then
+  # Generate an HMAC for the kernel after signing.
+  generate_hmac "${BOOT_MOUNT}/vmlinuz"
+fi
 
 # Set the Bottlerocket variant, version, and build-id
 SYS_ROOT="${ARCH}-bottlerocket-linux-gnu/sys-root"
@@ -692,10 +694,14 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
     sign_systemd_boot "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
   fi
 
+  # Generate an HMAC for the UKI after signing. The token is relative to
+  # check-kernel-integrity.service's WorkingDirectory=/boot.
+  generate_hmac "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" "EFI/Linux/bottlerocket.efi"
+
   # The kernel is now embedded in the UKI's .linux PE section, so the
   # standalone kernel image is no longer needed and must not be shipped.
-  # The .vmlinuz.hmac file is left in place, as it is still copied into
-  # the boot partition below.
+  # The .bottlerocket.efi.hmac file generated above is left in place, as it
+  # is still copied into the boot partition below.
   rm -f "${BOOT_MOUNT}/vmlinuz"
 fi
 
@@ -790,8 +796,8 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
   mmd -i "${BOOT_IMAGE}" ::/EFI/Linux
   mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" ::/EFI/Linux/
   # Copy HMAC file if present
-  if [[ -f "${BOOT_MOUNT}/.vmlinuz.hmac" ]]; then
-    mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" ::/
+  if [[ -f "${BOOT_MOUNT}/EFI/Linux/.bottlerocket.efi.hmac" ]]; then
+    mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/.bottlerocket.efi.hmac" ::/EFI/Linux/
   fi
   dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
 

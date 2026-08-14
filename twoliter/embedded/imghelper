@@ -777,11 +777,12 @@ sign_systemd_boot() {
 }
 
 generate_hmac() {
-  local vmlinuz
-  vmlinuz="${1:?}"
-  openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${vmlinuz}" |
-    awk '{ print $2 "  vmlinuz" }' \
-      >"${vmlinuz%/*}/.${vmlinuz##*/}.hmac"
+  local target token
+  target="${1:?}"
+  token="${2:-${target##*/}}"
+  openssl sha512 -hmac FIPS-FTW-RHT2009 -hex "${target}" |
+    awk -v token="${token}" '{ print $2 "  " token }' \
+      >"${target%/*}/.${target##*/}.hmac"
 }
 
 sign_grubcfg() {
