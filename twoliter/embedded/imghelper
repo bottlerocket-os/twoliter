@@ -768,6 +768,21 @@ sign_vmlinuz() {
   do_sign "${vmlinuz}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
 }
 
+# bootconfig is not yet supported for UKI images. Until that support exists,
+# the systemd and (for FIPS variants) FIPS bootconfig snippets shipped by
+# the core kit are hard-coded here as literal cmdline tokens. FIPS-ness is
+# derived from the variant name, which always ends in the `-fips` suffix for
+# FIPS variants.
+uki_bootconfig_cmdline() {
+  local variant tokens
+  variant="${1:?}"
+  tokens="SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25 module_blacklist=i8042"
+  if [[ "${variant}" == *-fips ]]; then
+    tokens="${tokens} fips=1 init.systemd.unit=fipscheck.target"
+  fi
+  echo "${tokens}"
+}
+
 sign_systemd_boot() {
   local loader
   loader="${1:?}"

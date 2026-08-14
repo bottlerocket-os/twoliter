@@ -665,10 +665,10 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
   fi
 
   # Build cmdline EXACTLY mirroring grub.cfg
-  # bootconfig is not yet supported for UKI images: there is no mechanism to
-  # attach the runtime-generated bootconfig.data blob as with GRUB's `initrd`
-  # directive, so requesting it only produces a kernel warning at boot.
-  uki_bootconfig=""
+  # bootconfig is not yet supported for UKI images: see uki_bootconfig_cmdline
+  # in imghelper for details on the hard-coded FIPS/systemd cmdline tokens
+  # used in place of it.
+  uki_bootconfig="$(uki_bootconfig_cmdline "${VARIANT}")"
 
   # The escaped quotes around the verity table are intentional: the kernel's
   # dm-mod.create= value contains spaces, so the literal quote characters must
