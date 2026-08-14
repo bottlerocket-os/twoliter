@@ -8,6 +8,8 @@
 # for the boot partition, where we set gptprio bits in the GUID-specific use
 # field, but we might as well do it for all of them.
 BOTTLEROCKET_BOOT_TYPECODE="6b636168-7420-6568-2070-6c616e657421"
+# XBOOTLDR partition for UKI (systemd-boot Type 2 discovery)
+BOTTLEROCKET_XBOOTLDR_TYPECODE="bc13c2ff-59e6-4262-a352-b275fd6f7172"
 BOTTLEROCKET_ROOT_TYPECODE="5526016a-1a97-4ea4-b39a-b7c8c6ca4502"
 BOTTLEROCKET_HASH_TYPECODE="598f10af-c955-4456-6a99-7720068a6cea"
 BOTTLEROCKET_RESERVED_TYPECODE="0c5d99a5-d331-4147-baef-08e2b855bdc9"
@@ -545,6 +547,7 @@ set_partition_labels() {
 set_partition_types() {
   local -n pp_type
   pp_type="${1:?}"
+  local uki_image="${2:-no}"
   pp_type["BIOS"]="${BIOS_BOOT_TYPECODE}"
   pp_type["DATA-A"]="${BOTTLEROCKET_DATA_TYPECODE}"
   pp_type["DATA-B"]="${BOTTLEROCKET_DATA_TYPECODE}"
@@ -554,9 +557,13 @@ set_partition_types() {
   local typecode
   for part in BOOT ROOT HASH RESERVED; do
     for bank in A B; do
-      typecode="BOTTLEROCKET_${part}_TYPECODE"
-      typecode="${!typecode}"
-      pp_type["${part}-${bank}"]="${typecode}"
+      if [[ "${part}" == "BOOT" && "${uki_image}" == "yes" ]]; then
+        pp_type["${part}-${bank}"]="${BOTTLEROCKET_XBOOTLDR_TYPECODE}"
+      else
+        typecode="BOTTLEROCKET_${part}_TYPECODE"
+        typecode="${!typecode}"
+        pp_type["${part}-${bank}"]="${typecode}"
+      fi
     done
   done
 }

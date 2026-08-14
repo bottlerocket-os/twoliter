@@ -66,10 +66,22 @@ Provides: %{_cross_os}image-feature(encrypted-storage)
 Provides: %{_cross_os}image-feature(no-encrypted-storage)
 %endif
 
+%if %{with ephemeral_encryption_keys}
+Provides: %{_cross_os}image-feature(ephemeral-encryption-keys)
+%else
+Provides: %{_cross_os}image-feature(no-ephemeral-encryption-keys)
+%endif
+
 %if %{with standalone_image}
 Provides: %{_cross_os}image-feature(standalone-image)
 %else
 Provides: %{_cross_os}image-feature(no-standalone-image)
+%endif
+
+%if %{with uki_image}
+Provides: %{_cross_os}image-feature(uki-image)
+%else
+Provides: %{_cross_os}image-feature(no-uki-image)
 %endif
 
 %description

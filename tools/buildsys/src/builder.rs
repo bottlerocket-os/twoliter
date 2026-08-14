@@ -545,6 +545,7 @@ impl DockerBuild {
                     Some(ImageFormat::Eif) => "eif",
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",
+                    Some(ImageFormat::Uki) => "uki",
                     Some(ImageFormat::Vmdk) => "vmdk",
                 }
                 .to_string(),
@@ -599,11 +600,22 @@ impl DockerBuild {
     pub(crate) fn repack_variant(args: RepackVariantArgs, manifest: &Manifest) -> Result<Self> {
         let raw_layout = manifest.info().image_layout().cloned().unwrap_or_default();
         let features = manifest.info().image_features().unwrap_or_default();
-        // Repack is implemented by `img2img`, which has no EIF support. Fail
-        // fast here so users get a clear error instead of a cryptic failure
-        // deep inside the Dockerfile build.
-        if matches!(manifest.info().image_format(), Some(ImageFormat::Eif)) {
-            return error::EifRepackUnsupportedSnafu.fail();
+        // Repack is implemented by `img2img`. Handle every format explicitly so
+        // that a newly added one cannot reach the repack path without someone
+        // deciding whether `img2img` can actually handle it.
+        match manifest.info().image_format() {
+            // `img2img` has no EIF support. Fail fast here so users get a clear
+            // error instead of a cryptic failure deep inside the Dockerfile
+            // build.
+            Some(ImageFormat::Eif) => return error::EifRepackUnsupportedSnafu.fail(),
+            // UKI repack is supported (along with the other listed formats).
+            // `img2img` extracts the FAT boot partition with mtools, rebuilds
+            // `EFI/Linux/bottlerocket.efi` from the sections of the existing
+            // UKI so that the kernel command line carries the new dm-verity
+            // root hash, and recreates the partition. See `repack_uki` in
+            // `twoliter/embedded/img2img`.
+            Some(ImageFormat::Raw | ImageFormat::Qcow2 | ImageFormat::Vmdk | ImageFormat::Uki)
+            | None => {}
         }
 
         // Repack has already rejected EIF above, so `image_format` is always
@@ -658,6 +670,7 @@ impl DockerBuild {
                     Some(ImageFormat::Eif) => "eif",
                     Some(ImageFormat::Raw) | None => "raw",
                     Some(ImageFormat::Qcow2) => "qcow2",
+                    Some(ImageFormat::Uki) => "uki",
                     Some(ImageFormat::Vmdk) => "vmdk",
                 }
                 .to_string(),

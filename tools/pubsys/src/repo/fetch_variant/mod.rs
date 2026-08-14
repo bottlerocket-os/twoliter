@@ -142,7 +142,7 @@ async fn fetch_variant(
         .context(error::MissingImageLayoutSnafu { variant })?;
     let image_format = manifest_info.image_format();
     let image_ext = match image_format {
-        Some(ImageFormat::Raw) | None => "img.lz4",
+        Some(ImageFormat::Raw) | Some(ImageFormat::Uki) | None => "img.lz4",
         Some(ImageFormat::Qcow2) => "qcow2",
         Some(ImageFormat::Eif) => "eif",
         Some(ImageFormat::Vmdk) => "ova",
