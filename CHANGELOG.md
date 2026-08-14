@@ -7,13 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.23.0...HEAD
 
+## [0.23.0] - 2026-08-14
+
+### Breaking Changes
 * `testsys` is now officially deprecated and removed from the twoliter binary. ([#697])
 
-[#697]: https://github.com/bottlerocket-os/twoliter/pull/697
+### Added
+* Add support for Unified Kernel Images (UKI) ([#701])
+* Add a new `ephemeral-encryption-keys` image feature to twoliter ([#701])
+* Add re-pack support for UKIs via a new `ukisys` tool, which extracts the `stub` section from a compiled UKI ([#724])
+* Add an `[eif]` signing configuration schema in `pubsys-config` ([#714])
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.1...HEAD
+### Changed
+* Mark the `standalone-image` image feature as experimental ([#702])
+
+### Fixed
+* Propagate `BUILDSYS_ARCH` properly through `twoliter make` commands in cargo-make ([#725])
+
+### Build
+* Bump twoliter Rust nightly toolchain ([#700])
+
+[#697]: https://github.com/bottlerocket-os/twoliter/pull/697
+[#700]: https://github.com/bottlerocket-os/twoliter/pull/700
+[#701]: https://github.com/bottlerocket-os/twoliter/pull/701
+[#702]: https://github.com/bottlerocket-os/twoliter/pull/702
+[#714]: https://github.com/bottlerocket-os/twoliter/pull/714
+[#724]: https://github.com/bottlerocket-os/twoliter/pull/724
+[#725]: https://github.com/bottlerocket-os/twoliter/pull/725
+
+[0.23.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.1...v0.23.0
 
 ## [0.22.1] - 2026-08-03
 
