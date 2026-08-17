@@ -34,23 +34,26 @@ deny:
 
 .PHONY: clippy
 clippy:
-	cargo clippy --locked -- -D warnings --no-deps
+	cargo clippy --quiet --locked -- -D warnings --no-deps
+
+.PHONY: fast
+fast: fmt clippy test
 
 .PHONY: fmt
 fmt:
-	cargo fmt --check
+	cargo fmt --quiet --check
 
 .PHONY: test
 test:
-	cargo test --release --locked
+	cargo test --quiet --release --locked
 
 .PHONY: integ
 integ:
-	cargo test --manifest-path tests/integration-tests/Cargo.toml -- --include-ignored
+	cargo test --quiet --manifest-path tests/integration-tests/Cargo.toml -- --include-ignored
 
 .PHONY: check
 check: fmt clippy deny attributions test integ
 
 .PHONY: build
 build: check
-	cargo build --release --locked
+	cargo build --quiet --release --locked
