@@ -69,10 +69,10 @@ pub(crate) enum Subcommand {
 pub(super) async fn run(args: Args) -> Result<()> {
     match args.subcommand {
         Subcommand::Build(build_command) => build_command.run(&args.global).await,
-        Subcommand::Fetch(fetch_args) => fetch_args.run().await,
+        Subcommand::Fetch(fetch_args) => fetch_args.run(&args.global).await,
         Subcommand::Make(make_args) => make_args.run(&args.global).await,
         Subcommand::Update(update_args) => update_args.run().await,
-        Subcommand::Publish(publish_command) => publish_command.run().await,
+        Subcommand::Publish(publish_command) => publish_command.run(&args.global).await,
         Subcommand::Debug(debug_action) => debug_action.run().await,
     }
 }
@@ -157,7 +157,7 @@ mod test {
             project_path: Some(project_path.to_path_buf()),
             arch: arch.into(),
         };
-        command.run().await.unwrap()
+        command.run(&GlobalOpts { quiet: false }).await.unwrap()
     }
 
     #[tokio::test]
