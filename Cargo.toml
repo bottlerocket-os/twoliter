@@ -79,7 +79,7 @@ pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin
 serde-templated = { version = "0.1", path = "tools/serde-templated" }
 serde-templated-derive = { version = "0.1", path = "tools/serde-templated-derive" }
 
-twoliter = { version = "0.22.1", path = "twoliter", artifact = [ "bin:twoliter" ] }
+twoliter = { version = "0.23.0-rc1", path = "twoliter", artifact = [ "bin:twoliter" ] }
 twoliter-tool-advisory-checker = { version = "0.1", path = "twoliter/src/tool-crates/advisory-checker" }
 twoliter-tool-buildsys = { version = "0.1", path = "twoliter/src/tool-crates/buildsys" }
 twoliter-tool-eif-builder = { version = "0.1", path = "twoliter/src/tool-crates/eif-builder" }
