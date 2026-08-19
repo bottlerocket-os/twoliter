@@ -801,18 +801,8 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
   fi
   dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
 
-  # Report BOOT partition usage for vfat (use file size as approximation)
-  boot_used=$(stat -c %s "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi")
-  boot_total=$((partsize["BOOT-A"] * 1024 * 1024))
-  boot_remaining=$((boot_total - boot_used))
-  boot_percent=$((boot_used * 100 / boot_total))
-  boot_usage=$(jq -n \
-    --arg partition "BOOT-A" \
-    --argjson bytes_total "${boot_total}" \
-    --argjson bytes_used "${boot_used}" \
-    --argjson bytes_remaining "${boot_remaining}" \
-    --argjson percentage_bytes "${boot_percent}" \
-    '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}')
+  # Report BOOT partition usage
+  boot_usage=$(get_fat_usage "${BOOT_IMAGE}" "BOOT-A" "${partsize["BOOT-A"]}")
 else
   mkdir -p "${BOOT_MOUNT}/lost+found"
   chmod -R go-rwx "${BOOT_MOUNT}"

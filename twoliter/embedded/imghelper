@@ -464,6 +464,30 @@ get_erofs_usage() {
     '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}'
 }
 
+# FAT has no dumpe2fs equivalent, so this measures usage from mtools' real
+# free cluster accounting via `mdir -s` instead of summing file sizes.
+get_fat_usage() {
+  local image_file partition_name partition_size_mib
+  local free_bytes total_bytes used_bytes bytes_remaining percentage_bytes
+  image_file="${1:?}"
+  partition_name="${2:?}"
+  partition_size_mib="${3:?}"
+
+  free_bytes="$(mdir -i "${image_file}" -s ::/ | grep "bytes free" | tr -d ' ' | grep -oE '^[0-9]+')"
+  total_bytes="$((partition_size_mib * 1024 * 1024))"
+  used_bytes="$((total_bytes - free_bytes))"
+  bytes_remaining="${free_bytes}"
+  percentage_bytes="$((used_bytes * 100 / total_bytes))"
+
+  jq -n \
+    --arg partition "${partition_name}" \
+    --argjson bytes_total "${total_bytes}" \
+    --argjson bytes_used "${used_bytes}" \
+    --argjson bytes_remaining "${bytes_remaining}" \
+    --argjson percentage_bytes "${percentage_bytes}" \
+    '{($partition): {bytes_total: $bytes_total, bytes_used: $bytes_used, bytes_remaining: $bytes_remaining, percentage_bytes: $percentage_bytes}}'
+}
+
 # Read back the real GPT unique partition GUID for a named partition from an
 # already-partitioned image. Must be called after sgdisk has created the
 # partition table (so the UUID exists to read).

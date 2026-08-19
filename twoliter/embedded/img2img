@@ -17,6 +17,7 @@ IN_PLACE_UPDATES="no"
 ENCRYPTED_STORAGE="no"
 EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="no"
+UKI_IMAGE="no"
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)')"
@@ -34,6 +35,7 @@ for opt in "$@"; do
   --with-uefi-secure-boot=*) UEFI_SECURE_BOOT="${optarg}" ;;
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
+  --with-uki-image=*) UKI_IMAGE="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -109,6 +111,168 @@ write_partition() {
   fi
 }
 
+# Reassemble the Unified Kernel Image for a UKI-format image.
+#
+# The UKI is the only EFI input for the rebuild. The root filesystem is not
+# consulted. The only thing that comes from outside the UKI is the new
+# dm-verity table.
+#
+# Must be called after the new root verity has been generated.
+#
+# Args:
+#   $1: path to the extracted boot filesystem tree
+#   $2: the new dm-verity table, as a single space-separated string
+repack_uki() {
+  local boot_mount dm_verity_table
+  boot_mount="${1:?}"
+  dm_verity_table="${2:?}"
+
+  local uki
+  uki="${boot_mount}/EFI/Linux/bottlerocket.efi"
+  if [[ ! -s "${uki}" ]]; then
+    echo "no UKI found at '${uki}'" >&2
+    exit 1
+  fi
+
+  local stage
+  stage="$(mktemp -p "${WORKDIR}" -d uki.XXXXXXXXXX)"
+
+  # Recover the build inputs from the sections of the existing UKI. The
+  # recovered kernel replaces the loose copy on the boot partition.
+  local kernel old_cmdline_file os_release uname_file old_sbat_file
+  kernel="${boot_mount}/vmlinuz"
+  old_cmdline_file="${stage}/cmdline"
+  os_release="${stage}/os-release"
+  uname_file="${stage}/uname"
+  old_sbat_file="${stage}/sbat"
+  ukify inspect "${uki}" --section=".linux:binary@${kernel}"
+  ukify inspect "${uki}" --section=".cmdline:binary@${old_cmdline_file}"
+  ukify inspect "${uki}" --section=".osrel:binary@${os_release}"
+  ukify inspect "${uki}" --section=".uname:binary@${uname_file}"
+  ukify inspect "${uki}" --section=".sbat:binary@${old_sbat_file}"
+
+  # `ukify build` refuses a signed stub, so derive one from the UKI.
+  local stub
+  stub="${stage}/linux.efi.stub"
+  "${0%/*}/ukisys" derive-stub "${uki}" "${stub}"
+
+  # Resign the recovered kernel. `sign_vmlinuz` runs `undo_sign` first to strip
+  # the signature applied when the image was built, so repacking does not
+  # append another one and grow the kernel.
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    sign_vmlinuz "${kernel}"
+  fi
+
+  # Substitute the new verity table into the recovered command line. img2img is
+  # not given the variant's kernel parameters, so everything other than
+  # `dm-mod.create=` is carried over from the UKI unchanged. Matching on the
+  # literal quote characters is deliberate: the table contains spaces, so the
+  # quotes are part of the command line itself.
+  local old_cmdline
+  old_cmdline="$(tr -d '\0' <"${old_cmdline_file}")"
+  if [[ "${old_cmdline}" != *'dm-mod.create="'* ]]; then
+    echo "no 'dm-mod.create=' in the kernel command line of '${uki}'" >&2
+    exit 1
+  fi
+  local cmdline_prefix cmdline_suffix new_cmdline
+  cmdline_prefix="${old_cmdline%%dm-mod.create=\"*}"
+  cmdline_suffix="${old_cmdline#*dm-mod.create=\"}"
+  cmdline_suffix="${cmdline_suffix#*\"}"
+  new_cmdline="${cmdline_prefix}dm-mod.create=\"${dm_verity_table}\"${cmdline_suffix}"
+
+  local kernel_version
+  kernel_version="$(tr -d '\0' <"${uname_file}")"
+  if [[ -z "${kernel_version}" ]]; then
+    echo "no kernel version in the '.uname' section of '${uki}'" >&2
+    exit 1
+  fi
+
+  # Reassemble. No measured-boot options are passed: predicted PCR values are
+  # not supported for these images.
+  #
+  # --sbat: a single-line placeholder, not new SBAT content. ukify merges in
+  # the stub's carried-over `.sbat` regardless. Omitting this flag lets ukify
+  # inject its own extra default entry instead, failing the cmp below.
+  local new_uki
+  new_uki="${stage}/bottlerocket.efi"
+  ukify build \
+    --stub "${stub}" \
+    --linux "${kernel}" \
+    --cmdline "${new_cmdline}" \
+    --uname "${kernel_version}" \
+    --os-release @"${os_release}" \
+    --sbat 'sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md' \
+    --output "${new_uki}"
+
+  # Sign the assembled UKI, keeping the existing pesign and NSS plumbing in
+  # charge of the keys.
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    sign_systemd_boot "${new_uki}"
+  fi
+
+  # Validate before the new UKI replaces the old one. A UKI that lost a section,
+  # or that still carries the previous verity table, would boot a kernel that
+  # cannot find its root filesystem, so treat either as fatal.
+  local section extracted
+  for section in .linux .cmdline .uname .osrel .sbat; do
+    extracted="${stage}/verify${section}"
+    if ! ukify inspect "${new_uki}" --section="${section}:binary@${extracted}" ||
+      [[ ! -s "${extracted}" ]]; then
+      echo "assembled UKI has no '${section}' section" >&2
+      exit 1
+    fi
+  done
+  if [[ "$(tr -d '\0' <"${stage}/verify.cmdline")" != "${new_cmdline}" ]]; then
+    echo "assembled UKI does not carry the new kernel command line" >&2
+    exit 1
+  fi
+
+  # Confirm the rebuilt `.sbat` matches the original, rather than assuming it.
+  if ! cmp -s "${old_sbat_file}" "${stage}/verify.sbat"; then
+    echo "assembled UKI's '.sbat' section does not match the original" >&2
+    exit 1
+  fi
+
+  mv "${new_uki}" "${uki}"
+
+  # The HMAC has to cover the final signed bytes of the repacked UKI, so
+  # generate it after the UKI is in its final place. The token is relative to
+  # check-kernel-integrity.service's WorkingDirectory=/boot.
+  generate_hmac "${uki}" "EFI/Linux/bottlerocket.efi"
+
+  # The kernel is now embedded in the UKI's .linux PE section, so the
+  # standalone kernel image is no longer needed and must not be shipped.
+  # The .bottlerocket.efi.hmac file generated above is left in place, as it
+  # is still copied into the boot partition below.
+  rm -f "${kernel}"
+}
+
+# Rebuild the FAT boot partition image for a UKI-format image.
+#
+# The image is rebuilt from scratch: only the files copied in below are
+# carried over, so leftover files from the original filesystem are not.
+#
+# Args:
+#   $1: path to the extracted boot filesystem tree
+#   $2: path of the boot partition image to create
+#   $3: size of the boot partition, in MiB
+mkfs_boot_uki() {
+  local boot_mount boot_image bootpart_mib
+  boot_mount="${1:?}"
+  boot_image="${2:?}"
+  bootpart_mib="${3:?}"
+
+  rm -f "${boot_image}"
+  dd if=/dev/zero of="${boot_image}" bs=1M count="${bootpart_mib}"
+  mkfs.vfat -I -S 512 "${boot_image}" $((bootpart_mib * 1024))
+  mmd -i "${boot_image}" ::/EFI
+  mmd -i "${boot_image}" ::/EFI/Linux
+  mcopy -i "${boot_image}" "${boot_mount}/EFI/Linux/bottlerocket.efi" ::/EFI/Linux/
+  if [[ -f "${boot_mount}/EFI/Linux/.bottlerocket.efi.hmac" ]]; then
+    mcopy -i "${boot_image}" "${boot_mount}/EFI/Linux/.bottlerocket.efi.hmac" ::/EFI/Linux/
+  fi
+}
+
 # Import the partition helper functions.
 # shellcheck source=partyplanner
 . "${0%/*}/partyplanner"
@@ -144,6 +308,11 @@ if [[ "${STANDALONE_IMAGE}" == "yes" ]]; then
   fi
 fi
 
+if [[ "${UKI_IMAGE}" == "yes" && "${IN_PLACE_UPDATES}" == "yes" ]]; then
+  echo "\`image-format = \"uki\"\` is incompatible with 'in-place-updates'" >&2
+  exit 1
+fi
+
 ###############################################################################
 # Section 1: prepare working environment
 
@@ -166,14 +335,19 @@ SELINUX_FILE_CONTEXTS="${ROOT_MOUNT}/${SELINUX_ROOT}/${SELINUX_POLICY}/contexts/
 
 # Collect partition sizes and offsets from the partition plan.
 # The caller is responsible for resolving any feature-dependent default
-# for OS_IMAGE_SIZE_GIB (e.g., 1 GiB when `standalone-image = true`) before invoking
-# this script; we use the value as-is. See `resolved_image_layout` in
+# for OS_IMAGE_SIZE_GIB, e.g. 1 GiB when `standalone-image = true`, before invoking
+# this script. We use the value as-is. See `resolved_image_layout` in
 # `tools/buildsys/src/manifest.rs` for the canonical resolver.
 declare -A partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
   partsize partoff "${STANDALONE_IMAGE}"
+
+# Collect the partition labels, which are needed to look a partition up in the
+# GPT of the image we were given.
+declare -A partlabel
+set_partition_labels partlabel
 
 # Process and stage the input images to the working directory.
 declare OS_IMAGE DATA_IMAGE
@@ -226,7 +400,12 @@ fi
 # Extract the boot partition from the OS image, and dump the contents.
 dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" \
   count="${partsize["BOOT-A"]}" bs=1M skip="${partoff["BOOT-A"]}"
-debugfs -R "rdump / ${BOOT_MOUNT}" "${BOOT_IMAGE}"
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # UKI images have a FAT boot partition, which `debugfs` cannot read.
+  mcopy -i "${BOOT_IMAGE}" -sv "::/" "${BOOT_MOUNT}/"
+else
+  debugfs -R "rdump / ${BOOT_MOUNT}" "${BOOT_IMAGE}"
+fi
 
 # Extract the EFI partition from the OS image and dump the contents, if needed.
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
@@ -280,10 +459,23 @@ else
   root_usage=$(get_ext4_usage "${ROOT_IMAGE}" "ROOT-A")
 fi
 
+# For UKI images, BOOT-A's PARTUUID is fixed for the life of
+# the image, and the repacked image keeps the partition table it came with.
+# Capture it so it can be baked into the .cmdline PE section.
+BOOT_PARTUUID=""
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  BOOT_PARTUUID="$(get_partition_uuid "${OS_IMAGE}" "${partlabel["BOOT-A"]}")"
+fi
+
 # Generate a new root verity.
 declare -a DM_VERITY_ROOT
-generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
-  "${partsize["HASH-A"]}" DM_VERITY_ROOT
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
+    "${partsize["HASH-A"]}" DM_VERITY_ROOT "${BOOT_PARTUUID}"
+else
+  generate_verity_root "${ROOT_IMAGE}" "${VERITY_IMAGE}" \
+    "${partsize["HASH-A"]}" DM_VERITY_ROOT
+fi
 
 # Validate and write root verity back to the OS image. The image size check
 # isn't needed here as it's already done in `generate_verity_root`.
@@ -294,10 +486,11 @@ write_partition "${VERITY_IMAGE}" "${OS_IMAGE}" "${partoff["HASH-A"]}"
 
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
+  # The shim was renamed to the platform-defined default boot path,
+  # `boot*.efi`, by `rpm2img`, regardless of which bootloader it
+  # chain-loads.
   shims=(boot*.efi)
   shim="${shims[0]}"
-  grubs=(grub*.efi)
-  grub="${grubs[0]}"
   mokms=(mm*.efi)
   mokm="${mokms[0]}"
 
@@ -309,7 +502,16 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   # Resign the EFI artifacts.
   sign_shim "${shim}"
   sign_mokm "${mokm}"
-  sign_grub "${grub}"
+  if [[ "${UKI_IMAGE}" == "yes" ]]; then
+    # UKI images carry systemd-boot next to the shim instead of grub.
+    systemd_boots=(systemd-boot*.efi)
+    systemd_boot="${systemd_boots[0]}"
+    sign_systemd_boot "${systemd_boot}"
+  else
+    grubs=(grub*.efi)
+    grub="${grubs[0]}"
+    sign_grub "${grub}"
+  fi
 
   # Write the resigned artifacts back to the EFI image.
   mcopy -i "${EFI_IMAGE}" -ov "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
@@ -323,32 +525,43 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   check_image_size "${EFI_IMAGE}" "${partsize["EFI-A"]}"
   write_partition "${EFI_IMAGE}" "${OS_IMAGE}" "${partoff["EFI-A"]}"
 
-  # Resign the kernel and write to boot image.
-  sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
-  debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" vmlinuz
+  # Resign the kernel and write to boot image. UKI images are handled in
+  # section 6 instead: there the kernel is a payload section of the UKI, which
+  # has to be taken apart and reassembled anyway, and BOOT-A is FAT so
+  # `debugfs_replace` does not apply.
+  if [[ "${UKI_IMAGE}" != "yes" ]]; then
+    sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
+    debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" vmlinuz
 
-  # Generate a new HMAC for the kernel after signing and write to boot image.
-  generate_hmac "${BOOT_MOUNT}/vmlinuz"
-  debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" .vmlinuz.hmac
+    # Generate a new HMAC for the kernel after signing and write to boot image.
+    generate_hmac "${BOOT_MOUNT}/vmlinuz"
+    debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" .vmlinuz.hmac
+  fi
 fi
 
 ###############################################################################
 # Section 6: update boot partition
 
-GRUB_CONFIG="${BOOT_MOUNT}/grub/grub.cfg"
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # No GRUB or grub.cfg to patch: rebuild the UKI and boot partition instead.
+  repack_uki "${BOOT_MOUNT}" "${DM_VERITY_ROOT[*]}"
+  mkfs_boot_uki "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
+else
+  GRUB_CONFIG="${BOOT_MOUNT}/grub/grub.cfg"
 
-# Replace the dm-verity root with the new verity.
-sed -i \
-  "s:^set dm_verity_root=.*:set dm_verity_root=\"${DM_VERITY_ROOT[*]}\":g" \
-  "${GRUB_CONFIG}"
+  # Replace the dm-verity root with the new verity.
+  sed -i \
+    "s:^set dm_verity_root=.*:set dm_verity_root=\"${DM_VERITY_ROOT[*]}\":g" \
+    "${GRUB_CONFIG}"
 
-# Replace grub.cfg on the boot image.
-debugfs_replace "${BOOT_IMAGE}" "${GRUB_CONFIG}" /grub/grub.cfg
+  # Replace grub.cfg on the boot image.
+  debugfs_replace "${BOOT_IMAGE}" "${GRUB_CONFIG}" /grub/grub.cfg
 
-# Sign the grub.cfg and replace the signature on the boot image, if needed.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-  sign_grubcfg "${GRUB_CONFIG}"
-  debugfs_replace "${BOOT_IMAGE}" "${GRUB_CONFIG}.sig" /grub/grub.cfg.sig
+  # Sign the grub.cfg and replace the signature on the boot image, if needed.
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+    sign_grubcfg "${GRUB_CONFIG}"
+    debugfs_replace "${BOOT_IMAGE}" "${GRUB_CONFIG}.sig" /grub/grub.cfg.sig
+  fi
 fi
 
 # Write the boot image back to the OS image.
@@ -356,13 +569,18 @@ check_image_size "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
 write_partition "${BOOT_IMAGE}" "${OS_IMAGE}" "${partoff["BOOT-A"]}"
 
 # Report BOOT partition usage
-boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  boot_usage=$(get_fat_usage "${BOOT_IMAGE}" "BOOT-A" "${partsize["BOOT-A"]}")
+else
+  boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
+fi
 
 # Combine usage data into final JSON
 echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
 # Predict PCR values after all signing is complete.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+# Skipped for UKI images, matching `rpm2img`.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
   "${0%/*}/pcrsys" disk \
     --image "${OS_IMAGE}" \
     --efi-vars "${SBKEYS}/efi-vars.json" \
@@ -399,6 +617,13 @@ elif [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
   if [[ -s "${DATA_IMAGE}" ]]; then
     symlink_image "vmdk" "data_image" "${OUTPUT_DIR}"
   fi
+elif [[ "${OUTPUT_FMT}" == "uki" ]]; then
+  # UKI uses raw disk format. "uki" here refers to boot layout, not disk format.
+  compress_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  symlink_image "img.lz4" "os_image" "${OUTPUT_DIR}"
+  if [[ -s "${DATA_IMAGE}" ]]; then
+    symlink_image "img.lz4" "data_image" "${OUTPUT_DIR}"
+  fi
 fi
 
 # Create the OVA if needed.
@@ -415,11 +640,20 @@ if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
 fi
 
 # Compress and symlink the rest.
-compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+# BOOT-A is FAT for UKI images, see mkfs_boot_uki above, and ext4 otherwise.
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  compress_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
+else
+  compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+fi
 compress_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 compress_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
-symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  symlink_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
+else
+  symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
+fi
 symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 symlink_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 

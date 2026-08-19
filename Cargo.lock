@@ -5076,6 +5076,7 @@ dependencies = [
  "twoliter-tool-pubsys",
  "twoliter-tool-pubsys-setup",
  "twoliter-tool-tuftool",
+ "twoliter-tool-ukisys",
  "twoliter-tool-unplug",
  "uuid",
  "which",
@@ -5156,6 +5157,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "twoliter-tool-ukisys"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "ukisys",
+]
+
+[[package]]
 name = "twoliter-tool-unplug"
 version = "0.1.0"
 dependencies = [
@@ -5195,6 +5204,14 @@ checksum = "885c31f06fce836457fe3ef09a59f83fe8db95d270b11cd78f40a4666c4d1661"
 dependencies = [
  "libc",
  "tokio",
+]
+
+[[package]]
+name = "ukisys"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "snafu 0.8.9",
 ]
 
 [[package]]
