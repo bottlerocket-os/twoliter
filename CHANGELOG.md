@@ -7,13 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.23.0-rc1...HEAD
 
+## [0.23.0-rc1] - 2026-08-19
+
+### Breaking Changes
 * `testsys` is now officially deprecated and removed from the twoliter binary. ([#697])
 
-[#697]: https://github.com/bottlerocket-os/twoliter/pull/697
+### Added 
+* Add new `uki` image format, complete with repack support ([#701], [#724])
+* Add support for ephemeral encryption keys ([#701])
+* Add `eif` signing configuration to `Infra.toml` ([#714])
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.1...HEAD
+### Build
+* Bump rust toolchain from `nightly-2025-12-17` to `nightly-2026-08-09` ([#700])
+
+### Fixed
+* Propagate `BUILDSYS_ARCH` properly when using `twoliter make` ([#725])
+
+[#697]: https://github.com/bottlerocket-os/twoliter/pull/697
+[#700]: https://github.com/bottlerocket-os/twoliter/pull/700
+[#701]: https://github.com/bottlerocket-os/twoliter/pull/701
+[#714]: https://github.com/bottlerocket-os/twoliter/pull/714
+[#724]: https://github.com/bottlerocket-os/twoliter/pull/724
+[#725]: https://github.com/bottlerocket-os/twoliter/pull/725
+
+[0.23.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.22.1...v0.23.0-rc1
 
 ## [0.22.1] - 2026-08-03
 
