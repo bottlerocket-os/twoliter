@@ -103,6 +103,7 @@ async-trait = "0.1"
 async-walkdir = "1"
 authenticode = "0.5"
 aws-config = { version = "1", default-features = false, features = ["credentials-process", "default-https-client", "rt-tokio" ] }
+aws-lc-rs = { version = "1.17", default-features = false, features = ["aws-lc-sys"] }
 aws-credential-types = "1"
 aws-sdk-ebs = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-ec2 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
@@ -119,6 +120,7 @@ bounded-integer = "0.5"
 bytes = "1"
 clap = "4"
 coldsnap = { version = "0.11", default-features = false }
+coset = { version = "0.3", features = ["std"] }
 crc32fast = "1"
 daemonize = "0.5"
 darling = "0.23"
@@ -145,6 +147,7 @@ libc = "0.2"
 log = "0.4"
 lzma-rs = "0.3"
 maplit = "1"
+minicbor-serde = { version = "0.7", features = ["std"] }
 mockall = "0.13"
 nix = "0.31"
 nonzero_ext = "0.3"
@@ -153,6 +156,7 @@ num-traits = "0.2"
 object = "0.37"
 once_cell = "1.21"
 olpc-cjson = "0.1"
+pem = "3"
 pest = "2.8"
 pest_derive = "2.8"
 proc-macro2 = "1"
@@ -192,6 +196,7 @@ url = "2"
 uuid = "1"
 walkdir = "2"
 which = "8"
+x509-cert = { version = "0.2", default-features = false, features = ["std", "pem"] }
 zstd = "0.13"
 
 [profile.dev.package]
