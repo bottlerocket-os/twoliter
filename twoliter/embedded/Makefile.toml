@@ -689,18 +689,29 @@ profile="${BUILDSYS_SBKEYS_PROFILE_DIR}"
 
 found=0
 # A local profile has signing keys and certificates, while an AWS profile
-# has a config for the aws-kms-pkcs11 helper. Either type is supported.
+# has a config for the aws-kms-pkcs11 helper. The environment variables profile
+# has keys provided through BUILDSYS_SBKEY_* environment variables. Any of
+# these profile types is supported.
 if [ -s "${profile}/shim-sign.key" ] && \
    [ -s "${profile}/shim-sign.crt" ] && \
    [ -s "${profile}/code-sign.key" ] && \
-   [ -s "${profile}/code-sign.crt" ] ; then
+   [ -s "${profile}/code-sign.crt" ] && \
+   [ -s "${profile}/config-sign.key" ] ; then
    let found+=1
-elif [ -s "${profile}/kms-sign.json" ] ; then
+elif [ -s "${profile}/kms-sign.json" ] && \
+     [ -s "${profile}/config-sign.key" ] ; then
+   let found+=1
+# Environment variables case - check if all required env vars are set
+elif [ -n "${BUILDSYS_SBKEY_SHIM_SIGN_KEY_CONTENT}" ] && \
+     [ -n "${BUILDSYS_SBKEY_CODE_SIGN_KEY_CONTENT}" ] && \
+     [ -n "${BUILDSYS_SBKEY_CONFIG_SIGN_KEY_CONTENT}" ] && \
+     [ -s "${profile}/shim-sign.crt" ] && \
+     [ -s "${profile}/code-sign.crt" ] ; then
    let found+=1
 fi
 
 expected=1
-for f in {PK,KEK,db,vendor}.crt config-sign.key efi-vars.{json,aws} ; do
+for f in {PK,KEK,db,vendor}.crt efi-vars.{json,aws} ; do
   let expected+=1
   [ -s "${profile}/${f}" ] && let found+=1
 done
