@@ -84,6 +84,38 @@ pub(crate) enum Error {
     #[snafu(display("Failed to create build arguments due to a dependency error: {source}"))]
     Graph { source: buildsys::manifest::Error },
 
+    #[snafu(display("Failed to load Infra.toml at '{}': {}", path.display(), source))]
+    InfraConfigLoad {
+        path: PathBuf,
+        #[snafu(source(from(pubsys_config::Error, Box::new)))]
+        source: Box<pubsys_config::Error>,
+    },
+
+    #[snafu(display(
+        "EIF signing cert '{}' does not exist or is empty (from Infra.toml [eif].signing_cert).",
+        path.display()
+    ))]
+    EifSigningCertMissing { path: PathBuf },
+
+    #[snafu(display(
+        "EIF signing key '{}' does not exist or is empty (from Infra.toml [eif].signing_key).",
+        path.display()
+    ))]
+    EifSigningKeyMissing { path: PathBuf },
+
+    #[snafu(display(
+        "Infra.lock at '{}' was loaded and has no [eif] section, but the sibling Infra.toml at \
+         '{}' does declare one. This usually means Infra.lock predates the [eif] field and would \
+         silently strip EIF signing. Delete Infra.lock (it will be regenerated) or regenerate it \
+         from the current Infra.toml.",
+        lock_path.display(),
+        toml_path.display()
+    ))]
+    EifStaleInfraLock {
+        lock_path: PathBuf,
+        toml_path: PathBuf,
+    },
+
     #[snafu(display("Missing environment variable '{}'", var))]
     Environment {
         var: String,

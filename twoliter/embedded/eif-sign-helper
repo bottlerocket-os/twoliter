@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# eif-sign-helper — translate the EIF signing profile mounted from
+# Infra.toml [eif] into `eif-builder` signing flags.
+#
+# Sourced by rpm2eif / eif2eif / img2img.
+#
+# Contract:
+#   discover_eif_signer_args OUT_ARRAY_NAME
+#     Fills OUT_ARRAY_NAME with `--signing-cert / --signing-key`
+#     (local) or `--kms-key-id / --signing-cert [/ --region]` (KMS).
+#     rc 0: profile detected (may be empty ⇒ unsigned).
+#     rc 1: cert mounted but no backend ⇒ broken build plumbing.
+#
+# Env:
+#   EIF_SIGNING_DIR   Mount dir for signing artifacts (default /root/eif).
+#   EIF_AWS_DIR       Mount dir for AWS credential .env files
+#                     (default "${HOME:-/root}/.aws"; KMS backend only).
+
+discover_eif_signer_args() {
+  local -n _out=${1:?discover_eif_signer_args: OUT_ARRAY_NAME required}
+  # Reset to empty in case the caller passed a pre-populated array.
+  _out=()
+
+  local dir="${EIF_SIGNING_DIR:-/root/eif}"
+  local cert="${dir}/signing.crt"
+  local key="${dir}/signing.key"
+  local kms_key_id_file="${dir}/kms-key-id"
+  local kms_region_file="${dir}/kms-region"
+
+  # Case 1: no cert → no signing profile.
+  if [[ ! -s "${cert}" ]]; then
+    return 0
+  fi
+
+  # Case 2: local key backend.
+  if [[ -s "${key}" ]]; then
+    echo "eif-sign-helper: local backend, cert=${cert}" >&2
+    _out=(
+      --signing-cert "${cert}"
+      --signing-key  "${key}"
+    )
+    return 0
+  fi
+
+  # Case 3: KMS backend. Strip whitespace defensively (env-source mounts
+  # sometimes include a trailing newline).
+  if [[ -s "${kms_key_id_file}" ]]; then
+    local key_id
+    key_id="$(tr -d '[:space:]' <"${kms_key_id_file}")"
+    if [[ -z "${key_id}" ]]; then
+      echo "eif-sign-helper: ${kms_key_id_file} is empty after stripping whitespace" >&2
+      return 1
+    fi
+    _out=(
+      --kms-key-id   "${key_id}"
+      --signing-cert "${cert}"
+    )
+    # --region is optional; if unset, defer to the AWS SDK's ambient region chain.
+    local region=""
+    if [[ -s "${kms_region_file}" ]]; then
+      region="$(tr -d '[:space:]' <"${kms_region_file}")"
+    fi
+    if [[ -n "${region}" ]]; then
+      _out+=(--region "${region}")
+    fi
+
+    # Load AWS creds from mounted .env files into env to propagate down the call chain.
+    local aws_dir="${EIF_AWS_DIR:-${HOME:-/root}/.aws}"
+    local var val
+    for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+      # Skip absent/empty files silently (session token is optional).
+      val="${var,,}"
+      val="${aws_dir}/${val//_/-}.env"
+      [[ -s "${val}" ]] || continue
+      export "${var}=$(<"${val}")"
+    done
+
+    echo "eif-sign-helper: KMS backend, key=${key_id}, region=${region:-<ambient>}" >&2
+    return 0
+  fi
+
+  # Case 4: cert without a backend — refuse rather than silently downgrade to unsigned.
+  echo "eif-sign-helper: Refusing to build an unsigned EIF since ${cert} is present but neither ${key} nor ${kms_key_id_file} is. Check Infra.toml [eif].signing_key" >&2
+  return 1
+}

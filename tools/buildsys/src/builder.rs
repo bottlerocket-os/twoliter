@@ -19,6 +19,7 @@ use error::Result;
 use lazy_static::lazy_static;
 use nonzero_ext::nonzero;
 use pipesys::server::Server as PipesysServer;
+use pubsys_config::{EifSigningKey, InfraConfig};
 use rand::Rng;
 use regex::Regex;
 use semver::{Comparator, Op, Prerelease, Version, VersionReq};
@@ -971,7 +972,104 @@ fn secrets_args() -> Result<Vec<String>> {
         args.build_secret("env", &id, var);
     }
 
+    args.extend(eif_signing_args()?);
+
     Ok(args)
+}
+
+/// Docker-build `--secret` flags carrying the EIF signing profile from
+/// `Infra.toml [eif]`. Absent config (no `PUBLISH_INFRA_CONFIG_PATH`, no
+/// `[eif]`, or no Infra.toml) is not an error: the in-container helper
+/// treats missing mounts as "unsigned". Empty cert/key files are rejected
+/// here to keep this gate in lockstep with the helper's `[[ -s ]]` check.
+fn eif_signing_args() -> Result<Vec<String>> {
+    let infra_path = match env::var("PUBLISH_INFRA_CONFIG_PATH") {
+        Ok(p) if !p.is_empty() => PathBuf::from(p),
+        _ => return Ok(Vec::new()),
+    };
+
+    let infra = InfraConfig::from_path_or_lock(&infra_path, true)
+        .context(error::InfraConfigLoadSnafu { path: &infra_path })?;
+    let Some(eif) = infra.eif else {
+        // Guard against a stale Infra.lock that predates the `[eif]` schema
+        // shadowing an `[eif]` section in Infra.toml.
+        detect_stale_infra_lock(&infra_path)?;
+        return Ok(Vec::new());
+    };
+
+    if !is_non_empty_file(&eif.signing_cert) {
+        return error::EifSigningCertMissingSnafu {
+            path: eif.signing_cert,
+        }
+        .fail();
+    }
+
+    let mut args = Vec::new();
+    args.build_secret(
+        "file",
+        "eif-signing.crt",
+        &eif.signing_cert.to_string_lossy(),
+    );
+
+    match eif.signing_key {
+        EifSigningKey::file { path } => {
+            if !is_non_empty_file(&path) {
+                return error::EifSigningKeyMissingSnafu { path }.fail();
+            }
+            args.build_secret("file", "eif-signing.key", &path.to_string_lossy());
+        }
+        EifSigningKey::kms { key_id, region } => {
+            env::set_var("EIF_KMS_KEY_ID", &key_id);
+            args.build_secret("env", "eif-kms-key-id.env", "EIF_KMS_KEY_ID");
+            if let Some(region) = region {
+                env::set_var("EIF_KMS_REGION", &region);
+                args.build_secret("env", "eif-kms-region.env", "EIF_KMS_REGION");
+            }
+        }
+    }
+
+    Ok(args)
+}
+
+/// True if `path` names a regular file with size > 0.
+fn is_non_empty_file(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
+}
+
+/// Fail if `Infra.lock` was loaded with no `[eif]` section while the
+/// sibling `Infra.toml` declares one — this indicates a lock predating
+/// the `[eif]` schema and would otherwise silently strip EIF signing.
+/// Returns `Ok(())` when there is no lock, no Infra.toml, or Infra.toml
+/// has no `[eif]` — those are legitimate "no signing" configurations.
+fn detect_stale_infra_lock(infra_path: &Path) -> Result<()> {
+    let Ok(lock_path) = InfraConfig::compute_lock_path(infra_path) else {
+        return Ok(());
+    };
+    // Only relevant when the lock is what actually got loaded.
+    if !lock_path.exists() {
+        return Ok(());
+    }
+    // If Infra.toml is missing or unreadable, there is nothing to compare
+    // against — the lock is authoritative by design.
+    let Ok(toml_str) = fs::read_to_string(infra_path) else {
+        return Ok(());
+    };
+    // Use version-tolerant `toml::Value` so unrelated schema additions in
+    // Infra.toml do not trip this guard.
+    let has_eif = toml::from_str::<toml::Value>(&toml_str)
+        .ok()
+        .and_then(|v| v.get("eif").cloned())
+        .is_some();
+    if has_eif {
+        return error::EifStaleInfraLockSnafu {
+            lock_path,
+            toml_path: infra_path.to_path_buf(),
+        }
+        .fail();
+    }
+    Ok(())
 }
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
@@ -1238,6 +1336,8 @@ fn filename(p: impl AsRef<Path>) -> String {
 mod test {
     use super::*;
     use semver::Version;
+    use std::io::Write;
+    use tempfile::TempDir;
 
     #[test]
     fn test_docker_version_req_25_0_5_passes() {
@@ -1261,5 +1361,103 @@ mod test {
     fn test_docker_version_req_20_10_27_fails() {
         let version = Version::parse("20.10.27").unwrap();
         assert!(!MINIMUM_DOCKER_VERSION.matches(&version))
+    }
+
+    /// A regular file with content is accepted.
+    #[test]
+    fn is_non_empty_file_accepts_nonempty() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("cert.pem");
+        let mut f = File::create(&p).unwrap();
+        f.write_all(b"-----BEGIN CERTIFICATE-----\n").unwrap();
+        assert!(is_non_empty_file(&p));
+    }
+
+    /// A 0-byte file must be treated the same as `[[ -s ]]` in the helper: not present.
+    #[test]
+    fn is_non_empty_file_rejects_zero_byte() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("cert.pem");
+        File::create(&p).unwrap();
+        assert!(p.exists(), "precondition: file exists on disk");
+        assert!(
+            !is_non_empty_file(&p),
+            "a 0-byte file must be treated the same as `[[ -s ]]` in the helper: not present",
+        );
+    }
+
+    #[test]
+    fn is_non_empty_file_rejects_missing() {
+        let dir = TempDir::new().unwrap();
+        assert!(!is_non_empty_file(&dir.path().join("nope")));
+    }
+
+    /// A directory must not satisfy the "file with signing material" check.
+    #[test]
+    fn is_non_empty_file_rejects_directory() {
+        let dir = TempDir::new().unwrap();
+        assert!(!is_non_empty_file(dir.path()));
+    }
+
+    /// No `Infra.lock` on disk → nothing to detect; must be Ok(()).
+    #[test]
+    fn detect_stale_infra_lock_returns_ok_when_no_lock() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        fs::write(
+            &toml_path,
+            r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { file = { path = "/opt/eif/signing.key" } }
+"#,
+        )
+        .unwrap();
+        // No Infra.lock next to it.
+        assert!(detect_stale_infra_lock(&toml_path).is_ok());
+    }
+
+    /// Lock present with `eif = None` while Infra.toml declares `[eif]` → error.
+    #[test]
+    fn detect_stale_infra_lock_errors_when_lock_shadows_eif_toml() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        let lock_path = dir.path().join("Infra.lock");
+        fs::write(
+            &toml_path,
+            r#"
+[eif]
+signing_cert = "/opt/eif/signing.crt"
+signing_key = { file = { path = "/opt/eif/signing.key" } }
+"#,
+        )
+        .unwrap();
+        fs::write(&lock_path, "aws: null\n").unwrap();
+
+        let err = detect_stale_infra_lock(&toml_path)
+            .expect_err("stale lock shadowing Infra.toml [eif] must error");
+        assert!(matches!(err, error::Error::EifStaleInfraLock { .. }));
+    }
+
+    /// Lock present and Infra.toml has no `[eif]` → legitimate no-signing project, Ok(()).
+    #[test]
+    fn detect_stale_infra_lock_ok_when_toml_has_no_eif() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        let lock_path = dir.path().join("Infra.lock");
+        fs::write(&toml_path, "[aws]\nregions = []\n").unwrap();
+        fs::write(&lock_path, "aws: null\n").unwrap();
+        assert!(detect_stale_infra_lock(&toml_path).is_ok());
+    }
+
+    /// Malformed Infra.toml is not this guard's concern; must be Ok(()).
+    #[test]
+    fn detect_stale_infra_lock_ok_when_toml_unparseable() {
+        let dir = TempDir::new().unwrap();
+        let toml_path = dir.path().join("Infra.toml");
+        let lock_path = dir.path().join("Infra.lock");
+        fs::write(&toml_path, "this is not = valid = toml [[[").unwrap();
+        fs::write(&lock_path, "aws: null\n").unwrap();
+        assert!(detect_stale_infra_lock(&toml_path).is_ok());
     }
 }

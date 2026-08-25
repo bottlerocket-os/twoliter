@@ -150,6 +150,7 @@ async fn test_install_tools() {
     assert!(toolsdir.join("build.Dockerfile").is_file());
     assert!(toolsdir.join("build.Dockerfile.dockerignore").is_file());
     assert!(toolsdir.join("docker-go").is_file());
+    assert!(toolsdir.join("eif-sign-helper").is_file());
     assert!(toolsdir.join("guest-images-helper").is_file());
     assert!(toolsdir.join("img2img").is_file());
     assert!(toolsdir.join("imghelper").is_file());
