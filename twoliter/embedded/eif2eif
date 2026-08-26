@@ -301,6 +301,13 @@ if ! discover_eif_signer_args sign_args; then
   exit 1
 fi
 
+# EIF header PCIE flags; unset → omit `--pcie-flags` so the repacked header
+# matches the first-build default. See tools/eif-builder/src/lib.rs.
+pcie_flags_args=()
+if [[ -n "${EIF_PCIE_FLAGS:-}" ]]; then
+  pcie_flags_args=(--pcie-flags "${EIF_PCIE_FLAGS}")
+fi
+
 EIF_OUT="${WORKDIR}/out.eif"
 
 # Carry METADATA identity fields forward from the input EIF.
@@ -379,6 +386,7 @@ KERNEL_CMDLINE="${CMDLINE_PREFIX}${DM_CREATE}${CMDLINE_SUFFIX}"
   --kernel-version "${INPUT_KERNEL_VERSION}" \
   --image-version "${INPUT_IMAGE_VERSION}" \
   --build-time "${INPUT_BUILD_TIME}" \
+  "${pcie_flags_args[@]}" \
   "${sign_args[@]}"
 
 # ---------- Emit artifacts ----------

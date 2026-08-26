@@ -536,6 +536,13 @@ if ! discover_eif_signer_args sign_args; then
     exit 1
 fi
 
+# EIF header PCIE flags; unset → omit `--pcie-flags` so `eif-builder`'s
+# default applies. See tools/eif-builder/src/lib.rs::DEFAULT_PCIE_FLAGS.
+pcie_flags_args=()
+if [[ -n "${EIF_PCIE_FLAGS:-}" ]]; then
+    pcie_flags_args=(--pcie-flags "${EIF_PCIE_FLAGS}")
+fi
+
 /host/build/tools/eif-builder \
     --kernel "${KERNEL_LOCAL}" \
     --cmdline "${KERNEL_CMDLINE}" \
@@ -546,6 +553,7 @@ fi
     --image-version "${VERSION_ID}" \
     --build-time "${BUILD_TIME_RFC3339}" \
     --out-prepared-kernel "${PREPARED_KERNEL_TMP}" \
+    "${pcie_flags_args[@]}" \
     "${sign_args[@]}"
 
 echo "=== Generating SBOMs ==="

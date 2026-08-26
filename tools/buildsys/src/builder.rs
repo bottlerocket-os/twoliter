@@ -214,6 +214,12 @@ impl crate::builder::PackageBuildArgs {
     }
 }
 
+/// Bare lowercase hex for the Docker build-arg; `None` → empty string
+/// (Dockerfile omits `--pcie-flags`, so `eif-builder`'s default applies).
+fn format_eif_pcie_flags(flags: Option<u16>) -> String {
+    flags.map(|v| format!("{v:x}")).unwrap_or_default()
+}
+
 struct VariantBuildArgs {
     package_dependencies: Vec<String>,
     kit_dependencies: Vec<String>,
@@ -224,6 +230,9 @@ struct VariantBuildArgs {
     image_features: HashSet<ImageFeature>,
     image_format: String,
     kernel_parameters: String,
+    /// EIF header PCIE flags override from `[package.metadata.build-variant]
+    /// eif-pcie-flags`.
+    eif_pcie_flags: String,
     name: String,
     os_image_publish_size_gib: String,
     os_image_size_gib: String,
@@ -262,6 +271,7 @@ impl VariantBuildArgs {
         args.build_arg("IMAGE_FORMAT", &self.image_format);
         args.build_arg("IMAGE_NAME", &self.name);
         args.build_arg("KERNEL_PARAMETERS", &self.kernel_parameters);
+        args.build_arg("EIF_PCIE_FLAGS", &self.eif_pcie_flags);
         args.build_arg("KIT_DEPENDENCIES", self.kit_dependencies.join(" "));
         args.build_arg(
             "EXTERNAL_KIT_DEPENDENCIES",
@@ -315,6 +325,7 @@ struct RepackVariantBuildArgs {
     data_image_size_gib: String,
     image_features: HashSet<ImageFeature>,
     image_format: String,
+    eif_pcie_flags: String,
     name: String,
     os_image_publish_size_gib: String,
     os_image_size_gib: String,
@@ -350,6 +361,7 @@ impl RepackVariantBuildArgs {
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("BUILD_ID", &self.version_build);
         args.build_arg("VERSION_ID", &self.version_image);
+        args.build_arg("EIF_PCIE_FLAGS", &self.eif_pcie_flags);
         args.build_arg("GUEST_IMAGES", &self.guest_images);
 
         // TWOLITER_VERSION mirrors what VariantBuildArgs plumbs through so
@@ -568,6 +580,7 @@ impl DockerBuild {
                     .cloned()
                     .unwrap_or_default()
                     .join(" "),
+                eif_pcie_flags: format_eif_pcie_flags(manifest.info().eif_pcie_flags()),
                 name: args.name,
                 os_image_publish_size_gib: os_image_publish_size_gib.to_string(),
                 os_image_size_gib: os_image_size_gib.to_string(),
@@ -689,6 +702,7 @@ impl DockerBuild {
                     Some(ImageFormat::Vmdk) => "vmdk",
                 }
                 .to_string(),
+                eif_pcie_flags: format_eif_pcie_flags(manifest.info().eif_pcie_flags()),
                 name: args.name,
                 os_image_publish_size_gib: os_image_publish_size_gib.to_string(),
                 os_image_size_gib: os_image_size_gib.to_string(),
