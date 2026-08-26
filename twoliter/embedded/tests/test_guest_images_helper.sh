@@ -146,6 +146,7 @@ mkdir -p "${src}" "${dst}"
 # must be rejected.
 touch "${src}/bottlerocket-1.0.0.img.lz4"
 touch "${src}/bottlerocket-1.0.0.ext4.lz4"
+touch "${src}/bottlerocket-1.0.0.eif"
 ln -s "bottlerocket-1.0.0.img.lz4" "${src}/os_image.img.lz4"
 touch "${src}/bottlerocket-1.0.0.eif"
 touch "${src}/bottlerocket-1.0.0-disk.img"

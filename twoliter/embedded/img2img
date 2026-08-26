@@ -21,6 +21,7 @@ ENCRYPTED_STORAGE="no"
 EPHEMERAL_ENCRYPTION_KEYS="no"
 STANDALONE_IMAGE="no"
 UKI_IMAGE="no"
+GUEST_IMAGES=""
 
 for opt in "$@"; do
   optarg="$(expr "${opt}" : '[^=]*=\(.*\)' || echo '')"
@@ -39,7 +40,7 @@ for opt in "$@"; do
   --with-in-place-updates=*) IN_PLACE_UPDATES="${optarg}" ;;
   --with-standalone-image=*) STANDALONE_IMAGE="${optarg}" ;;
   --with-uki-image=*) UKI_IMAGE="${optarg}" ;;
-  --guest-images=*) ;;
+  --guest-images=*) GUEST_IMAGES="${optarg}" ;;
   *)
     echo "unexpected arg: ${opt}" >&2
     exit 1
@@ -285,6 +286,10 @@ mkfs_boot_uki() {
 # shellcheck source=imghelper
 . "${0%/*}/imghelper"
 
+# Provides `discover_eif_signer_args` for the guest-EIF resign loop.
+# shellcheck source=eif-sign-helper
+. "${0%/*}/eif-sign-helper"
+
 # Validate that the values for the args are sane.
 sanity_checks \
   "${OUTPUT_FMT}" "${PARTITION_PLAN}" "${OVF_TEMPLATE}" "${UEFI_SECURE_BOOT}"
@@ -429,6 +434,50 @@ install_ca_certs "${ROOT_MOUNT}"
 
 # Install 'root.json'.
 install_root_json "${ROOT_MOUNT}"
+
+# Resign any guest EIFs staged under ${ROOT_MOUNT} by the original build, so
+# the repacked host reflects the current Infra.toml [eif] profile. With no
+# [eif] profile configured, we log once and leave the guest EIFs untouched.
+if [[ -n "${GUEST_IMAGES}" ]]; then
+  # Only implemented for erofs rootfs; ext4 edits go through debugfs_replace
+  # with no live tree to walk. Fail loudly rather than silently skip.
+  if [[ "${EROFS_ROOT_PARTITION}" != "yes" ]]; then
+    echo "img2img: --guest-images is set but rootfs is not erofs; guest-EIF resign is only implemented for erofs rootfs. Enable erofs-root-partition on the host variant or drop the guest-images declaration." >&2
+    exit 1
+  fi
+  guest_resign_args=()
+  if ! discover_eif_signer_args guest_resign_args; then
+    # signing.crt is present but signing.key / kms-key-id is not: the secret
+    # plumbing disagrees with Infra.toml [eif]. Propagate as rpm2eif does.
+    exit 1
+  fi
+  if (( ${#guest_resign_args[@]} == 0 )); then
+    echo "img2img: no EIF signing profile present (Infra.toml [eif] not configured); leaving guest EIFs unchanged" >&2
+  else
+    while IFS= read -r entry; do
+      [[ -n "${entry}" ]] || continue
+      IFS=':' read -r _guest install_path _host_dir <<<"${entry}"
+      if [[ -z "${install_path}" ]]; then
+        echo "img2img: malformed --guest-images entry (missing install_path): ${entry}" >&2
+        exit 1
+      fi
+      # A host that embeds no `.eif`s (e.g. qcow2-only guests) is normal, so
+      # disable failglob and filter out the unexpanded pattern below.
+      shopt -u failglob
+      eif_files=( "${ROOT_MOUNT}${install_path}"/*.eif )
+      shopt -s failglob
+      for eif in "${eif_files[@]}"; do
+        [[ -f "${eif}" ]] || continue
+        echo "img2img: resigning guest EIF ${eif#"${ROOT_MOUNT}"}"
+        /host/build/tools/eif-builder resign \
+          --input "${eif}" \
+          --output "${eif}.resigned" \
+          "${guest_resign_args[@]}"
+        mv "${eif}.resigned" "${eif}"
+      done
+    done <<<"${GUEST_IMAGES}"
+  fi
+fi
 
 ###############################################################################
 # Section 4: update root partition and root verity
