@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! EIF (Enclave Image Format) builder.
 //!
-//! Builds a minimal sidecar EIF: kernel + cmdline + empty ramdisk + metadata.
-//! The rootfs is a separate erofs artifact attached as virtio-blk at launch.
+//! Builds a minimal sidecar EIF: kernel + cmdline + metadata (+ optional
+//! signature). The rootfs is attached as virtio-blk at launch, so no
+//! RAMDISK section is emitted.
 //!
 //! All multi-byte fields are big-endian.
 
@@ -339,12 +340,10 @@ fn write_eif_bytes(
     Ok(eif)
 }
 
-/// Bundle of prepared section data (kernel/cmdline/ramdisk/metadata) shared
-/// by the unsigned and signed builders.
+/// Bundle of prepared section data shared by the unsigned and signed builders.
 struct KernelPayload {
     kernel: Vec<u8>,
     cmdline: Vec<u8>,
-    ramdisk: Vec<u8>,
     metadata: Vec<u8>,
 }
 
@@ -358,9 +357,6 @@ fn prepare_payload(
     Ok(KernelPayload {
         kernel: kernel_data,
         cmdline: cmdline.as_bytes().to_vec(),
-        // Empty RAMDISK section; sidecar mounts rootfs via virtio-blk + dm-verity.
-        // NOTE: stock nitro-cli produces two ramdisks, so PCR2 consumers see empty input here.
-        ramdisk: Vec::new(),
         metadata: build_metadata(
             metadata.build_tool_version,
             metadata.kernel_version,
@@ -391,7 +387,6 @@ pub fn build_eif(
     payload.kernel =
         kernel::prepare_kernel(payload.kernel, target_arch).context(PrepareKernelSnafu)?;
 
-    // Layout: KERNEL, CMDLINE, RAMDISK, METADATA.
     let entries = [
         SectionEntry {
             ty: EIF_SECTION_KERNEL,
@@ -400,10 +395,6 @@ pub fn build_eif(
         SectionEntry {
             ty: EIF_SECTION_CMDLINE,
             data: Cow::Borrowed(&payload.cmdline),
-        },
-        SectionEntry {
-            ty: EIF_SECTION_RAMDISK,
-            data: Cow::Borrowed(&payload.ramdisk),
         },
         SectionEntry {
             ty: EIF_SECTION_METADATA,
@@ -423,8 +414,8 @@ pub fn build_eif(
 
 /// Build and write a signed EIF.
 ///
-/// Layout: KERNEL, CMDLINE, RAMDISK, METADATA, SIGNATURE (last).
-/// PCR0 = `SHA-384(48 zero bytes || SHA-384(kernel || cmdline || ramdisk_data))`;
+/// Layout: KERNEL, CMDLINE, METADATA, SIGNATURE (last).
+/// PCR0 = `SHA-384(48 zero bytes || SHA-384(kernel || cmdline))`;
 /// metadata and signature sections are excluded from the hash.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_signed_eif(
@@ -442,7 +433,7 @@ pub async fn build_signed_eif(
     payload.kernel =
         kernel::prepare_kernel(payload.kernel, target_arch).context(PrepareKernelSnafu)?;
 
-    let pcr0 = compute_pcr0(&payload.kernel, &payload.cmdline, &[&payload.ramdisk]);
+    let pcr0 = compute_pcr0(&payload.kernel, &payload.cmdline, &[]);
     let signature_bytes = build_signature_section(signer, &pcr0).await?;
 
     let entries = [
@@ -453,10 +444,6 @@ pub async fn build_signed_eif(
         SectionEntry {
             ty: EIF_SECTION_CMDLINE,
             data: Cow::Borrowed(&payload.cmdline),
-        },
-        SectionEntry {
-            ty: EIF_SECTION_RAMDISK,
-            data: Cow::Borrowed(&payload.ramdisk),
         },
         SectionEntry {
             ty: EIF_SECTION_METADATA,
@@ -1322,7 +1309,7 @@ mod tests {
         let coses_payload = sign1.payload.expect("payload must be present");
 
         // Recompute PCR0 and the upstream `measured_payload` for exact byte compare.
-        let pcr0 = compute_pcr0(b"FAKE_KERNEL", b"cmd", &[&[][..]]);
+        let pcr0 = compute_pcr0(b"FAKE_KERNEL", b"cmd", &[]);
         let measured_payload = minicbor_serde::to_vec(&PcrInfo {
             register_index: 0,
             register_value: pcr0,
@@ -1523,7 +1510,6 @@ mod tests {
         for ty in [
             EIF_SECTION_KERNEL,
             EIF_SECTION_CMDLINE,
-            EIF_SECTION_RAMDISK,
             EIF_SECTION_METADATA,
         ] {
             let a = extract_section(&in_bytes, ty).expect("input has section");
@@ -1698,8 +1684,7 @@ mod tests {
         assert_eq!(v["is_signed"], false);
         assert_eq!(v["cmdline"], "root=/dev/vda1 console=ttyS0");
         assert!(v["kernel_size"].as_u64().unwrap() > 0);
-        // Every builder-produced EIF has exactly one (empty) RAMDISK section.
-        assert_eq!(v["ramdisk_count"], 1);
+        assert_eq!(v["ramdisk_count"], 0);
 
         let bm = &v["metadata"]["BuildMetadata"];
         assert_eq!(bm["BuildToolVersion"], "0.99.0");
