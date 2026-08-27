@@ -5,6 +5,9 @@
 //! signature). The rootfs is attached as virtio-blk at launch, so no
 //! RAMDISK section is emitted.
 //!
+//! PCR0 folds the EIF header flags (arch bit masked) into the measurement;
+//! see [`compute_pcr0`].
+//!
 //! All multi-byte fields are big-endian.
 
 pub mod kernel;
@@ -48,6 +51,9 @@ fn section_type_name(ty: u16) -> &'static str {
 const EIF_ARCH_X86_64: u16 = 0;
 const EIF_ARCH_AARCH64: u16 = 1;
 
+/// Arch bit, excluded from the PCR0 fold.
+const EIF_HDR_ARCH_ARM64: u16 = EIF_ARCH_AARCH64;
+
 const MAX_NUM_SECTIONS: usize = 32;
 const EIF_HEADER_SIZE: usize = 548;
 const EIF_CRC32_OFFSET: usize = EIF_HEADER_SIZE - 4;
@@ -56,9 +62,13 @@ const EIF_SECTION_HEADER_SIZE: usize = 12;
 /// Upper bound on the CBOR-encoded EIF signature section, per the spec.
 pub const SIGNATURE_MAX_SIZE: usize = 32768;
 
-/// PCIE flag constants.
+/// Matched device-model feature flag bits (wire ABI). Any sub-flag implies
+/// the base PCIE bit.
 pub const EIF_HDR_FLAG_PCIE: u16 = 1 << 6;
+pub const EIF_HDR_FLAG_PCIE_VSOCK: u16 = 1 << 7;
+pub const EIF_HDR_FLAG_PCIE_HOTPLUG: u16 = 1 << 8;
 pub const EIF_HDR_FLAG_PCIE_VIRTIO: u16 = 1 << 9;
+pub const EIF_HDR_FLAG_PCIE_ASSIGN: u16 = 1 << 10;
 
 /// Default PCIE flags written into the EIF header when no `--pcie-flags`
 /// override is supplied. Override per-variant via
@@ -433,7 +443,10 @@ pub async fn build_signed_eif(
     payload.kernel =
         kernel::prepare_kernel(payload.kernel, target_arch).context(PrepareKernelSnafu)?;
 
-    let pcr0 = compute_pcr0(&payload.kernel, &payload.cmdline, &[]);
+    // Compute header_flags before PCR0 so the fold and the on-disk header
+    // use the same value.
+    let header_flags = target_arch.flags() | pcie_flags;
+    let pcr0 = compute_pcr0(&payload.kernel, &payload.cmdline, &[], header_flags);
     let signature_bytes = build_signature_section(signer, &pcr0).await?;
 
     let entries = [
@@ -455,7 +468,6 @@ pub async fn build_signed_eif(
         },
     ];
 
-    let header_flags = target_arch.flags() | pcie_flags;
     let eif = write_eif_bytes(default_mem, default_cpus, header_flags, &entries)?;
 
     let mut file = fs::File::create(output_path).context(WriteOutputSnafu { path: output_path })?;
@@ -688,7 +700,8 @@ pub async fn resign_eif(input: &Path, output: &Path, signer: &dyn Signer) -> Res
         reason: "input EIF has no CMDLINE section".to_string(),
     })?;
     // RAMDISK is not required; `compute_pcr0` accepts an empty slice.
-    let pcr0 = compute_pcr0(kernel, cmdline, &ramdisks);
+    // header.flags is byte-preserved, so the fold matches the on-disk header.
+    let pcr0 = compute_pcr0(kernel, cmdline, &ramdisks, header.flags);
     let signature_bytes = build_signature_section(signer, &pcr0).await?;
 
     // Preserve non-signature sections in order; append the new signature last.
@@ -726,16 +739,32 @@ pub async fn resign_eif(input: &Path, output: &Path, signer: &dyn Signer) -> Res
     Ok(())
 }
 
-/// Compute PCR0 = `SHA-384(48 zero bytes || SHA-384(kernel || cmdline || ramdisks))`,
-/// matching the reference `EifBuilder::image_hasher`.
-fn compute_pcr0(kernel_data: &[u8], cmdline_data: &[u8], ramdisks: &[&[u8]]) -> Vec<u8> {
+/// Compute PCR0 with the header-flag fold:
+///
+/// ```text
+/// folded_flags = header_flags & !EIF_HDR_ARCH_ARM64
+/// inner  = SHA-384(kernel || cmdline || ramdisks... [|| folded_flags_be_u16 when nonzero])
+/// PCR0   = SHA-384(48 zero bytes || inner)
+/// ```
+fn compute_pcr0(
+    kernel_data: &[u8],
+    cmdline_data: &[u8],
+    ramdisks: &[&[u8]],
+    header_flags: u16,
+) -> Vec<u8> {
     use aws_lc_rs::digest::{digest, SHA384};
 
-    let mut inner = Vec::with_capacity(kernel_data.len() + cmdline_data.len() + 64);
+    let folded_flags = header_flags & !EIF_HDR_ARCH_ARM64;
+    let flag_bytes = folded_flags.to_be_bytes();
+
+    let mut inner = Vec::with_capacity(kernel_data.len() + cmdline_data.len() + 64 + 2);
     inner.extend_from_slice(kernel_data);
     inner.extend_from_slice(cmdline_data);
     for r in ramdisks {
         inner.extend_from_slice(r);
+    }
+    if folded_flags != 0 {
+        inner.extend_from_slice(&flag_bytes);
     }
     let inner_digest = digest(&SHA384, &inner);
 
@@ -1025,9 +1054,9 @@ mod tests {
 
     // -------- PCR0 / signature tests --------
 
+    /// Baseline: with header_flags=0 the fold appends nothing.
     #[test]
     fn test_pcr0_matches_spec() {
-        // Recompute PCR0 independently to guard against drift in `compute_pcr0`.
         use aws_lc_rs::digest::{digest, SHA384};
 
         let kernel = b"FAKE_KERNEL".to_vec();
@@ -1043,9 +1072,83 @@ mod tests {
         outer.extend_from_slice(inner_d.as_ref());
         let expected = digest(&SHA384, &outer).as_ref().to_vec();
 
-        let got = compute_pcr0(&kernel, &cmdline, &[&ramdisk]);
+        let got = compute_pcr0(&kernel, &cmdline, &[&ramdisk], 0);
         assert_eq!(got, expected, "PCR0 must match the reference spec");
         assert_eq!(got.len(), 48, "SHA-384 output is 48 bytes");
+    }
+
+    /// Pin the byte-level fold contract: BE-append, arch bit masked.
+    #[test]
+    fn test_pcr0_folds_pcie_flags() {
+        use aws_lc_rs::digest::{digest, SHA384};
+
+        let kernel = b"FAKE_KERNEL".to_vec();
+        let cmdline = b"console=ttyS0".to_vec();
+
+        let x86_flags = DEFAULT_PCIE_FLAGS;
+        let arm_flags = DEFAULT_PCIE_FLAGS | EIF_HDR_ARCH_ARM64;
+        let pcr_x86 = compute_pcr0(&kernel, &cmdline, &[], x86_flags);
+        let pcr_arm = compute_pcr0(&kernel, &cmdline, &[], arm_flags);
+        assert_eq!(pcr_x86, pcr_arm, "arch bit must be masked");
+
+        let mut inner = Vec::new();
+        inner.extend_from_slice(&kernel);
+        inner.extend_from_slice(&cmdline);
+        inner.extend_from_slice(&[0x02, 0x40]); // BE(0x0240)
+        let inner_d = digest(&SHA384, &inner);
+        let mut outer = vec![0u8; 48];
+        outer.extend_from_slice(inner_d.as_ref());
+        let expected = digest(&SHA384, &outer).as_ref().to_vec();
+        assert_eq!(pcr_x86, expected);
+
+        let baseline = compute_pcr0(&kernel, &cmdline, &[], 0);
+        let arch_only = compute_pcr0(&kernel, &cmdline, &[], EIF_HDR_ARCH_ARM64);
+        assert_eq!(baseline, arch_only);
+        assert_ne!(baseline, pcr_x86);
+    }
+
+    /// Wire ABI: matched-flag bit values are byte-pinned. Any drift silently
+    /// changes PCR0.
+    #[test]
+    fn test_matched_flag_bit_values() {
+        assert_eq!(EIF_HDR_FLAG_PCIE, 0x0040);
+        assert_eq!(EIF_HDR_FLAG_PCIE_VSOCK, 0x0080);
+        assert_eq!(EIF_HDR_FLAG_PCIE_HOTPLUG, 0x0100);
+        assert_eq!(EIF_HDR_FLAG_PCIE_VIRTIO, 0x0200);
+        assert_eq!(EIF_HDR_FLAG_PCIE_ASSIGN, 0x0400);
+        assert_eq!(DEFAULT_PCIE_FLAGS, 0x0240);
+        // No matched bit collides with the arch bit.
+        let all = EIF_HDR_FLAG_PCIE
+            | EIF_HDR_FLAG_PCIE_VSOCK
+            | EIF_HDR_FLAG_PCIE_HOTPLUG
+            | EIF_HDR_FLAG_PCIE_VIRTIO
+            | EIF_HDR_FLAG_PCIE_ASSIGN;
+        assert_eq!(all & EIF_HDR_ARCH_ARM64, 0);
+    }
+
+    /// Golden vector: PcrInfo{0, [0xAA; 48]} must serialize to the exact bytes
+    /// the reference `serde_cbor` emits. If `minicbor-serde` drifts we would
+    /// ship an unverifiable signature.
+    #[test]
+    fn test_pcr_info_golden_cbor_bytes() {
+        let payload = minicbor_serde::to_vec(&PcrInfo {
+            register_index: 0,
+            register_value: vec![0xAA; 48],
+        })
+        .unwrap();
+
+        let mut expected = Vec::with_capacity(130);
+        expected.push(0xa2); // map(2)
+        expected.push(0x6e); // tstr(14)
+        expected.extend_from_slice(b"register_index");
+        expected.push(0x00); // uint 0
+        expected.push(0x6e); // tstr(14)
+        expected.extend_from_slice(b"register_value");
+        expected.extend_from_slice(&[0x98, 0x30]); // array(48)
+        for _ in 0..48 {
+            expected.extend_from_slice(&[0x18, 0xAA]);
+        }
+        assert_eq!(payload, expected);
     }
 
     #[test]
@@ -1309,7 +1412,7 @@ mod tests {
         let coses_payload = sign1.payload.expect("payload must be present");
 
         // Recompute PCR0 and the upstream `measured_payload` for exact byte compare.
-        let pcr0 = compute_pcr0(b"FAKE_KERNEL", b"cmd", &[]);
+        let pcr0 = compute_pcr0(b"FAKE_KERNEL", b"cmd", &[], 0);
         let measured_payload = minicbor_serde::to_vec(&PcrInfo {
             register_index: 0,
             register_value: pcr0,
@@ -1376,6 +1479,97 @@ mod tests {
         public_key
             .verify(&tbs, &sig_der)
             .expect("signature must verify");
+    }
+
+    /// End-to-end guard: signed EIF built with DEFAULT_PCIE_FLAGS must carry
+    /// a PCR0 that includes the fold.
+    #[tokio::test]
+    async fn test_signed_eif_with_pcie_flags_folds_flags_into_pcr0() {
+        use coset::{CborSerializable, CoseSign1};
+
+        let (cert_pem, key_pem) = generate_test_cert_and_key();
+        let signer = signer::LocalSigner::from_pem(&cert_pem, &key_pem).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let kernel_path = dir.path().join("kernel");
+        let output = dir.path().join("signed.eif");
+        let kernel_bytes = b"FAKE_KERNEL_PCIE_TEST";
+        let cmdline = "root=/dev/dm-0 ro";
+        fs::write(&kernel_path, kernel_bytes).unwrap();
+
+        build_signed_eif(
+            &kernel_path,
+            cmdline,
+            &output,
+            512 << 20,
+            2,
+            DEFAULT_PCIE_FLAGS,
+            TargetArch::X86_64,
+            &MetadataFields::default(),
+            &signer,
+        )
+        .await
+        .unwrap();
+
+        let eif = fs::read(&output).unwrap();
+        let on_disk_flags = u16::from_be_bytes([eif[6], eif[7]]);
+        assert_eq!(on_disk_flags, DEFAULT_PCIE_FLAGS);
+
+        let sig = extract_section(&eif, EIF_SECTION_SIGNATURE).unwrap();
+        let envelope: Vec<PcrSignature> = minicbor_serde::from_slice(&sig).unwrap();
+        let sign1 = CoseSign1::from_slice(&envelope[0].signature).unwrap();
+        let payload = sign1.payload.expect("payload must be present");
+        let decoded: PcrInfo = minicbor_serde::from_slice(&payload).unwrap();
+
+        let expected = compute_pcr0(kernel_bytes, cmdline.as_bytes(), &[], DEFAULT_PCIE_FLAGS);
+        let baseline = compute_pcr0(kernel_bytes, cmdline.as_bytes(), &[], 0);
+        assert_eq!(decoded.register_value, expected);
+        assert_ne!(decoded.register_value, baseline);
+    }
+
+    /// Resign reads header flags off disk and folds them identically.
+    #[tokio::test]
+    async fn test_resign_preserves_pcr0_fold() {
+        use coset::{CborSerializable, CoseSign1};
+
+        let (cert_a, key_a) = generate_test_cert_and_key();
+        let (cert_b, key_b) = generate_test_cert_and_key();
+        let signer_a = signer::LocalSigner::from_pem(&cert_a, &key_a).unwrap();
+        let signer_b = signer::LocalSigner::from_pem(&cert_b, &key_b).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let kernel_path = dir.path().join("kernel");
+        let signed_a = dir.path().join("a.eif");
+        let signed_b = dir.path().join("b.eif");
+        fs::write(&kernel_path, b"FAKE_KERNEL").unwrap();
+
+        build_signed_eif(
+            &kernel_path,
+            "cmd",
+            &signed_a,
+            512 << 20,
+            2,
+            DEFAULT_PCIE_FLAGS,
+            TargetArch::X86_64,
+            &MetadataFields::default(),
+            &signer_a,
+        )
+        .await
+        .unwrap();
+
+        resign_eif(&signed_a, &signed_b, &signer_b).await.unwrap();
+
+        let pcr0_of = |path: &Path| -> Vec<u8> {
+            let eif = fs::read(path).unwrap();
+            let sig = extract_section(&eif, EIF_SECTION_SIGNATURE).unwrap();
+            let envelope: Vec<PcrSignature> = minicbor_serde::from_slice(&sig).unwrap();
+            let sign1 = CoseSign1::from_slice(&envelope[0].signature).unwrap();
+            let payload = sign1.payload.expect("payload must be present");
+            let decoded: PcrInfo = minicbor_serde::from_slice(&payload).unwrap();
+            decoded.register_value
+        };
+
+        assert_eq!(pcr0_of(&signed_a), pcr0_of(&signed_b));
     }
 
     /// Decode the signature section outer envelope via the upstream serde CBOR path.

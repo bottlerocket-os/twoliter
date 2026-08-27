@@ -2,7 +2,7 @@
 # rpm2eif - Build a sidecar EIF from RPMs with dm-verity integrity.
 #
 # Produces:
-#   - {name}.eif: minimal EIF (kernel + cmdline + empty ramdisk + metadata)
+#   - {name}.eif: minimal EIF (kernel + cmdline + metadata; no ramdisk)
 #   - {name}-disk.img: GPT disk with ROOT-A (erofs) + HASH-A (verity) partitions
 #   - {name}-kernel: bare kernel for direct Firecracker boot. On aarch64 this
 #     is a flat PE arm64 `Image` (any EFI zboot wrapper has been unwrapped and
