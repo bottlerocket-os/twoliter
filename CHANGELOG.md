@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0...HEAD
 
-## [0.24.0-rc1] - 2026-08-28
+## [0.24.0] - 2026-08-28
 
 ### Added
 * Add support for signing and repacking EIFs ([#715], [#716], [#717], [#718], [#719], [#720], [#731])
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#730]: https://github.com/bottlerocket-os/twoliter/pull/730
 [#731]: https://github.com/bottlerocket-os/twoliter/pull/731
 
-[0.24.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.23.0...v0.24.0-rc1
+[0.24.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.23.0...v0.24.0
 
 ## [0.23.0] - 2026-08-19
 
