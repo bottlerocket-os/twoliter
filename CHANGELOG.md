@@ -7,14 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.23.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0-rc1...HEAD
+
+## [0.24.0-rc1] - 2026-08-28
+
+### Added
+* Add support for signing and repacking EIFs ([#715], [#716], [#717], [#718], [#719], [#720], [#731])
+
+### Fixed
+* Expose EIF header PCIE flags as variant metadata ([#721])
+* Select x86_64 EIF kernel format via variant metadata ([#722])
+* Remove empty ramdisk and fix ordering of EIF sections ([#730])
+
+[#715]: https://github.com/bottlerocket-os/twoliter/pull/715
+[#716]: https://github.com/bottlerocket-os/twoliter/pull/716
+[#717]: https://github.com/bottlerocket-os/twoliter/pull/717
+[#718]: https://github.com/bottlerocket-os/twoliter/pull/718
+[#719]: https://github.com/bottlerocket-os/twoliter/pull/719
+[#720]: https://github.com/bottlerocket-os/twoliter/pull/720
+[#721]: https://github.com/bottlerocket-os/twoliter/pull/721
+[#722]: https://github.com/bottlerocket-os/twoliter/pull/722
+[#730]: https://github.com/bottlerocket-os/twoliter/pull/730
+[#731]: https://github.com/bottlerocket-os/twoliter/pull/731
+
+[0.24.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.23.0...v0.24.0-rc1
 
 ## [0.23.0] - 2026-08-19
 
 ### Breaking Changes
 * `testsys` is now officially deprecated and removed from the twoliter binary. ([#697])
 
-### Added 
+### Added
 * Add new `uki` image format, complete with repack support ([#701], [#724])
 * Add support for ephemeral encryption keys ([#701])
 * Add `eif` signing configuration to `Infra.toml` ([#714])
