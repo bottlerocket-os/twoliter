@@ -195,44 +195,78 @@ impl Variant {
     ///
     /// If an override is `Some`, it replaces the original value. If `None`, the original is kept.
     /// Family is recomputed from final platform/runtime UNLESS family was explicitly overridden.
-    pub fn with_overrides(&self, overrides: &VariantOverrides) -> Self {
+    ///
+    /// The variant identity string (i.e. its name as used by `Display`, `AsRef<str>`, etc.) is
+    /// always preserved from the original variant.  Overrides only affect the individual attribute
+    /// accessors (`platform()`, `runtime()`, `family()`, `version()`, `variant_flavor()`).  This
+    /// is important because the identity string is used for the `bottlerocket-variant(name)` RPM
+    /// Provides/Requires contract; rewriting it from overridden attributes breaks that contract.
+    pub fn with_overrides(&self, overrides: &VariantOverrides) -> Result<Self> {
         let platform = overrides
             .platform
             .clone()
             .unwrap_or_else(|| self.platform.clone());
+        ensure!(
+            !platform.is_empty(),
+            error::VariantPartEmptySnafu {
+                part_name: "platform",
+                variant: self.variant.clone()
+            }
+        );
         let runtime = overrides
             .runtime
             .clone()
             .unwrap_or_else(|| self.runtime.clone());
+        ensure!(
+            !runtime.is_empty(),
+            error::VariantPartEmptySnafu {
+                part_name: "runtime",
+                variant: self.variant.clone()
+            }
+        );
         let family = overrides
             .family
             .clone()
             .unwrap_or_else(|| format!("{platform}-{runtime}"));
+        ensure!(
+            !family.is_empty(),
+            error::VariantPartEmptySnafu {
+                part_name: "family",
+                variant: self.variant.clone()
+            }
+        );
         let version = overrides.version.clone().or_else(|| self.version.clone());
+        if let Some(ref v) = version {
+            ensure!(
+                !v.is_empty(),
+                error::VariantPartEmptySnafu {
+                    part_name: "variant_version",
+                    variant: self.variant.clone()
+                }
+            );
+        }
         let variant_flavor = overrides
             .flavor
             .clone()
             .or_else(|| self.variant_flavor.clone());
-
-        // Reconstruct variant string from final attributes: platform-runtime[-version][-flavor]
-        let mut variant = format!("{platform}-{runtime}");
-        if let Some(ref v) = version {
-            variant.push('-');
-            variant.push_str(v);
-        }
         if let Some(ref f) = variant_flavor {
-            variant.push('-');
-            variant.push_str(f);
+            ensure!(
+                !f.is_empty(),
+                error::VariantPartEmptySnafu {
+                    part_name: "variant_flavor",
+                    variant: self.variant.clone()
+                }
+            );
         }
 
-        Self {
-            variant,
+        Ok(Self {
+            variant: self.variant.clone(),
             platform,
             runtime,
             family,
             version,
             variant_flavor,
-        }
+        })
     }
 
     fn parse<S: Into<String>>(value: S) -> Result<Self> {
@@ -520,7 +554,7 @@ mod with_overrides_tests {
             platform: Some("metal".to_string()),
             ..Default::default()
         };
-        let result = variant.with_overrides(&overrides);
+        let result = variant.with_overrides(&overrides).unwrap();
         assert_eq!(result.platform(), "metal");
         assert_eq!(result.runtime(), "k8s");
         assert_eq!(result.family(), "metal-k8s");
@@ -534,7 +568,7 @@ mod with_overrides_tests {
             runtime: Some("ecs".to_string()),
             ..Default::default()
         };
-        let result = variant.with_overrides(&overrides);
+        let result = variant.with_overrides(&overrides).unwrap();
         assert_eq!(result.platform(), "aws");
         assert_eq!(result.runtime(), "ecs");
         assert_eq!(result.family(), "aws-ecs");
@@ -549,7 +583,7 @@ mod with_overrides_tests {
             family: Some("custom-family".to_string()),
             ..Default::default()
         };
-        let result = variant.with_overrides(&overrides);
+        let result = variant.with_overrides(&overrides).unwrap();
         assert_eq!(result.platform(), "metal");
         assert_eq!(result.runtime(), "k8s");
         assert_eq!(result.family(), "custom-family");
@@ -563,7 +597,7 @@ mod with_overrides_tests {
             runtime: Some("dev".to_string()),
             ..Default::default()
         };
-        let result = variant.with_overrides(&overrides);
+        let result = variant.with_overrides(&overrides).unwrap();
         assert_eq!(result.family(), "vmware-dev");
     }
 
@@ -577,7 +611,7 @@ mod with_overrides_tests {
             version: Some("2.0".to_string()),
             flavor: Some("nvidia".to_string()),
         };
-        let result = variant.with_overrides(&overrides);
+        let result = variant.with_overrides(&overrides).unwrap();
         assert_eq!(result.platform(), "metal");
         assert_eq!(result.runtime(), "dev");
         assert_eq!(result.family(), "custom");
@@ -589,7 +623,7 @@ mod with_overrides_tests {
     fn test_with_overrides_none() {
         let variant = Variant::new("aws-k8s-1.32-nvidia").unwrap();
         let overrides = VariantOverrides::default();
-        let result = variant.with_overrides(&overrides);
+        let result = variant.with_overrides(&overrides).unwrap();
         assert_eq!(result.platform(), "aws");
         assert_eq!(result.runtime(), "k8s");
         assert_eq!(result.family(), "aws-k8s");
@@ -613,5 +647,269 @@ mod with_overrides_tests {
         assert_eq!(variant2.family(), "metal-dev");
         assert_eq!(variant2.version(), None);
         assert_eq!(variant2.variant_flavor(), None);
+    }
+
+    // Identity-preservation: with_overrides must not rewrite the variant name.
+
+    /// Scenario 1: multiple overrides that diverge from the parsed segments.
+    #[test]
+    fn test_with_overrides_preserves_identity_customer_scenario() {
+        // "aws-dev-gpu" parses as platform=aws, runtime=dev, version=gpu
+        let variant = Variant::new("aws-dev-gpu").unwrap();
+        assert_eq!(variant.platform(), "aws");
+        assert_eq!(variant.runtime(), "dev");
+        assert_eq!(variant.version(), Some("gpu"));
+
+        let overrides = VariantOverrides {
+            platform: Some("aws".to_string()),
+            runtime: Some("custom-runtime".to_string()),
+            flavor: Some("gpu".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        // Identity must be preserved, not reconstructed from overridden attributes.
+        assert_eq!(
+            result.as_ref(),
+            "aws-dev-gpu",
+            "variant identity must be preserved, not reconstructed from overridden attributes"
+        );
+        assert_eq!(
+            result.to_string(),
+            "aws-dev-gpu",
+            "Display must reflect the preserved identity"
+        );
+
+        // Overridden attributes must still take effect.
+        assert_eq!(result.platform(), "aws");
+        assert_eq!(result.runtime(), "custom-runtime");
+        assert_eq!(result.family(), "aws-custom-runtime");
+        assert_eq!(result.version(), Some("gpu")); // inherited from original, not overridden
+        assert_eq!(result.variant_flavor(), Some("gpu"));
+    }
+
+    /// Scenario 2: platform-only override on a non-standard name.
+    #[test]
+    fn test_with_overrides_preserves_identity_platform_only_override() {
+        // "prod-1" parses as platform=prod, runtime=1
+        let variant = Variant::new("prod-1").unwrap();
+        assert_eq!(variant.platform(), "prod");
+        assert_eq!(variant.runtime(), "1");
+        assert_eq!(variant.version(), None);
+
+        let overrides = VariantOverrides {
+            platform: Some("aws".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        assert_eq!(
+            result.as_ref(),
+            "prod-1",
+            "overriding only platform must not rewrite identity from prod-1 to aws-1"
+        );
+        assert_eq!(result.to_string(), "prod-1");
+
+        assert_eq!(result.platform(), "aws");
+        assert_eq!(result.runtime(), "1");
+        assert_eq!(result.family(), "aws-1");
+        assert_eq!(result.version(), None);
+        assert_eq!(result.variant_flavor(), None);
+    }
+
+    /// Scenario 3: flavor override duplicates an existing parsed segment.
+    #[test]
+    fn test_with_overrides_preserves_identity_flavor_adds_duplicate_segment() {
+        // "aws-dev-gpu" parses version=gpu, flavor=None
+        let variant = Variant::new("aws-dev-gpu").unwrap();
+        assert_eq!(variant.platform(), "aws");
+        assert_eq!(variant.runtime(), "dev");
+        assert_eq!(variant.version(), Some("gpu"));
+        assert_eq!(variant.variant_flavor(), None);
+
+        let overrides = VariantOverrides {
+            platform: Some("aws".to_string()),
+            flavor: Some("gpu".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        assert_eq!(
+            result.as_ref(),
+            "aws-dev-gpu",
+            "overriding flavor to 'gpu' when version is already 'gpu' must not produce aws-dev-gpu-gpu"
+        );
+        assert_eq!(result.to_string(), "aws-dev-gpu");
+
+        assert_eq!(result.platform(), "aws");
+        assert_eq!(result.runtime(), "dev");
+        assert_eq!(result.family(), "aws-dev");
+        assert_eq!(result.version(), Some("gpu"));
+        assert_eq!(result.variant_flavor(), Some("gpu"));
+    }
+
+    /// All identity accessors return the original name after overrides.
+    #[test]
+    fn test_with_overrides_preserves_identity_all_accessors() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("metal".to_string()),
+            runtime: Some("dev".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        assert_eq!(result.as_ref(), "aws-k8s-1.32");
+        assert_eq!(result.to_string(), "aws-k8s-1.32");
+        assert_eq!(&*result, "aws-k8s-1.32"); // Deref
+        let owned: String = result.into();
+        assert_eq!(owned, "aws-k8s-1.32"); // Into<String>
+    }
+
+    /// Empty overrides must not truncate trailing ignored segments.
+    #[test]
+    fn test_with_overrides_none_preserves_full_identity() {
+        let input = "aws-k8s-1.32-nvidia-some-additional-ignored-tuple-positions";
+        let variant = Variant::new(input).unwrap();
+        let result = variant
+            .with_overrides(&VariantOverrides::default())
+            .unwrap();
+
+        assert_eq!(
+            result.as_ref(),
+            input,
+            "empty overrides must not truncate trailing variant string segments"
+        );
+    }
+
+    /// PartialEq impls compare the preserved identity, not overridden attrs.
+    #[test]
+    fn test_with_overrides_preserves_identity_equality() {
+        let variant = Variant::new("aws-dev-gpu").unwrap();
+        let overrides = VariantOverrides {
+            runtime: Some("ecs".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        assert_eq!(result, "aws-dev-gpu");
+        assert_eq!("aws-dev-gpu", result);
+        assert_ne!(result, "aws-ecs-gpu");
+    }
+
+    /// Overriding every field still preserves the original name.
+    #[test]
+    fn test_with_overrides_all_fields_preserves_identity() {
+        let variant = Variant::new("aws-k8s-1.32").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("metal".to_string()),
+            runtime: Some("dev".to_string()),
+            family: Some("custom".to_string()),
+            version: Some("2.0".to_string()),
+            flavor: Some("nvidia".to_string()),
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        assert_eq!(
+            result.as_ref(),
+            "aws-k8s-1.32",
+            "even with every attribute overridden, the identity must stay as the original name"
+        );
+
+        // Attributes still reflect overrides.
+        assert_eq!(result.platform(), "metal");
+        assert_eq!(result.runtime(), "dev");
+        assert_eq!(result.family(), "custom");
+        assert_eq!(result.version(), Some("2.0"));
+        assert_eq!(result.variant_flavor(), Some("nvidia"));
+    }
+
+    /// Two-segment variant with overrides preserves its identity.
+    #[test]
+    fn test_with_overrides_two_segment_preserves_identity() {
+        let variant = Variant::new("metal-dev").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some("aws".to_string()),
+            runtime: Some("k8s".to_string()),
+            version: Some("1.32".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        assert_eq!(result.as_ref(), "metal-dev");
+        assert_eq!(result.platform(), "aws");
+        assert_eq!(result.runtime(), "k8s");
+        assert_eq!(result.version(), Some("1.32"));
+    }
+
+    /// Borrow impls return the preserved identity.
+    #[test]
+    fn test_with_overrides_borrow_preserves_identity() {
+        use std::borrow::Borrow;
+
+        let variant = Variant::new("aws-dev-gpu").unwrap();
+        let overrides = VariantOverrides {
+            runtime: Some("ecs".to_string()),
+            ..Default::default()
+        };
+        let result = variant.with_overrides(&overrides).unwrap();
+
+        let s: &str = result.borrow();
+        assert_eq!(s, "aws-dev-gpu");
+
+        let s: &String = result.borrow();
+        assert_eq!(s, "aws-dev-gpu");
+    }
+
+    // Empty override validation tests.
+
+    #[test]
+    fn test_with_overrides_rejects_empty_platform() {
+        let variant = Variant::new("aws-dev").unwrap();
+        let overrides = VariantOverrides {
+            platform: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(variant.with_overrides(&overrides).is_err());
+    }
+
+    #[test]
+    fn test_with_overrides_rejects_empty_runtime() {
+        let variant = Variant::new("aws-dev").unwrap();
+        let overrides = VariantOverrides {
+            runtime: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(variant.with_overrides(&overrides).is_err());
+    }
+
+    #[test]
+    fn test_with_overrides_rejects_empty_family() {
+        let variant = Variant::new("aws-dev").unwrap();
+        let overrides = VariantOverrides {
+            family: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(variant.with_overrides(&overrides).is_err());
+    }
+
+    #[test]
+    fn test_with_overrides_rejects_empty_version() {
+        let variant = Variant::new("aws-dev").unwrap();
+        let overrides = VariantOverrides {
+            version: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(variant.with_overrides(&overrides).is_err());
+    }
+
+    #[test]
+    fn test_with_overrides_rejects_empty_flavor() {
+        let variant = Variant::new("aws-dev").unwrap();
+        let overrides = VariantOverrides {
+            flavor: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(variant.with_overrides(&overrides).is_err());
     }
 }

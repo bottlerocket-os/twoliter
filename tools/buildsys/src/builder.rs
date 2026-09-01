@@ -535,7 +535,9 @@ impl DockerBuild {
 
         let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
         let overrides = manifest.info().variant_overrides();
-        let v = v.with_overrides(&overrides);
+        let v = v
+            .with_overrides(&overrides)
+            .context(error::VariantParseSnafu)?;
         let variant_name = variant.clone();
         let variant: String = v.as_ref().into();
         let variant_platform = v.platform().into();
@@ -676,7 +678,9 @@ impl DockerBuild {
         let variant = filename(args.common.cargo_manifest_dir);
         let v = Variant::new(&variant).context(error::VariantParseSnafu)?;
         let overrides = manifest.info().variant_overrides();
-        let v = v.with_overrides(&overrides);
+        let v = v
+            .with_overrides(&overrides)
+            .context(error::VariantParseSnafu)?;
         let variant_name = variant.clone();
         let variant: String = v.as_ref().into();
         let variant_platform = v.platform().into();
