@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.1-rc1...HEAD
+
+## [0.24.1-rc1] - 2026-09-02
+
+### Fixed
+* Preserve variant identity string in `with_overrides` ([#734])
+
+[#734]: https://github.com/bottlerocket-os/twoliter/pull/734
+
+[0.24.1-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0...v0.24.1-rc1
 
 ## [0.24.0] - 2026-08-28
 
