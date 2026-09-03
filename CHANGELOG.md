@@ -7,16 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.1-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.1-rc2...HEAD
 
-## [0.24.1-rc1] - 2026-09-02
+## [0.24.1-rc2] - 2026-09-03
 
 ### Fixed
 * Preserve variant identity string in `with_overrides` ([#734])
+* Plumb EIF_PCIE_FLAGS into eif2eif repack ([#736])
 
 [#734]: https://github.com/bottlerocket-os/twoliter/pull/734
+[#736]: https://github.com/bottlerocket-os/twoliter/pull/736
 
-[0.24.1-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0...v0.24.1-rc1
+[0.24.1-rc2]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.0...v0.24.1-rc2
 
 ## [0.24.0] - 2026-08-28
 
