@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.2-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.2...HEAD
 
-## [0.24.2-rc1] - 2026-09-04
+## [0.24.2] - 2026-09-08
 
 ### Fixed
 * Install CA certificates in EIF images ([#739])
 
 [#739]: https://github.com/bottlerocket-os/twoliter/pull/739
 
-[0.24.2-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.1...v0.24.2-rc1
+[0.24.2]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.1...v0.24.2
 
 ## [0.24.1] - 2026-09-03
 
