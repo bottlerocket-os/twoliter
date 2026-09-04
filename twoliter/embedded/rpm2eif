@@ -426,6 +426,9 @@ BUG_REPORT_URL="https://github.com/bottlerocket-os/bottlerocket/issues"
 DOCUMENTATION_URL="https://bottlerocket.dev"
 EOF
 
+echo "=== Installing CA certificates ==="
+install_ca_certs "${INSTALL_ROOT}"
+
 echo "=== Creating rootfs.erofs ==="
 # Remove only the top-level /boot from rootfs (kernel is shipped separately).
 [[ -d "${INSTALL_ROOT}/boot" ]] && rm -rf "${INSTALL_ROOT}/boot"
