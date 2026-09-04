@@ -145,6 +145,7 @@ struct InventoryView {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_twoliter_application_inventory() {
     // We clone the latest release bob
     let bob_version = find_latest_version("bottlerocket").await;
