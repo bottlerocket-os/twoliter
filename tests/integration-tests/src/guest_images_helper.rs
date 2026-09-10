@@ -16,7 +16,8 @@ fn helper_path() -> PathBuf {
 /// build. Includes:
 ///   - the bootable image artifacts that should be copied (standard + EIF)
 ///   - the build-metadata files that must NOT be copied (the bug we're guarding against)
-///   - a stable-name symlink (`os_image.img.lz4` -> `bottlerocket-…img.lz4`)
+///   - stable-name symlinks (`os_image.img.lz4`, `latest.eif`, `latest-disk.img`,
+///     `latest-kernel`) that must be dereferenced
 fn populate_synthetic_guest_dir(dir: &Path) {
     // Bootable artifacts (these are the ones that SHOULD be copied).
     for f in [
@@ -49,6 +50,16 @@ fn populate_synthetic_guest_dir(dir: &Path) {
     std::os::unix::fs::symlink(
         "bottlerocket-inner-x86_64-1.0.0-0.eif",
         dir.join("latest.eif"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "bottlerocket-inner-x86_64-1.0.0-0-disk.img",
+        dir.join("latest-disk.img"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "bottlerocket-inner-x86_64-1.0.0-0-kernel",
+        dir.join("latest-kernel"),
     )
     .unwrap();
 
@@ -133,6 +144,8 @@ fn test_copy_guest_image_artifacts_filters_metadata_and_sboms() {
         "bottlerocket-inner-x86_64-1.0.0-0-kernel",
         "os_image.img.lz4",
         "latest.eif",
+        "latest-disk.img",
+        "latest-kernel",
     ] {
         assert!(
             copied.iter().any(|n| n == required),
@@ -157,19 +170,34 @@ fn test_copy_guest_image_artifacts_filters_metadata_and_sboms() {
         );
     }
 
-    // The symlink must remain a symlink (so its target name is preserved verbatim) and
-    // must point at one of the real artifacts in the same directory.
-    let symlink_meta = std::fs::symlink_metadata(dst.join("os_image.img.lz4")).unwrap();
-    assert!(
-        symlink_meta.file_type().is_symlink(),
-        "os_image.img.lz4 should remain a symlink at the destination"
-    );
-    let target = std::fs::read_link(dst.join("os_image.img.lz4")).unwrap();
-    assert_eq!(
-        target.to_string_lossy(),
-        "bottlerocket-inner-x86_64-1.0.0-0.img.lz4",
-        "symlink target should be preserved verbatim"
-    );
+    // Symlinks must be dereferenced — the destination must contain regular files,
+    // not symlinks, so the host rootfs has self-contained artifacts.
+    for name in [
+        "os_image.img.lz4",
+        "latest.eif",
+        "latest-disk.img",
+        "latest-kernel",
+    ] {
+        let meta = std::fs::symlink_metadata(dst.join(name)).unwrap();
+        assert!(
+            meta.file_type().is_file(),
+            "{name} should be a regular file at the destination, not a symlink"
+        );
+    }
+
+    // All copied artifacts must have mode 0644 (world-readable).
+    use std::os::unix::fs::PermissionsExt;
+    for entry in std::fs::read_dir(&dst).unwrap() {
+        let entry = entry.unwrap();
+        let mode = entry.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode,
+            0o644,
+            "{:?} should have mode 0644, got {:o}",
+            entry.file_name(),
+            mode
+        );
+    }
 }
 
 /// If a guest directory holds no recognizable image artifacts, the helper returns non-zero so

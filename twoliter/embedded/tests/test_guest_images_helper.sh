@@ -152,6 +152,8 @@ touch "${src}/bottlerocket-1.0.0.eif"
 touch "${src}/bottlerocket-1.0.0-disk.img"
 touch "${src}/bottlerocket-1.0.0-kernel"
 ln -s "bottlerocket-1.0.0.eif" "${src}/latest.eif"
+ln -s "bottlerocket-1.0.0-disk.img" "${src}/latest-disk.img"
+ln -s "bottlerocket-1.0.0-kernel" "${src}/latest-kernel"
 touch "${src}/application-inventory.json"
 touch "${src}/spdx-sbom.json"
 touch "${src}/artifact-metadata.json"
@@ -171,7 +173,7 @@ else
   # Verify allowlisted artifacts landed at the destination.
   wanted=("bottlerocket-1.0.0.img.lz4" "bottlerocket-1.0.0.ext4.lz4" "os_image.img.lz4"
           "bottlerocket-1.0.0.eif" "bottlerocket-1.0.0-disk.img" "bottlerocket-1.0.0-kernel"
-          "latest.eif")
+          "latest.eif" "latest-disk.img" "latest-kernel")
   missing=""
   for f in "${wanted[@]}"; do
     [[ -e "${dst}/${f}" ]] || missing+=" ${f}"
@@ -182,14 +184,29 @@ else
   for f in "${unwanted[@]}"; do
     [[ -e "${dst}/${f}" ]] && leaked+=" ${f}"
   done
-  # Verify the symlink was preserved as a symlink (not dereferenced).
-  sym_ok="yes"
-  [[ -L "${dst}/os_image.img.lz4" ]] || sym_ok="no"
+  # Verify that symlinks were dereferenced — they must be regular files, not
+  # symlinks, so the host rootfs contains self-contained artifacts.
+  deref_ok="yes"
+  for f in "os_image.img.lz4" "latest.eif" "latest-disk.img" "latest-kernel"; do
+    if [[ -L "${dst}/${f}" ]]; then
+      deref_ok="no"
+    elif [[ ! -f "${dst}/${f}" ]]; then
+      deref_ok="no"
+    fi
+  done
+  # Verify that all copied artifacts have mode 0644.
+  mode_ok="yes"
+  while IFS= read -r -d '' f; do
+    perms="$(stat -c '%a' "${f}")"
+    if [[ "${perms}" != "644" ]]; then
+      mode_ok="no"
+    fi
+  done < <(find "${dst}" -maxdepth 1 -type f -print0)
 
-  if [[ -z "${missing}" && -z "${leaked}" && "${sym_ok}" == "yes" ]]; then
-    pass "copy_guest_image_artifacts copies allowlisted files, drops metadata, preserves symlinks"
+  if [[ -z "${missing}" && -z "${leaked}" && "${deref_ok}" == "yes" && "${mode_ok}" == "yes" ]]; then
+    pass "copy_guest_image_artifacts copies allowlisted files, drops metadata, dereferences symlinks, mode 0644"
   else
-    fail "copy_guest_image_artifacts had issues:${missing:+ missing:${missing}}${leaked:+ leaked:${leaked}}${sym_ok:+ symlink_ok=${sym_ok}}"
+    fail "copy_guest_image_artifacts had issues:${missing:+ missing:${missing}}${leaked:+ leaked:${leaked}}${deref_ok:+ deref_ok=${deref_ok}}${mode_ok:+ mode_ok=${mode_ok}}"
   fi
 fi
 

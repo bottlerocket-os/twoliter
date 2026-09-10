@@ -10,8 +10,8 @@
 //! * every `compress_image "<ext>"` call site in `rpm2img` and `img2img`
 //!   uses a declared suffix;
 //! * `copy_guest_image_artifacts` copies allowlisted files, drops
-//!   sidecar metadata (SBOM, inventory, artifact-metadata), and
-//!   preserves symlinks.
+//!   metadata (SBOM, inventory, artifact-metadata),
+//!   dereferences symlinks, and sets mode 0644.
 //!
 //! This Rust wrapper exists so the bash tests run under `cargo test`
 //! alongside the other embedded-bundle and buildsys tests.

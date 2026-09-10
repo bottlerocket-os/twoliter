@@ -15,13 +15,12 @@ if [[ -z "${IMAGE_ARTIFACT_SUFFIXES+x}" ]]; then
   exit 1
 fi
 
-# Copy bootable image artifacts (and their stable-name symlinks) from `${1}`
-# into `${2}`, rejecting build metadata such as `*.json` and `*-sbom-*`.
+# Copy bootable image artifacts from `${1}` into `${2}`, rejecting build
+# metadata such as `*.json` and `*-sbom-*`.
 #
 # Returns 0 on success, 1 if no matching artifacts were found. Robust to spaces
-# in filenames; preserves symlinks so that e.g.
-# `os_image.img.lz4 -> bottlerocket-…img.lz4` continues to resolve at the
-# destination.
+# in filenames. Symlinks (e.g. `latest.eif`) are dereferenced and installed as
+# regular files with mode 0644 so they are world-readable in the host rootfs.
 copy_guest_image_artifacts() {
   local src="${1}"
   local dst="${2}"
@@ -43,7 +42,7 @@ copy_guest_image_artifacts() {
   find_args+=( \) -print0 )
   local copied=0 file
   while IFS= read -r -d '' file; do
-    if cp -a "${file}" "${dst}/"; then
+    if install -p -m 0644 "${file}" "${dst}/"; then
       copied=$((copied + 1))
     else
       echo "guest-images: failed to copy '${file}' to '${dst}/'" >&2
