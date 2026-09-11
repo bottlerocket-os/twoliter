@@ -1060,7 +1060,13 @@ trap 'cleanup' EXIT
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
-bootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-boot.ext4.lz4"
+# BOOT-A is FAT for UKI images (see the UKI_IMAGE branch in rpm2img/img2img),
+# and ext4 otherwise. The variant's image format isn't plumbed through to
+# cargo-make, so pick whichever boot artifact 'cargo make' actually produced.
+bootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-boot.fat.lz4"
+if [ ! -s "${bootlz4}" ]; then
+   bootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-boot.ext4.lz4"
+fi
 rootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-root.ext4.lz4"
 hashlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-root.verity.lz4"
 if [ ! -s "${bootlz4}" ] || [ ! -s "${rootlz4}" ] || [ ! -s "${hashlz4}" ]; then
