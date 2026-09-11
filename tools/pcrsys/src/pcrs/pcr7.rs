@@ -24,16 +24,30 @@ const VMWARE_SIGNATURE_OWNER_GUID: [u8; 16] = [
 /// 1. SecureBoot variable (0x01)
 /// 2. PK, KEK, db, dbx variables
 /// 3. Separator
-/// 4. db authority (certificate used to verify shim)
-/// 5. SbatLevel (from shim's .sbatlevel section)
-/// 6. MokListRT (vendor certificate from shim)
+/// 4. db authority (certificate used to verify the loaded image)
+/// 5. SbatLevel (from shim's .sbatlevel section) — shim chain only
+/// 6. MokListRT (vendor certificate from shim) — shim chain only
+///
+/// Direct-UKI layout (uki-image): firmware verifies the UKI against `db`
+/// directly with no shim in the chain, so the shim-specific SbatLevel and
+/// MokListRT measurements (5 and 6) are absent.
 ///
 /// Platform differences:
 /// - AWS/Metal: uses SignatureOwner GUID from efi-vars.json
 /// - VMware: uses VMware's SignatureOwner GUID for enrolled keys
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    let vendor_cert = extract_vendor_cert(ctx.shim)?;
-    let sbat_level = extract_sbat_level(ctx.shim)?;
+    let is_uki = !ctx.uki.is_empty();
+
+    // shim contributes the vendor cert (MokListRT) and SbatLevel
+    // UKI has no shim, so neither is measured into PCR 7.
+    let (vendor_cert, sbat_level) = if is_uki {
+        (Vec::new(), Vec::new())
+    } else {
+        (
+            extract_vendor_cert(ctx.shim)?,
+            extract_sbat_level(ctx.shim)?,
+        )
+    };
 
     // Get EFI variables
     let pk = ctx
@@ -66,6 +80,7 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
             &dbx_data,
             &vendor_cert,
             &sbat_level,
+            is_uki,
         )?,
         Platform::Vmware => {
             // Replace SignatureOwner GUIDs with VMware's GUID
@@ -80,6 +95,7 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
                 &dbx_data,
                 &vendor_cert,
                 &sbat_level,
+                is_uki,
             )?
         }
     };
@@ -88,6 +104,9 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
 }
 
 /// Predict PCR 7 for a specific set of Secure Boot variables.
+///
+/// When `is_uki` is true, the shim-specific SbatLevel and MokListRT
+/// measurements are omitted (there is no shim in a direct-UKI boot).
 fn predict_variant(
     pk_data: &[u8],
     kek_data: &[u8],
@@ -95,6 +114,7 @@ fn predict_variant(
     dbx_data: &[u8],
     vendor_cert: &[u8],
     sbat_level: &[u8],
+    is_uki: bool,
 ) -> Result<[u8; 32]> {
     // 1. SecureBoot = 0x01
     let secure_boot_data =
@@ -121,22 +141,26 @@ fn predict_variant(
     // 6. Separator
     pcr = extend_pcr_separator(&pcr);
 
-    // 7. db authority - certificate used to verify shim
+    // 7. db authority - certificate used to verify the loaded image (shim or UKI)
     // Assumes single cert in db per Bottlerocket sbkeys profile.
     // If multiple signature lists with different sizes exist, only the first is extracted.
     let db_sig = extract_first_sig_from_esl(db_data)?;
     let db_authority = generate_efi_variable_data(&EFI_IMAGE_SECURITY_DATABASE_GUID, "db", &db_sig);
     pcr = extend_pcr(&pcr, &Sha256::digest(&db_authority).into());
 
-    // 8. SbatLevel
-    let sbat_var_data = generate_efi_variable_data(&SHIM_LOCK_GUID, "SbatLevel", sbat_level);
-    pcr = extend_pcr(&pcr, &Sha256::digest(&sbat_var_data).into());
+    // The remaining measurements are contributed by shim. A direct-UKI boot has
+    // no shim, so SbatLevel and MokListRT are not measured.
+    if !is_uki {
+        // 8. SbatLevel
+        let sbat_var_data = generate_efi_variable_data(&SHIM_LOCK_GUID, "SbatLevel", sbat_level);
+        pcr = extend_pcr(&pcr, &Sha256::digest(&sbat_var_data).into());
 
-    // 9. MokListRT - owner GUID + vendor certificate
-    let mut mok_data = SHIM_LOCK_GUID.to_bytes_le().to_vec();
-    mok_data.extend_from_slice(vendor_cert);
-    let mok_var_data = generate_efi_variable_data(&SHIM_LOCK_GUID, "MokListRT", &mok_data);
-    pcr = extend_pcr(&pcr, &Sha256::digest(&mok_var_data).into());
+        // 9. MokListRT - owner GUID + vendor certificate
+        let mut mok_data = SHIM_LOCK_GUID.to_bytes_le().to_vec();
+        mok_data.extend_from_slice(vendor_cert);
+        let mok_var_data = generate_efi_variable_data(&SHIM_LOCK_GUID, "MokListRT", &mok_data);
+        pcr = extend_pcr(&pcr, &Sha256::digest(&mok_var_data).into());
+    }
 
     Ok(pcr)
 }
@@ -170,7 +194,7 @@ fn extract_first_sig_from_esl(esl: &[u8]) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::efi::{EfiVar, EfiVars, EFI_CERT_X509_GUID};
-    use crate::predict::test_support::{build_test_shim, MockCtx};
+    use crate::predict::test_support::{build_test_shim, build_test_uki, MockCtx};
 
     #[test]
     fn test_extract_first_sig_from_esl() {
@@ -282,5 +306,30 @@ mod tests {
             .build();
         let err = predict(&ctx).unwrap_err();
         assert!(err.to_string().contains("invalid") || err.to_string().contains("hex"));
+    }
+
+    #[test]
+    fn test_predict_uki_aws() {
+        // Direct-UKI boot: no shim, so PCR 7 stops after the db authority
+        // measurement (no SbatLevel, no MokListRT). No shim is provided.
+        let uki = build_test_uki();
+        let efi_vars = build_efi_vars();
+        let m = MockCtx::new();
+        let ctx = PcrContext::builder()
+            .platform(Platform::Aws)
+            .efi_vars(&efi_vars)
+            .partitions(&m.layout)
+            .uki(&uki)
+            .build();
+        let result = predict(&ctx).unwrap().unwrap();
+        assert_eq!(result.0, PcrIndex::Pcr7);
+
+        // Expected == predict_variant with is_uki=true and empty shim material.
+        let pk = hex::decode(&efi_vars.get("PK").unwrap().data).unwrap();
+        let kek = hex::decode(&efi_vars.get("KEK").unwrap().data).unwrap();
+        let db = hex::decode(&efi_vars.get("db").unwrap().data).unwrap();
+        let dbx = hex::decode(&efi_vars.get("dbx").unwrap().data).unwrap();
+        let expected = predict_variant(&pk, &kek, &db, &dbx, &[], &[], true).unwrap();
+        assert_eq!(result.1.sha256[0], hex::encode(expected));
     }
 }

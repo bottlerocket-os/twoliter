@@ -6,10 +6,16 @@
 //!
 //! The final /proc/cmdline format is:
 //! `<kernel.* params> BOOT_IMAGE=<path> <grub params before --> -- <init.* params> <grub params after -->`
+//!
+//! For a direct-UKI boot there is no grub: PCR 9 instead covers the two events
+//! the Linux EFI stub measures — the `.cmdline` LoadOptions and the initrd.
 
 use crate::error::Result;
 use crate::parsers::{bootconfig, grub};
-use crate::predict::{extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL};
+use crate::predict::{
+    extend_pcr, extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL,
+};
+use sha2::{Digest, Sha256};
 use snafu::whatever;
 
 const KERNEL_PATH_PREFIX: &str = "()/vmlinuz ";
@@ -109,13 +115,37 @@ fn predict_cmdline(
     Ok(cmdline)
 }
 
-/// Predict PCR 9 value.
+/// Predict PCR 9 for a direct-UKI boot.
 ///
-/// PCR 9 = extend(init, SHA256(cmdline + newline))
-/// The trailing newline matches /proc/cmdline format.
+/// The Linux EFI stub extends PCR 9 twice: with the `.cmdline` LoadOptions,
+/// then the initrd. So `PCR9 = extend(extend(0, SHA256(load_options)), SHA256(initrd))`.
+fn predict_uki(uki: &[u8]) -> Result<[u8; 32]> {
+    let load_options = crate::pe::uki_cmdline_load_options(uki)?;
+    let lo_digest: [u8; 32] = Sha256::digest(&load_options).into();
+    let mut pcr9 = extend_pcr(&PCR_INIT_VAL, &lo_digest);
+
+    let initrd = crate::pe::build_uki_synthetic_initrd(uki)?;
+    if !initrd.is_empty() {
+        let initrd_digest: [u8; 32] = Sha256::digest(&initrd).into();
+        pcr9 = extend_pcr(&pcr9, &initrd_digest);
+    }
+
+    Ok(pcr9)
+}
+
+/// Predict PCR 9.
+///
+/// - shim->grub->vmlinuz: `extend(init, SHA256(cmdline + "\n"))` (matches /proc/cmdline)
+/// - UKI: LoadOptions + initrd
+/// - A/B images: `None`
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
     if ctx.partitions.boot_b.is_some() {
         return Ok(None);
+    }
+
+    if !ctx.uki.is_empty() {
+        let pcr9 = predict_uki(ctx.uki)?;
+        return Ok(Some((PcrIndex::Pcr9, PcrRecord::new(pcr9))));
     }
 
     let mut cmdline = predict_cmdline(ctx.grub_cfg, ctx.bootconfig, Some(ctx.boot_partuuid))?;
@@ -273,5 +303,38 @@ mod tests {
         let m = MockCtx::dual_bank();
         let ctx = m.build(crate::platform::Platform::Aws);
         assert!(predict(&ctx).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_predict_uki_from_cmdline() {
+        use crate::predict::test_support::{build_test_uki, MockCtx};
+
+        let uki = build_test_uki();
+        let m = MockCtx::new();
+        let ctx = PcrContext::builder()
+            .platform(crate::platform::Platform::Aws)
+            .efi_vars(&m.efi_vars)
+            .partitions(&m.layout)
+            .uki(&uki)
+            .build();
+
+        let result = predict(&ctx).unwrap().unwrap();
+        assert_eq!(result.0, PcrIndex::Pcr9);
+
+        // Golden PCR 9 = extend(extend(0, SHA256(UTF-16LE cmdline + NUL)),
+        // SHA256(os-release cpio)). Locks in UTF-16LE, verbatim quotes, no
+        // BOOT_IMAGE prefix, no trailing newline, and the os-release initrd.
+        assert_eq!(
+            result.1.sha256[0],
+            "f74187f18ddb9bc4f439722186ddd54689460b4dd98d535925e1ebb255055700"
+        );
+
+        // Cross-check the chain against the pe.rs building blocks.
+        let load_options = crate::pe::uki_cmdline_load_options(&uki).unwrap();
+        let d1: [u8; 32] = Sha256::digest(&load_options).into();
+        let initrd = crate::pe::build_uki_synthetic_initrd(&uki).unwrap();
+        let d2: [u8; 32] = Sha256::digest(&initrd).into();
+        let expected = extend_pcr(&extend_pcr(&PCR_INIT_VAL, &d1), &d2);
+        assert_eq!(result.1.sha256[0], hex::encode(expected));
     }
 }

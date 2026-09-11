@@ -844,7 +844,7 @@ fi
 # Skipped for UKI images: pcrsys currently assumes an ext4 BOOT-A partition
 # (for reading grub.cfg/vmlinuz), but UKI images use a FAT BOOT-A partition,
 # so PCR prediction would fail here.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   "${0%/*}/pcrsys" disk \
     --image "${OS_IMAGE}" \
     --efi-vars "${SBKEYS}/efi-vars.json" \

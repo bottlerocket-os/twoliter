@@ -87,7 +87,7 @@ impl From<GptPrio> for u64 {
 /// Information about a single GPT partition.
 ///
 /// Contains the partition number and LBA range for calculating byte offsets.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PartitionInfo {
     /// 1-based partition number.
     pub number: u32,
@@ -151,20 +151,36 @@ const BOTTLEROCKET_PRIVATE: [u8; 16] = uuid_to_guid(hex!("440408bb eb0b 4328 a6e
 /// EFI System Partition type GUID.
 const EFI_SYSTEM_PARTITION: [u8; 16] = uuid_to_guid(hex!("c12a7328 f81f 11d2 ba4b 00a0c93ec93b"));
 
-/// Get the unique GUID of the first boot partition (BOOT-A).
+/// Whether a partition type GUID denotes a dedicated Bottlerocket boot partition.
+fn is_boot_type(guid: &[u8; 16]) -> bool {
+    guid == &BOTTLEROCKET_BOOT
+}
+
+/// Get the unique GUID of the boot partition.
+///
+/// For the grub layout this is the first dedicated Bottlerocket boot partition
+/// (BOOT-A). For the merged UKI layout there is no dedicated boot partition, so
+/// the ESP is the boot partition.
 pub fn get_boot_partuuid<R: Read + Seek>(disk: &mut R) -> Result<String> {
     let gpt = GPT::find_from(disk).whatever_context("failed to parse GPT")?;
     let (_, part) = gpt
         .iter()
-        .find(|(_, p)| p.partition_type_guid == BOTTLEROCKET_BOOT)
-        .whatever_context("BOOT-A partition not found")?;
+        .find(|(_, p)| is_boot_type(&p.partition_type_guid))
+        .or_else(|| {
+            gpt.iter()
+                .find(|(_, p)| p.partition_type_guid == EFI_SYSTEM_PARTITION)
+        })
+        .whatever_context("boot partition not found")?;
     Ok(Uuid::from_bytes_le(part.unique_partition_guid).to_string())
 }
 
 /// Find partitions by type GUID and return their layout.
 ///
 /// Parses GPT to find EFI-A, BOOT-A, BOOT-B (optional), and PRIVATE partitions.
-/// Single-bank images will not have BOOT-B.
+/// The grub layout has dedicated Bottlerocket-boot-typed BOOT-A/BOOT-B partitions.
+/// The UKI layout has no dedicated boot partition — the ESP holds the boot
+/// material — so `boot_a` resolves to the ESP (EFI-A) and `boot_b` is `None`.
+/// Single-bank grub images will not have BOOT-B either.
 pub fn find_partitions<R: Read + Seek>(disk: &mut R) -> Result<PartitionLayout> {
     let gpt = GPT::find_from(disk).whatever_context("failed to parse GPT")?;
 
@@ -180,9 +196,24 @@ pub fn find_partitions<R: Read + Seek>(disk: &mut R) -> Result<PartitionLayout> 
             })
     };
 
+    // Find nth dedicated boot partition (grub layout). The merged UKI layout has
+    // none, so callers fall back to the ESP.
+    let find_nth_boot = |n: usize| -> Option<PartitionInfo> {
+        gpt.iter()
+            .filter(|(_, p)| is_boot_type(&p.partition_type_guid))
+            .nth(n)
+            .map(|(num, p)| PartitionInfo {
+                number: num,
+                start_lba: p.starting_lba,
+                end_lba: p.ending_lba,
+            })
+    };
+
     let efi_a = find_nth(&EFI_SYSTEM_PARTITION, 0).whatever_context("EFI-A partition not found")?;
-    let boot_a = find_nth(&BOTTLEROCKET_BOOT, 0).whatever_context("BOOT-A partition not found")?;
-    let boot_b = find_nth(&BOTTLEROCKET_BOOT, 1); // Optional for single-bank
+    // grub: dedicated BOOT-A. merged UKI: no dedicated boot partition, so the ESP
+    // itself is the boot partition.
+    let boot_a = find_nth_boot(0).unwrap_or_else(|| efi_a.clone());
+    let boot_b = find_nth_boot(1); // Optional for single-bank / merged UKI
     let private =
         find_nth(&BOTTLEROCKET_PRIVATE, 0).whatever_context("PRIVATE partition not found")?;
 
@@ -532,15 +563,28 @@ mod tests {
     }
 
     #[test]
-    fn test_find_partitions_missing_boot() {
+    fn test_find_partitions_merged_uki_esp_is_boot() {
+        // UKI layout: no dedicated boot partition. The ESP holds the boot
+        // material, so find_partitions must resolve `boot_a` to the ESP (EFI-A)
+        // and get_boot_partuuid must return the ESP's unique GUID.
         let mut disk = mock_disk_with_partitions();
         disk[1024 + 128..1024 + 128 + 16].copy_from_slice(&[0u8; 16]);
         disk[1024 + 256..1024 + 256 + 16].copy_from_slice(&[0u8; 16]);
         recalc_disk_crcs(&mut disk);
 
         let mut cursor = Cursor::new(&disk[..]);
-        let err = find_partitions(&mut cursor).unwrap_err();
-        assert!(err.to_string().contains("BOOT-A"));
+        let layout = find_partitions(&mut cursor).unwrap();
+        // ESP is partition 1; boot_a falls back to it.
+        assert_eq!(layout.efi_a.number, 1);
+        assert_eq!(layout.boot_a.number, 1);
+        assert_eq!(layout.boot_a.start_lba, layout.efi_a.start_lba);
+        assert!(layout.boot_b.is_none());
+        assert_eq!(layout.private.number, 4);
+
+        let mut cursor = Cursor::new(&disk[..]);
+        // get_boot_partuuid must resolve to the ESP's unique GUID (0x11 in the mock).
+        let uuid = get_boot_partuuid(&mut cursor).unwrap();
+        assert_eq!(uuid, Uuid::from_bytes_le([0x11; 16]).to_string());
     }
 
     #[test]

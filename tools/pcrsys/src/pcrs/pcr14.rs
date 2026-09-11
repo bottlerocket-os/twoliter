@@ -9,7 +9,14 @@ use sha2::{Digest, Sha256};
 /// Predict PCR 14 value.
 ///
 /// PCR 14 = extend(MokList ESL) -> extend(MokListX ESL) -> extend(MokListTrusted)
+///
+/// Returns `None` for a direct-UKI boot: MOK variables are populated and
+/// measured by shim, which is absent in the uki-image layout.
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
+    if !ctx.uki.is_empty() {
+        return Ok(None);
+    }
+
     let vendor_cert = extract_vendor_cert(ctx.shim)?;
 
     // MokList: X509 ESL containing vendor certificate
@@ -34,7 +41,7 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
 mod tests {
     use super::*;
     use crate::platform::Platform;
-    use crate::predict::test_support::{build_test_shim, MockCtx};
+    use crate::predict::test_support::{build_test_shim, build_test_uki, MockCtx};
 
     #[test]
     fn test_predict() {
@@ -66,5 +73,19 @@ mod tests {
             .build();
         let err = predict(&ctx).unwrap_err();
         assert!(err.to_string().contains("PE32+") || err.to_string().contains("parse"));
+    }
+
+    #[test]
+    fn test_predict_skipped_for_uki() {
+        // Direct-UKI boot has no shim and therefore no MOK measurements.
+        let uki = build_test_uki();
+        let m = MockCtx::new();
+        let ctx = PcrContext::builder()
+            .platform(Platform::Aws)
+            .efi_vars(&m.efi_vars)
+            .partitions(&m.layout)
+            .uki(&uki)
+            .build();
+        assert!(predict(&ctx).unwrap().is_none());
     }
 }
