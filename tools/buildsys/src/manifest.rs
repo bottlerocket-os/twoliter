@@ -1260,6 +1260,7 @@ pub enum ImageFeature {
     EncryptedStorage,
     EphemeralEncryptionKeys,
     StandaloneImage,
+    NvidiaDualBranch,
 }
 
 const EXPERIMENTAL_IMAGE_FEATURES: &[&ImageFeature] = &[
@@ -1528,6 +1529,7 @@ impl TryFrom<String> for ImageFeature {
             "encrypted-storage" => Ok(ImageFeature::EncryptedStorage),
             "ephemeral-encryption-keys" => Ok(ImageFeature::EphemeralEncryptionKeys),
             "standalone-image" => Ok(ImageFeature::StandaloneImage),
+            "nvidia-dual-branch" => Ok(ImageFeature::NvidiaDualBranch),
             _ => error::ParseImageFeatureSnafu { what: s }.fail()?,
         }
     }
@@ -1574,6 +1576,7 @@ impl fmt::Display for ImageFeature {
             ImageFeature::EncryptedStorage => write!(f, "ENCRYPTED_STORAGE"),
             ImageFeature::EphemeralEncryptionKeys => write!(f, "EPHEMERAL_ENCRYPTION_KEYS"),
             ImageFeature::StandaloneImage => write!(f, "STANDALONE_IMAGE"),
+            ImageFeature::NvidiaDualBranch => write!(f, "NVIDIA_DUAL_BRANCH"),
         }
     }
 }

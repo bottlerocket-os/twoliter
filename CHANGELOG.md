@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.2...HEAD
+### Added
+* Add a new image feature, `nvidia-dual-branch`, which when enabled builds an image supporting multiple NVIDIA driver branches
+
+### Breaking Changes
 
 ## [0.24.2] - 2026-09-08
 
