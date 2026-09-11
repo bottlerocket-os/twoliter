@@ -54,6 +54,12 @@ Provides: %{_cross_os}image-feature(fips)
 Provides: %{_cross_os}image-feature(no-fips)
 %endif
 
+%if %{with nvidia_dual_branch}
+Provides: %{_cross_os}image-feature(nvidia-dual-branch)
+%else
+Provides: %{_cross_os}image-feature(no-nvidia-dual-branch)
+%endif
+
 %if %{with external_kmod_development}
 Provides: %{_cross_os}image-feature(external-kmod-development)
 %else
