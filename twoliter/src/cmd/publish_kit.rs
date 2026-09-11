@@ -1,3 +1,4 @@
+use super::GlobalOpts;
 use crate::cargo_make::CargoMake;
 use crate::project::{self, Locked};
 use crate::tools::install_tools;
@@ -12,9 +13,9 @@ pub(crate) enum PublishCommand {
 }
 
 impl PublishCommand {
-    pub(crate) async fn run(self) -> Result<()> {
+    pub(crate) async fn run(self, global_opts: &GlobalOpts) -> Result<()> {
         match self {
-            PublishCommand::Kit(command) => command.run().await,
+            PublishCommand::Kit(command) => command.run(global_opts).await,
         }
     }
 }
@@ -37,7 +38,7 @@ pub(crate) struct PublishKit {
 }
 
 impl PublishKit {
-    pub(super) async fn run(&self) -> Result<()> {
+    pub(super) async fn run(&self, _global_opts: &GlobalOpts) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let project = project.load_lock::<Locked>().await?;
         let toolsdir = project.project_dir().join("build/tools");

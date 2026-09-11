@@ -1,3 +1,4 @@
+use super::GlobalOpts;
 use crate::project::{self, Locked};
 use anyhow::Result;
 use clap::Parser;
@@ -15,7 +16,7 @@ pub(crate) struct Fetch {
 }
 
 impl Fetch {
-    pub(super) async fn run(&self) -> Result<()> {
+    pub(super) async fn run(&self, _global_opts: &GlobalOpts) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let project = project.load_lock::<Locked>().await?;
         project.fetch(self.arch.as_str()).await?;

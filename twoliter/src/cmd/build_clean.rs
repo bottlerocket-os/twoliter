@@ -1,3 +1,4 @@
+use super::GlobalOpts;
 use crate::cargo_make::CargoMake;
 use crate::project::{self, Locked};
 use crate::tools;
@@ -13,7 +14,7 @@ pub(crate) struct BuildClean {
 }
 
 impl BuildClean {
-    pub(super) async fn run(&self) -> Result<()> {
+    pub(super) async fn run(&self, _global_opts: &GlobalOpts) -> Result<()> {
         let project = project::load_or_find_project(self.project_path.clone()).await?;
         let project = project.load_lock::<Locked>().await?;
         let toolsdir = project.project_dir().join("build/tools");
