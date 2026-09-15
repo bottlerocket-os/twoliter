@@ -132,8 +132,13 @@ repack_uki() {
   boot_mount="${1:?}"
   dm_verity_table="${2:?}"
 
-  local uki
-  uki="${boot_mount}/EFI/Linux/bottlerocket.efi"
+  # The UKI is deployed on the ESP under the removable-media fallback name
+  # (EFI/BOOT/BOOT{X64,AA64}.EFI); that is the copy extracted from the image
+  # and the one we rebuild from.
+  local uki_filename uki
+
+  uki_filename="BOOT${efi_arch^^}.EFI"
+  uki="${boot_mount}/EFI/BOOT/${uki_filename}"
   if [[ ! -s "${uki}" ]]; then
     echo "no UKI found at '${uki}'" >&2
     exit 1
@@ -238,12 +243,20 @@ repack_uki() {
     exit 1
   fi
 
-  mv "${new_uki}" "${uki}"
+  # Stage the rebuilt UKI under the basename `bottlerocket.efi` so the HMAC
+  # sidecar is named `.bottlerocket.efi.hmac`, matching `rpm2img`. It is
+  # deployed to the ESP fallback path (EFI/BOOT/${uki_filename}) by
+  # `mkfs_boot_uki`.
+  local staged_uki
+  staged_uki="${boot_mount}/EFI/Linux/bottlerocket.efi"
+  mkdir -p "${boot_mount}/EFI/Linux"
+  mv "${new_uki}" "${staged_uki}"
 
   # The HMAC has to cover the final signed bytes of the repacked UKI, so
-  # generate it after the UKI is in its final place. The token is relative to
-  # check-kernel-integrity.service's WorkingDirectory=/boot.
-  generate_hmac "${uki}" "EFI/Linux/bottlerocket.efi"
+  # generate it after the UKI is staged. The token is the ESP path the UKI is
+  # loaded from at runtime (EFI/BOOT/${uki_filename}), matching `rpm2img`; it
+  # is relative to check-kernel-integrity.service's WorkingDirectory.
+  generate_hmac "${staged_uki}" "EFI/BOOT/${uki_filename}"
 
   # The kernel is now embedded in the UKI's .linux PE section, so the
   # standalone kernel image is no longer needed and must not be shipped.
@@ -267,14 +280,19 @@ mkfs_boot_uki() {
   boot_image="${2:?}"
   bootpart_mib="${3:?}"
 
+  local uki_filename
+  uki_filename="BOOT${efi_arch^^}.EFI"
+
   rm -f "${boot_image}"
   dd if=/dev/zero of="${boot_image}" bs=1M count="${bootpart_mib}"
   mkfs.vfat -I -S 512 "${boot_image}" $((bootpart_mib * 1024))
   mmd -i "${boot_image}" ::/EFI
-  mmd -i "${boot_image}" ::/EFI/Linux
-  mcopy -i "${boot_image}" "${boot_mount}/EFI/Linux/bottlerocket.efi" ::/EFI/Linux/
+  mmd -i "${boot_image}" ::/EFI/BOOT
+  # Deploy the staged UKI to the ESP removable-media fallback path so firmware
+  # loads it directly with no bootloader, matching `rpm2img`.
+  mcopy -i "${boot_image}" "${boot_mount}/EFI/Linux/bottlerocket.efi" "::/EFI/BOOT/${uki_filename}"
   if [[ -f "${boot_mount}/EFI/Linux/.bottlerocket.efi.hmac" ]]; then
-    mcopy -i "${boot_image}" "${boot_mount}/EFI/Linux/.bottlerocket.efi.hmac" ::/EFI/Linux/
+    mcopy -i "${boot_image}" "${boot_mount}/EFI/Linux/.bottlerocket.efi.hmac" ::/EFI/BOOT/
   fi
 }
 
@@ -329,6 +347,19 @@ fi
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
 mkdir -p "${OUTPUT_DIR}"
 
+# Map the build architecture to the EFI arch string used in the ESP
+# removable-media fallback path (EFI/BOOT/BOOT{X64,AA64}.EFI). Mirrors the
+# `case` in `rpm2img`. Needed by the UKI repack path (`repack_uki` /
+# `mkfs_boot_uki`) below.
+case "${ARCH}" in
+x86_64) efi_arch="x64" ;;
+aarch64) efi_arch="aa64" ;;
+*)
+  echo "unsupported architecture: ${ARCH}" >&2
+  exit 1
+  ;;
+esac
+
 BOOT_IMAGE="${WORKDIR}/boot.ext4"
 VERITY_IMAGE="${WORKDIR}/root.verity"
 ROOT_IMAGE="${WORKDIR}/root.ext4"
@@ -351,7 +382,7 @@ declare -A partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff "${STANDALONE_IMAGE}"
+  partsize partoff "${STANDALONE_IMAGE}" "${UKI_IMAGE}"
 
 # Collect the partition labels, which are needed to look a partition up in the
 # GPT of the image we were given.
@@ -371,6 +402,10 @@ get_partition_sizes \
 # Compare the offsets between the partition plan and the input image.
 for part in "${!partoff[@]}"; do
   [[ "${part}" == DATA-* ]] && continue
+  # For UKI images, BOOT-A is a degenerate 0-size placeholder from the
+  # partition plan; it has no entry in the on-disk GPT (EFI-A is the boot
+  # partition), so it is absent from the image tables. Skip it.
+  [[ "${UKI_IMAGE}" == "yes" && "${part}" == "BOOT-A" ]] && continue
   if [[ "${partoff["${part}"]}" -ne "${imgoff["${part}"]}" ]]; then
     echo "start mismatch between partition plan and disk: '${part}'" >&2
     exit 1
@@ -380,6 +415,7 @@ done
 # Compare the sizes between the partition plan and the input image.
 for part in "${!partsize[@]}"; do
   [[ "${part}" == DATA-* ]] && continue
+  [[ "${UKI_IMAGE}" == "yes" && "${part}" == "BOOT-A" ]] && continue
   if [[ "${partsize["${part}"]}" -ne "${imgsize["${part}"]}" ]]; then
     echo "size mismatch between partition plan and disk: '${part}'" >&2
     exit 1
@@ -407,17 +443,24 @@ if [[ "${EROFS_ROOT_PARTITION}" == "yes" ]]; then
 fi
 
 # Extract the boot partition from the OS image, and dump the contents.
-dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" \
-  count="${partsize["BOOT-A"]}" bs=1M skip="${partoff["BOOT-A"]}"
+# For UKI images there is no separate BOOT-A partition (partyplanner sizes it
+# to 0); the ESP (EFI-A) is the single boot partition and holds the UKI, so
+# extract EFI-A instead.
 if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  # UKI images have a FAT boot partition, which `debugfs` cannot read.
+  dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" \
+    count="${partsize["EFI-A"]}" bs=1M skip="${partoff["EFI-A"]}"
+  # The ESP is FAT, which `debugfs` cannot read.
   mcopy -i "${BOOT_IMAGE}" -sv "::/" "${BOOT_MOUNT}/"
 else
+  dd if="${OS_IMAGE}" of="${BOOT_IMAGE}" \
+    count="${partsize["BOOT-A"]}" bs=1M skip="${partoff["BOOT-A"]}"
   debugfs -R "rdump / ${BOOT_MOUNT}" "${BOOT_IMAGE}"
 fi
 
 # Extract the EFI partition from the OS image and dump the contents, if needed.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+# Skipped for UKI images: their ESP (EFI-A) was already extracted into
+# BOOT_MOUNT above and is rebuilt from scratch by `mkfs_boot_uki`.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
   dd if="${OS_IMAGE}" of="${EFI_IMAGE}" \
     count="${partsize["EFI-A"]}" bs=1M skip="${partoff["EFI-A"]}"
   mkdir -p "${EFI_MOUNT}/EFI/BOOT"
@@ -512,12 +555,13 @@ else
   root_usage=$(get_ext4_usage "${ROOT_IMAGE}" "ROOT-A")
 fi
 
-# For UKI images, BOOT-A's PARTUUID is fixed for the life of
-# the image, and the repacked image keeps the partition table it came with.
-# Capture it so it can be baked into the .cmdline PE section.
+# For UKI images the ESP (EFI-A) is the single boot partition; its PARTUUID is
+# fixed for the life of the image, and the repacked image keeps the partition
+# table it came with. Capture it so it can be baked into the .cmdline PE
+# section, mirroring how `rpm2img` reads EFI-A's UUID for UKI images.
 BOOT_PARTUUID=""
 if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  BOOT_PARTUUID="$(get_partition_uuid "${OS_IMAGE}" "${partlabel["BOOT-A"]}")"
+  BOOT_PARTUUID="$(get_partition_uuid "${OS_IMAGE}" "${partlabel["EFI-A"]}")"
 fi
 
 # Generate a new root verity.
@@ -586,20 +630,26 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
     sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
     debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" vmlinuz
 
-    # Generate a new HMAC for the kernel after signing and write to boot image.
-    generate_hmac "${BOOT_MOUNT}/vmlinuz"
-    debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" .vmlinuz.hmac
-  fi
+  # Generate a new HMAC for the kernel after signing and write to boot image.
+  generate_hmac "${BOOT_MOUNT}/vmlinuz"
+  debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/.vmlinuz.hmac" .vmlinuz.hmac
 fi
+# UKI images are signed and HMAC'd inside `repack_uki` (Section 6), which
+# rebuilds the UKI from scratch and re-signs it, so there is nothing to sign
+# for them here.
 
 ###############################################################################
 # Section 6: update boot partition
 
+# For UKI images the ESP (EFI-A) is the single boot partition; grub images use
+# the separate BOOT-A. Track which one so the write-back below targets it.
 if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  # No GRUB or grub.cfg to patch: rebuild the UKI and boot partition instead.
+  boot_part="EFI-A"
+  # No GRUB or grub.cfg to patch: rebuild the UKI and ESP instead.
   repack_uki "${BOOT_MOUNT}" "${DM_VERITY_ROOT[*]}"
-  mkfs_boot_uki "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
+  mkfs_boot_uki "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["EFI-A"]}"
 else
+  boot_part="BOOT-A"
   GRUB_CONFIG="${BOOT_MOUNT}/grub/grub.cfg"
 
   # Replace the dm-verity root with the new verity.
@@ -618,13 +668,12 @@ else
 fi
 
 # Write the boot image back to the OS image.
-check_image_size "${BOOT_IMAGE}" "${partsize["BOOT-A"]}"
-write_partition "${BOOT_IMAGE}" "${OS_IMAGE}" "${partoff["BOOT-A"]}"
+check_image_size "${BOOT_IMAGE}" "${partsize["${boot_part}"]}"
+write_partition "${BOOT_IMAGE}" "${OS_IMAGE}" "${partoff["${boot_part}"]}"
 
 # Report BOOT partition usage
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  boot_usage=$(get_fat_usage "${BOOT_IMAGE}" "BOOT-A" "${partsize["BOOT-A"]}")
-else
+boot_usage=""
+if [[ "${UKI_IMAGE}" == "no" ]]; then
   boot_usage=$(get_ext4_usage "${BOOT_IMAGE}" "BOOT-A")
 fi
 
@@ -693,18 +742,14 @@ if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
 fi
 
 # Compress and symlink the rest.
-# BOOT-A is FAT for UKI images, see mkfs_boot_uki above, and ext4 otherwise.
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  compress_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
-else
+# BOOT-A is absent for UKI images, and ext4 otherwise.
+if [[ "${UKI_IMAGE}" == "no" ]]; then
   compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
 fi
 compress_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 compress_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  symlink_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
-else
+if [[ "${UKI_IMAGE}" == "no" ]]; then
   symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
 fi
 symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
