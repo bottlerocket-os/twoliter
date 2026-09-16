@@ -79,7 +79,11 @@ pub struct UpdateWave {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Images {
-    pub boot: String,
+    // UKI images use a merged boot layout with no separate BOOT-A partition, so
+    // there is no boot partition image to publish. `boot` is therefore optional
+    // and omitted for those variants; all other layouts populate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boot: Option<String>,
     pub root: String,
     pub hash: String,
 }
@@ -463,7 +467,7 @@ mod tests {
             max_version: Version::parse("1.1.1").unwrap(),
             waves: BTreeMap::new(),
             images: Images {
-                boot: String::from("boot"),
+                boot: Some(String::from("boot")),
                 root: String::from("root"),
                 hash: String::from("hash"),
             },
@@ -634,7 +638,7 @@ mod tests {
             max_version: Version::parse("1.1.0").unwrap(),
             waves: BTreeMap::new(),
             images: Images {
-                boot: String::from("boot"),
+                boot: Some(String::from("boot")),
                 root: String::from("root"),
                 hash: String::from("hash"),
             },
