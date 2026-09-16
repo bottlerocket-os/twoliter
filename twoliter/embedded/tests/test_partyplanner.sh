@@ -256,6 +256,27 @@ non_uki_total=$((non_uki_off[DATA-A] + non_uki_size[DATA-A]))
 assert_eq "${uki_total}" "${non_uki_total}" "UKI layout total == non-UKI total (image size unchanged)"
 
 ###############################################################################
+# Test 6c: `set_partition_types` skips BOOT-A/BOOT-B for uki_image=yes.
+#
+# The merged UKI layout has no BOOT partition, so `set_partition_types` must not
+# assign a typecode to BOOT-A/BOOT-B when uki_image=yes, while still assigning
+# every other partition typecode exactly as it does for the non-UKI layout.
+###############################################################################
+echo "Test 6c: set_partition_types skips BOOT-A/BOOT-B for uki_image=yes"
+declare -A uki_type non_uki_type
+set_partition_types uki_type yes
+set_partition_types non_uki_type no
+
+assert_unset uki_type BOOT-A "UKI parttype must not set BOOT-A"
+assert_unset uki_type BOOT-B "UKI parttype must not set BOOT-B"
+[[ -n "${non_uki_type[BOOT-A]:-}" ]] \
+  && pass "non-UKI parttype sets BOOT-A (got '${non_uki_type[BOOT-A]}')" \
+  || fail "non-UKI parttype must set BOOT-A"
+assert_eq "${uki_type[ROOT-A]}" "${non_uki_type[ROOT-A]}" "ROOT-A typecode unchanged for UKI"
+assert_eq "${uki_type[HASH-A]}" "${non_uki_type[HASH-A]}" "HASH-A typecode unchanged for UKI"
+assert_eq "${uki_type[EFI-A]}" "${EFI_SYSTEM_TYPECODE}" "UKI EFI-A typecode is EFI system"
+
+###############################################################################
 # Test 7: `set_eif_partition_sizes` tight-fit layout.
 #
 # With rootfs_mib=100 and verity_mib=8:

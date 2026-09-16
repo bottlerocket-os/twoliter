@@ -450,6 +450,11 @@ aarch64) efi_arch="aa64" ;;
   ;;
 esac
 
+# Set up `pesign`/`gpg` signing once, up front, if Secure Boot is enabled.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  sbsetup_signing_profile
+fi
+
 if [[ "${UKI_IMAGE}" == "no" ]]; then
   # The bootloader packages have placed their binaries in /boot/efi/EFI/BOOT.
   mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
@@ -465,33 +470,10 @@ if [[ "${UKI_IMAGE}" == "no" ]]; then
   mokms=(mm*.efi)
   mokm="${mokms[0]}"
 
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  # UKI mode: shim chain-loads systemd-boot, which is installed next to it
-  # and discovers UKIs on the XBOOTLDR partition.
-  systemd_boots=(systemd-boot*.efi)
-  systemd_boot="${systemd_boots[0]}"
-  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    # Do the setup required for `pesign` and `gpg` signing and
-    # verification to "just work", regardless of which type of
-    # signing profile we have.
-    sbsetup_signing_profile
-
-    sign_shim "${shim}"
-    sign_mokm "${mokm}"
-    sign_systemd_boot "${systemd_boot}"
-  else
-    zero_shim "${shim}"
-  fi
-else
   # GRUB mode: shim chain-loads grub.
   grubs=(grub*.efi)
   grub="${grubs[0]}"
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    # Do the setup required for `pesign` and `gpg` signing and
-    # verification to "just work", regardless of which type of
-    # signing profile we have.
-    sbsetup_signing_profile
-
     sign_shim "${shim}"
     sign_mokm "${mokm}"
     sign_grub "${grub}"
@@ -524,7 +506,9 @@ mkdir -p "${ROOT_MOUNT}/boot/grub"
 # Now that we're done messing with /, move /boot out of it
 mv "${ROOT_MOUNT}/boot"/* "${BOOT_MOUNT}"
 
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes"  && "${UKI_IMAGE}" == "no" ]]; then
+  # In UKI mode the kernel is embedded in the UKI and signed as part of it, so
+  # the standalone vmlinuz is never signed on its own.
   sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
 fi
 
@@ -684,7 +668,7 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
 
   # Sign UKI with do_sign if secure boot enabled
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    sign_systemd_boot "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
+    sign_uki "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
   fi
 
   uki_path="BOOT${efi_arch^^}.EFI"

@@ -687,20 +687,38 @@ script = [
 # Check the profile for all files needed for Secure Boot signing.
 profile="${BUILDSYS_SBKEYS_PROFILE_DIR}"
 
+# Determine the image format so we know which signing artifacts a complete
+# profile must contain. UKI images boot the Unified Kernel Image directly and
+# are signed with a single `uki-sign` identity.
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+variant_manifest="${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/Cargo.toml"
+image_format="$(buildsys variant-image-format --variant-manifest "${variant_manifest}")"
+
 found=0
 # A local profile has signing keys and certificates, while an AWS profile
 # has a config for the aws-kms-pkcs11 helper. Either type is supported.
-if [ -s "${profile}/shim-sign.key" ] && \
-   [ -s "${profile}/shim-sign.crt" ] && \
-   [ -s "${profile}/code-sign.key" ] && \
-   [ -s "${profile}/code-sign.crt" ] ; then
-   let found+=1
-elif [ -s "${profile}/kms-sign.json" ] ; then
-   let found+=1
+if [ "${image_format}" == "uki" ] ; then
+  if [ -s "${profile}/uki-sign.key" ] && \
+     [ -s "${profile}/uki-sign.crt" ] ; then
+     let found+=1
+  elif [ -s "${profile}/kms-sign.json" ] ; then
+     let found+=1
+  fi
+  required_files=( {PK,KEK,db}.crt efi-vars.{json,aws} )
+else
+  if [ -s "${profile}/shim-sign.key" ] && \
+     [ -s "${profile}/shim-sign.crt" ] && \
+     [ -s "${profile}/code-sign.key" ] && \
+     [ -s "${profile}/code-sign.crt" ] ; then
+     let found+=1
+  elif [ -s "${profile}/kms-sign.json" ] ; then
+     let found+=1
+  fi
+  required_files=( {PK,KEK,db,vendor}.crt config-sign.key efi-vars.{json,aws} )
 fi
 
 expected=1
-for f in {PK,KEK,db,vendor}.crt config-sign.key efi-vars.{json,aws} ; do
+for f in "${required_files[@]}" ; do
   let expected+=1
   [ -s "${profile}/${f}" ] && let found+=1
 done

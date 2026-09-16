@@ -56,7 +56,7 @@ VERITY_HASH_BLOCK_SIZE=4096
 SBKEYS="${HOME}/sbkeys"
 
 # Pre-emptively declare global arrays to be populated later.
-declare -a SHIM_SIGN_KEY CODE_SIGN_KEY
+declare -a SHIM_SIGN_KEY CODE_SIGN_KEY UKI_SIGN_KEY
 
 sanity_checks() {
   local output_fmt partition_plan ovf_template uefi_secure_boot sbom_package_dir
@@ -578,21 +578,31 @@ sbsetup_wrapup() {
 
   # Convert certificates from PEM format (ASCII) to DER (binary). This could be
   # done when the certificates are created, but the resulting binary files are
-  # not as nice to store in source control.
-  for cert in PK KEK db vendor; do
+  # not as nice to store in source control. Standard AMIs need `vendor` CA
+  # to embed/sign the shim and grub.
+  local certs=(PK KEK db)
+  if [[ "${UKI_IMAGE}" != "yes" ]]; then
+    certs+=(vendor)
+  fi
+  for cert in "${certs[@]}"; do
     openssl x509 \
       -inform PEM -in "${SBKEYS}/${cert}.crt" \
       -outform DER -out "${SBKEYS}/${cert}.cer"
   done
 
-  # For signing the grub config, we need to embed the GPG public key in binary
-  # form, which is similarly awkward to store in source control.
-  gpg --batch --no-tty --import "${SBKEYS}/config-sign.key"
-  if [[ "${sb_key_source}" == "aws" ]]; then
-    gpg --batch --no-tty --card-status
+  # The grub config GPG signing key (`config-sign`) is only used for the
+  # standard (grub) layout. UKI images embed the kernel command line in the UKI
+  # itself and have no signed grub.cfg, so skip GPG key setup entirely.
+  if [[ "${UKI_IMAGE}" != "yes" ]]; then
+    # For signing the grub config, we need to embed the GPG public key in binary
+    # form, which is similarly awkward to store in source control.
+    gpg --batch --no-tty --import "${SBKEYS}/config-sign.key"
+    if [[ "${sb_key_source}" == "aws" ]]; then
+      gpg --batch --no-tty --card-status
+    fi
+    gpg --batch --no-tty --export >"${SBKEYS}/config-sign.pubkey"
+    gpg --batch --no-tty --list-keys
   fi
-  gpg --batch --no-tty --export >"${SBKEYS}/config-sign.pubkey"
-  gpg --batch --no-tty --list-keys
 }
 
 sbsetup_aws_profile() {
@@ -613,8 +623,15 @@ sbsetup_aws_profile() {
   aws sts get-caller-identity
   # Log all PKCS11 helper activity, to simplify debugging.
   export AWS_KMS_PKCS11_DEBUG=1
-  SHIM_SIGN_KEY+=(-c shim-sign-key -t shim-sign-key)
-  CODE_SIGN_KEY+=(-c code-sign-key -t code-sign-key)
+  # UKI images use only the `uki-sign` identity; standard images use the
+  # `shim-sign`/`code-sign` identities. Only register the ones relevant to the
+  # image type being built so we don't reference keys that weren't provisioned.
+  if [[ "${UKI_IMAGE}" == "yes" ]]; then
+    UKI_SIGN_KEY+=(-c uki-sign-key -t uki-sign-key)
+  else
+    SHIM_SIGN_KEY+=(-c shim-sign-key -t shim-sign-key)
+    CODE_SIGN_KEY+=(-c code-sign-key -t code-sign-key)
+  fi
 
   local sb_key_source="aws"
   sbsetup_wrapup "${sb_key_source}"
@@ -624,37 +641,53 @@ sbsetup_local_profile() {
   # Disable the PKCS11 helper.
   rm /etc/pkcs11/modules/aws-kms-pkcs11.module
 
-  # Generate the PKCS12 archives for import.
-  openssl pkcs12 \
-    -export \
-    -passout pass: \
-    -inkey "${SBKEYS}/shim-sign.key" \
-    -in "${SBKEYS}/shim-sign.crt" \
-    -certfile "${SBKEYS}/db.crt" \
-    -out "${SBKEYS}/shim-sign.p12"
-
-  openssl pkcs12 \
-    -export \
-    -passout pass: \
-    -inkey "${SBKEYS}/code-sign.key" \
-    -in "${SBKEYS}/code-sign.crt" \
-    -certfile "${SBKEYS}/vendor.crt" \
-    -out "${SBKEYS}/code-sign.p12"
-
-  # Import certificates and private key archive.
   local pedb="/etc/pki/pesign"
-
   certutil -d "${pedb}" -A -n db -i "${SBKEYS}/db.crt" -t ",,C"
-  certutil -d "${pedb}" -A -n shim-sign-key -i "${SBKEYS}/shim-sign.crt" -t ",,P"
-  pk12util -d "${pedb}" -i "${SBKEYS}/shim-sign.p12" -W ""
 
-  certutil -d "${pedb}" -A -n vendor -i "${SBKEYS}/vendor.crt" -t ",,C"
-  certutil -d "${pedb}" -A -n code-sign-key -i "${SBKEYS}/code-sign.crt" -t ",,P"
-  pk12util -d "${pedb}" -i "${SBKEYS}/code-sign.p12" -W ""
+  if [[ "${UKI_IMAGE}" == "yes" ]]; then
+    # The UKI-only signing identity.
+    openssl pkcs12 \
+      -export \
+      -passout pass: \
+      -inkey "${SBKEYS}/uki-sign.key" \
+      -in "${SBKEYS}/uki-sign.crt" \
+      -certfile "${SBKEYS}/db.crt" \
+      -out "${SBKEYS}/uki-sign.p12"
 
-  certutil -d "${pedb}" -L
-  SHIM_SIGN_KEY+=(-c shim-sign-key)
-  CODE_SIGN_KEY+=(-c code-sign-key)
+    certutil -d "${pedb}" -A -n uki-sign-key -i "${SBKEYS}/uki-sign.crt" -t ",,P"
+    pk12util -d "${pedb}" -i "${SBKEYS}/uki-sign.p12" -W ""
+
+    certutil -d "${pedb}" -L
+    UKI_SIGN_KEY+=(-c uki-sign-key)
+  else
+    # Generate the PKCS12 archives for import.
+    openssl pkcs12 \
+      -export \
+      -passout pass: \
+      -inkey "${SBKEYS}/shim-sign.key" \
+      -in "${SBKEYS}/shim-sign.crt" \
+      -certfile "${SBKEYS}/db.crt" \
+      -out "${SBKEYS}/shim-sign.p12"
+
+    openssl pkcs12 \
+      -export \
+      -passout pass: \
+      -inkey "${SBKEYS}/code-sign.key" \
+      -in "${SBKEYS}/code-sign.crt" \
+      -certfile "${SBKEYS}/vendor.crt" \
+      -out "${SBKEYS}/code-sign.p12"
+
+    certutil -d "${pedb}" -A -n shim-sign-key -i "${SBKEYS}/shim-sign.crt" -t ",,P"
+    pk12util -d "${pedb}" -i "${SBKEYS}/shim-sign.p12" -W ""
+
+    certutil -d "${pedb}" -A -n vendor -i "${SBKEYS}/vendor.crt" -t ",,C"
+    certutil -d "${pedb}" -A -n code-sign-key -i "${SBKEYS}/code-sign.crt" -t ",,P"
+    pk12util -d "${pedb}" -i "${SBKEYS}/code-sign.p12" -W ""
+
+    certutil -d "${pedb}" -L
+    SHIM_SIGN_KEY+=(-c shim-sign-key)
+    CODE_SIGN_KEY+=(-c code-sign-key)
+  fi
 
   local sb_key_source="local"
   sbsetup_wrapup "${sb_key_source}"
@@ -756,34 +789,6 @@ provide_certs() {
   mcopy -i "${efi_image}" -ov "${SBKEYS}"/db.{crt,cer} ::/EFI/BOOT
 }
 
-# Copy the systemd-boot configuration onto the EFI system partition.
-#
-# systemd-boot reads exactly one configuration file, `/loader/loader.conf`, and
-# only from the volume it was itself loaded from. That is the EFI system
-# partition; the XBOOTLDR partition is scanned for boot entries only. The
-# systemd-boot package therefore installs the file under /boot/efi/loader, which
-# lands in the ESP staging directory along with the rest of that tree, but the
-# `*.efi` glob used to copy the loader binaries does not pick it up, so it needs
-# its own directory and copy here.
-#
-# A missing configuration file is treated as a build error: the file is
-# expected to be present whenever this function is called, so a missing file
-# indicates a packaging problem rather than an intentionally absent config.
-provide_loader_config() {
-  local efi_image efi_mount loader_config
-  efi_image="${1:?}"
-  efi_mount="${2:?}"
-  loader_config="${efi_mount}/loader/loader.conf"
-
-  if [[ ! -f "${loader_config}" ]]; then
-    echo "no systemd-boot configuration found at ${loader_config}" >&2
-    exit 1
-  fi
-
-  mmd -i "${efi_image}" ::/loader
-  mcopy -i "${efi_image}" -ov "${loader_config}" ::/loader
-}
-
 sign_vmlinuz() {
   local vmlinuz
   vmlinuz="${1:?}"
@@ -807,12 +812,17 @@ uki_bootconfig_cmdline() {
   echo "${tokens}"
 }
 
-sign_systemd_boot() {
-  local loader
-  loader="${1:?}"
+# Sign a Unified Kernel Image with the UKI-only signing identity.
+#
+# The UKI is signed with the fresh `uki-sign` key and verified against
+# `db.cer`: the uki-sign certificate is issued off the db CA, so the signed
+# UKI chains to `db` and is authorized by firmware under Secure Boot.
+sign_uki() {
+  local uki
+  uki="${1:?}"
 
-  undo_sign "${loader}"
-  do_sign "${loader}" "${SBKEYS}/vendor.cer" CODE_SIGN_KEY
+  undo_sign "${uki}"
+  do_sign "${uki}" "${SBKEYS}/db.cer" UKI_SIGN_KEY
 }
 
 generate_hmac() {

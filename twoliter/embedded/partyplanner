@@ -266,7 +266,7 @@ set_partition_sizes() {
   uki_image="${8:-no}"
 
   # Most of the partitions on the main image scale with the overall size.
-  local boot_mib root_mib hash_mib reserved_mib private_mib
+  local boot_mib root_mib hash_mib reserved_mib private_mib efi_a_mib
   boot_mib="$((os_image_gib * BOOT_SCALE_FACTOR))"
   root_mib="$((os_image_gib * ROOT_SCALE_FACTOR))"
   hash_mib="$((os_image_gib * HASH_SCALE_FACTOR))"
