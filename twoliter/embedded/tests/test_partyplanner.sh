@@ -201,6 +201,61 @@ else
 fi
 
 ###############################################################################
+# Test 6b: merged UKI layout (uki_image=yes) boots the EFI directly from ESP.
+# There is NO separate BOOT-A partition; and the ESP is placed immediately before
+# ROOT-A. The overall image size is unchanged.
+#
+# 2 GiB split image, single-bank (UKI is incompatible with in-place-updates):
+#   EFI-A      = (5*2) + (40*2)         = 90  (was 10 = EFI_MIB * 2)
+#   BOOT-A     = (dropped entirely)
+#   RESERVED-A = (2*15 - 5)*2           = 50
+# Every partition from ROOT-A onward keeps the same size as the non-UKI
+# single-bank 2 GiB split layout; only EFI-A grows and BOOT-A vanishes.
+###############################################################################
+echo "Test 6b: merged UKI layout drops BOOT-A"
+declare -A uki_size uki_off non_uki_size non_uki_off
+set_partition_sizes 2 1 split no uki_size uki_off no yes
+set_partition_sizes 2 1 split no non_uki_size non_uki_off no no
+
+assert_eq "${uki_size[EFI-A]}"      "90" "UKI EFI-A size == 2*EFI_MIB size + 2*BOOT_A size"
+assert_eq "${non_uki_size[EFI-A]}"  "10" "non-UKI EFI-A size unchanged"
+
+# The merged UKI layout has NO BOOT-A partition at all.
+assert_eq "${uki_size[BOOT-A]:-0}" "0" "UKI layout allocates no space for BOOT-A"
+
+# RESERVED-A stays the same.
+assert_eq "${uki_size[RESERVED-A]}" "50" "UKI RESERVED-A stays the same"
+assert_eq "${non_uki_size[RESERVED-A]}" "50" "non-UKI RESERVED-A unchanged"
+
+# The ESP must be large enough to hold the ~15 MiB UKI with headroom.
+if (( uki_size[EFI-A] >= 15 )); then
+  pass "UKI EFI-A (${uki_size[EFI-A]} MiB) >= 15 MiB UKI"
+else
+  fail "UKI EFI-A (${uki_size[EFI-A]} MiB) too small for a ~15 MiB UKI"
+fi
+
+# EFI-A offset is unchanged (it still follows BIOS).
+assert_eq "${uki_off[EFI-A]}" "${non_uki_off[EFI-A]}" "EFI-A offset unchanged"
+
+# ROOT-A must sit immediately after the ESP (ESP+1): no BOOT-A between them.
+assert_eq "${uki_off[ROOT-A]}" "$((uki_off[EFI-A] + uki_size[EFI-A]))" \
+  "UKI ROOT-A immediately follows EFI-A (ESP+1)"
+# HASH-A must sit immediately after ROOT-A (ESP+2).
+assert_eq "${uki_off[HASH-A]}" "$((uki_off[ROOT-A] + uki_size[ROOT-A]))" \
+  "UKI HASH-A immediately follows ROOT-A (ESP+2)"
+
+# ROOT-A/HASH-A/PRIVATE sizes are unchanged versus the non-UKI layout.
+assert_eq "${uki_size[ROOT-A]}" "${non_uki_size[ROOT-A]}" "ROOT-A size unchanged in UKI layout"
+assert_eq "${uki_size[HASH-A]}" "${non_uki_size[HASH-A]}" "HASH-A size unchanged in UKI layout"
+assert_eq "${uki_size[PRIVATE]}" "${non_uki_size[PRIVATE]}" "PRIVATE size unchanged in UKI layout"
+
+# Crucially, the total consumed space (and therefore the image size) must be
+# identical between the two layouts: merging partitions must not enlarge the image.
+uki_total=$((uki_off[DATA-A] + uki_size[DATA-A]))
+non_uki_total=$((non_uki_off[DATA-A] + non_uki_size[DATA-A]))
+assert_eq "${uki_total}" "${non_uki_total}" "UKI layout total == non-UKI total (image size unchanged)"
+
+###############################################################################
 # Test 7: `set_eif_partition_sizes` tight-fit layout.
 #
 # With rootfs_mib=100 and verity_mib=8:

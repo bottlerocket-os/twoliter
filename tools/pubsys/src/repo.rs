@@ -9,6 +9,7 @@ mod env_key_source;
 
 use crate::{friendly_version, read_stream, Args};
 use aws_sdk_kms::{config::Region, Client as KmsClient};
+use buildsys::manifest::{ImageFormat, ManifestInfo};
 use clap::Parser;
 use env_key_source::EnvKeySource;
 use jiff::Timestamp;
@@ -60,7 +61,9 @@ pub(crate) struct RepoArgs {
 
     // The images to add in this update
     #[arg(long)]
-    /// Path to the image containing the boot partition
+    /// Path to the image containing the boot partition. UKI variants have no
+    /// separate boot partition, so this is ignored for them (see
+    /// `--variant-manifest`).
     boot_image: PathBuf,
     #[arg(long)]
     /// Path to the image containing the root partition
@@ -68,6 +71,11 @@ pub(crate) struct RepoArgs {
     #[arg(long)]
     /// Path to the image containing the verity hashes
     hash_image: PathBuf,
+
+    #[arg(long)]
+    /// Path to the variant's Cargo.toml manifest; used to determine the image
+    /// format so we know whether a boot partition image is expected
+    variant_manifest: PathBuf,
 
     // Optionally add other files to the repo
     #[arg(long = "link-target")]
@@ -112,7 +120,11 @@ pub(crate) async fn root_bytes(path: impl AsRef<Path>) -> Result<Vec<u8>> {
 }
 
 /// Adds update, migrations, and waves to the Manifest
-fn update_manifest(repo_args: &RepoArgs, manifest: &mut Manifest) -> Result<()> {
+fn update_manifest(
+    repo_args: &RepoArgs,
+    manifest: &mut Manifest,
+    has_boot_image: bool,
+) -> Result<()> {
     // Add update   =^..^=   =^..^=   =^..^=   =^..^=
 
     let filename = |path: &PathBuf| -> Result<String> {
@@ -125,7 +137,12 @@ fn update_manifest(repo_args: &RepoArgs, manifest: &mut Manifest) -> Result<()> 
     };
 
     let images = Images {
-        boot: filename(&repo_args.boot_image)?,
+        // UKI variants have no separate boot partition image to publish.
+        boot: if has_boot_image {
+            Some(filename(&repo_args.boot_image)?)
+        } else {
+            None
+        },
         root: filename(&repo_args.root_image)?,
         hash: filename(&repo_args.hash_image)?,
     };
@@ -521,8 +538,15 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
         )
     };
 
+    // Determine the variant's image format so we know whether a boot partition
+    // image is expected. UKI variants use a merged boot layout with no separate
+    // BOOT-A partition, so they have no boot image to publish.
+    let manifest_info =
+        ManifestInfo::new(&repo_args.variant_manifest).context(error::ManifestParseSnafu)?;
+    let has_boot_image = !matches!(manifest_info.image_format(), Some(ImageFormat::Uki));
+
     // Add update information to manifest
-    update_manifest(repo_args, &mut manifest)?;
+    update_manifest(repo_args, &mut manifest, has_boot_image)?;
     // Write manifest to tempfile so it can be copied in as target later
     let manifest_path = NamedTempFile::new()
         .context(error::TempFileSnafu)?
@@ -533,11 +557,13 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
 
     // Add manifest and targets to editor
     let copy_targets = &repo_args.copy_targets;
-    let link_targets = repo_args.link_targets.iter().chain(vec![
-        &repo_args.boot_image,
-        &repo_args.root_image,
-        &repo_args.hash_image,
-    ]);
+    // The boot image is only published for variants that have a separate boot
+    // partition; UKI variants do not, so it is omitted for them.
+    let mut image_targets = vec![&repo_args.root_image, &repo_args.hash_image];
+    if has_boot_image {
+        image_targets.push(&repo_args.boot_image);
+    }
+    let link_targets = repo_args.link_targets.iter().chain(image_targets);
     let all_targets = copy_targets.iter().chain(link_targets.clone());
 
     update_editor(repo_args, &mut editor, all_targets, &manifest_path).await?;
@@ -719,6 +745,9 @@ mod error {
             #[snafu(source(from(update_metadata::error::Error, Box::new)))]
             source: Box<update_metadata::error::Error>,
         },
+
+        #[snafu(display("Failed to parse variant manifest: {}", source))]
+        ManifestParse { source: buildsys::manifest::Error },
 
         #[snafu(display("Infra.toml is missing {}", missing))]
         MissingConfig { missing: String },

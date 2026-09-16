@@ -407,6 +407,8 @@ RUN --mount=target=/host \
     --mount=type=secret,id=shim-sign.crt,target=/root/sbkeys/shim-sign.crt \
     --mount=type=secret,id=code-sign.key,target=/root/sbkeys/code-sign.key \
     --mount=type=secret,id=code-sign.crt,target=/root/sbkeys/code-sign.crt \
+    --mount=type=secret,id=uki-sign.key,target=/root/sbkeys/uki-sign.key \
+    --mount=type=secret,id=uki-sign.crt,target=/root/sbkeys/uki-sign.crt \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
     --mount=type=secret,id=efi-vars.json,target=/root/sbkeys/efi-vars.json \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \
@@ -608,6 +610,8 @@ RUN --mount=target=/host \
     --mount=type=secret,id=shim-sign.crt,target=/root/sbkeys/shim-sign.crt \
     --mount=type=secret,id=code-sign.key,target=/root/sbkeys/code-sign.key \
     --mount=type=secret,id=code-sign.crt,target=/root/sbkeys/code-sign.crt \
+    --mount=type=secret,id=uki-sign.key,target=/root/sbkeys/uki-sign.key \
+    --mount=type=secret,id=uki-sign.crt,target=/root/sbkeys/uki-sign.crt \
     --mount=type=secret,id=config-sign.key,target=/root/sbkeys/config-sign.key \
     --mount=type=secret,id=efi-vars.json,target=/root/sbkeys/efi-vars.json \
     --mount=type=secret,id=kms-sign.json,target=/root/.config/aws-kms-pkcs11/config.json \

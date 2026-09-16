@@ -8,8 +8,6 @@
 # for the boot partition, where we set gptprio bits in the GUID-specific use
 # field, but we might as well do it for all of them.
 BOTTLEROCKET_BOOT_TYPECODE="6b636168-7420-6568-2070-6c616e657421"
-# XBOOTLDR partition for UKI (systemd-boot Type 2 discovery)
-BOTTLEROCKET_XBOOTLDR_TYPECODE="bc13c2ff-59e6-4262-a352-b275fd6f7172"
 BOTTLEROCKET_ROOT_TYPECODE="5526016a-1a97-4ea4-b39a-b7c8c6ca4502"
 BOTTLEROCKET_HASH_TYPECODE="598f10af-c955-4456-6a99-7720068a6cea"
 BOTTLEROCKET_RESERVED_TYPECODE="0c5d99a5-d331-4147-baef-08e2b855bdc9"
@@ -231,8 +229,13 @@ get_partition_sizes() {
 #                          "yes", a single-bank stripped-down layout is
 #                          produced with no RESERVED, PRIVATE, or DATA
 #                          partitions.
+#   $8  uki_image         (optional, default "no") "yes" or "no". When
+#                          "yes", the single-bank layout grows the EFI system
+#                          partition by reclaiming the space from BOOT-A,
+#                          leaving the image size unchanged (single bank only).
 set_partition_sizes() {
-  local os_image_gib data_image_gib partition_plan in_place_updates standalone_image
+  local os_image_gib data_image_gib partition_plan in_place_updates
+  local standalone_image uki_image
   local -n pp_size pp_offset
   os_image_gib="${1:?}"
   data_image_gib="${2:?}"
@@ -257,6 +260,10 @@ set_partition_sizes() {
   # Bottlerocket image. Defaults to "no" if not provided so existing direct
   # callers continue to get the standard layout unchanged.
   standalone_image="${7:-no}"
+
+  # UKI image (`image-format = "uki"`); grows the ESP for the signed UKI.
+  # Defaults to "no" so existing direct callers keep the EFI_MIB-based sizing.
+  uki_image="${8:-no}"
 
   # Most of the partitions on the main image scale with the overall size.
   local boot_mib root_mib hash_mib reserved_mib private_mib
@@ -364,13 +371,25 @@ set_partition_sizes() {
     done
   else
     # Allocate a single partition bank, where each partition is twice as large.
-    pp_offset["EFI-A"]="${offset}"
-    pp_size["EFI-A"]="$(( EFI_MIB * 2 ))"
-    ((offset += EFI_MIB * 2))
+    # For UKI images we expand ESP (EFI-A) to absorb all the space from BOOT-A
+    # and shrink BOOT-A to 0. We don't include BOOT-A in the GPT for UKI images.
+    if [[ "${uki_image}" == "yes" ]]; then
+      efi_a_mib="$(( EFI_MIB + boot_mib))"
+      pp_offset["EFI-A"]="${offset}"
+      pp_size["EFI-A"]="$(( efi_a_mib * 2 ))"
+      ((offset += efi_a_mib * 2))
 
-    pp_offset["BOOT-A"]="${offset}"
-    pp_size["BOOT-A"]="$(( boot_mib * 2 ))"
-    ((offset += boot_mib * 2))
+      pp_offset["BOOT-A"]="${offset}"
+      pp_size["BOOT-A"]="0"
+    else
+      pp_offset["EFI-A"]="${offset}"
+      pp_size["EFI-A"]="$(( EFI_MIB * 2 ))"
+      ((offset += EFI_MIB * 2))
+
+      pp_offset["BOOT-A"]="${offset}"
+      pp_size["BOOT-A"]="$(( boot_mib * 2 ))"
+      ((offset += boot_mib * 2))
+    fi
 
     pp_offset["ROOT-A"]="${offset}"
     pp_size["ROOT-A"]="$(( root_mib * 2 ))"
@@ -558,7 +577,7 @@ set_partition_types() {
   for part in BOOT ROOT HASH RESERVED; do
     for bank in A B; do
       if [[ "${part}" == "BOOT" && "${uki_image}" == "yes" ]]; then
-        pp_type["${part}-${bank}"]="${BOTTLEROCKET_XBOOTLDR_TYPECODE}"
+        continue
       else
         typecode="BOTTLEROCKET_${part}_TYPECODE"
         typecode="${!typecode}"
