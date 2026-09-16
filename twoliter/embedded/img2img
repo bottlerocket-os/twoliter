@@ -169,7 +169,7 @@ repack_uki() {
   # Resign the recovered kernel. `sign_vmlinuz` runs `undo_sign` first to strip
   # the signature applied when the image was built, so repacking does not
   # append another one and grow the kernel.
-  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
     sign_vmlinuz "${kernel}"
   fi
 
@@ -217,7 +217,7 @@ repack_uki() {
   # Sign the assembled UKI, keeping the existing pesign and NSS plumbing in
   # charge of the keys.
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    sign_systemd_boot "${new_uki}"
+    sign_uki "${new_uki}"
   fi
 
   # Validate before the new UKI replaces the old one. A UKI that lost a section,
@@ -582,6 +582,13 @@ write_partition "${VERITY_IMAGE}" "${OS_IMAGE}" "${partoff["HASH-A"]}"
 # Section 5: maybe secure boot
 
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  # Do the setup required for `pesign` and `gpg` signing and
+  # verification to "just work", regardless of which type of
+  # signing profile we have.
+  sbsetup_signing_profile
+fi
+
+if [[ "${UKI_IMAGE}" == "no" && "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
   # The shim was renamed to the platform-defined default boot path,
   # `boot*.efi`, by `rpm2img`, regardless of which bootloader it
@@ -590,25 +597,13 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   shim="${shims[0]}"
   mokms=(mm*.efi)
   mokm="${mokms[0]}"
-
-  # Do the setup required for `pesign` and `gpg` signing and
-  # verification to "just work", regardless of which type of
-  # signing profile we have.
-  sbsetup_signing_profile
+  grubs=(grub*.efi)
+  grub="${grubs[0]}"
 
   # Resign the EFI artifacts.
   sign_shim "${shim}"
   sign_mokm "${mokm}"
-  if [[ "${UKI_IMAGE}" == "yes" ]]; then
-    # UKI images carry systemd-boot next to the shim instead of grub.
-    systemd_boots=(systemd-boot*.efi)
-    systemd_boot="${systemd_boots[0]}"
-    sign_systemd_boot "${systemd_boot}"
-  else
-    grubs=(grub*.efi)
-    grub="${grubs[0]}"
-    sign_grub "${grub}"
-  fi
+  sign_grub "${grub}"
 
   # Write the resigned artifacts back to the EFI image.
   mcopy -i "${EFI_IMAGE}" -ov "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
@@ -626,9 +621,9 @@ if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   # section 6 instead: there the kernel is a payload section of the UKI, which
   # has to be taken apart and reassembled anyway, and BOOT-A is FAT so
   # `debugfs_replace` does not apply.
-  if [[ "${UKI_IMAGE}" != "yes" ]]; then
-    sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
-    debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" vmlinuz
+  sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
+
+  debugfs_replace "${BOOT_IMAGE}" "${BOOT_MOUNT}/vmlinuz" vmlinuz
 
   # Generate a new HMAC for the kernel after signing and write to boot image.
   generate_hmac "${BOOT_MOUNT}/vmlinuz"
