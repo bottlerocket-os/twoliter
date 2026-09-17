@@ -227,6 +227,7 @@ ARG EROFS_ROOT_PARTITION
 ARG IN_PLACE_UPDATES
 ARG HOST_CONTAINERS
 ARG FIPS
+ARG NVIDIA_DUAL_BRANCH
 ARG EXTERNAL_KMOD_DEVELOPMENT
 ARG ENCRYPTED_STORAGE
 ARG EPHEMERAL_ENCRYPTION_KEYS
@@ -249,6 +250,7 @@ RUN \
    && echo "%bcond_without $(V=${VARIANT_FAMILY,,}; echo ${V//-/_})_family" >> "${RPM_BCONDS}" \
    && echo "%bcond_without $(V=${VARIANT_FLAVOR:-no}; V=${V,,}; echo ${V//-/_})_flavor" >> "${RPM_BCONDS}" \
    && echo -e -n "${FIPS:+%bcond_without fips\n}" >> "${RPM_BCONDS}" \
+   && echo -e -n "${NVIDIA_DUAL_BRANCH:+%bcond_without nvidia_dual_branch\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${UEFI_SECURE_BOOT:+%bcond_without uefi_secure_boot\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${XFS_DATA_PARTITION:+%bcond_without xfs_data_partition\n}" >> "${RPM_BCONDS}" \
    && echo -e -n "${EROFS_ROOT_PARTITION:+%bcond_without erofs_root_partition\n}" >> "${RPM_BCONDS}" \

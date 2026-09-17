@@ -10,4 +10,4 @@ pub const SUPPORTED_TWOLITER_LOCK_SCHEMA_VERSION: u32 = 2;
 ///
 /// The kit metadata version is embeddeded in a label within the OCI image's configuration blob,
 /// with the value stored at that label including the kit metadata itself.
-pub const SUPPORTED_KIT_METADATA_VERSION: &str = "v3";
+pub const SUPPORTED_KIT_METADATA_VERSION: &str = "v4";
