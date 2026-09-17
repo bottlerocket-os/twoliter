@@ -1094,6 +1094,18 @@ pub enum ImageFormat {
     Vmdk,
 }
 
+impl ImageFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ImageFormat::Eif => "eif",
+            ImageFormat::Qcow2 => "qcow2",
+            ImageFormat::Raw => "raw",
+            ImageFormat::Uki => "uki",
+            ImageFormat::Vmdk => "vmdk",
+        }
+    }
+}
+
 /// x86_64 kernel image format that `rpm2eif` embeds in the EIF kernel
 /// section. TOML values `"bzimage"` and `"vmlinux"`.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]

@@ -45,6 +45,7 @@ pub(crate) enum Command {
     BuildKit(Box<BuildKitArgs>),
     BuildVariant(Box<BuildVariantArgs>),
     RepackVariant(Box<RepackVariantArgs>),
+    VariantImageFormat(Box<VariantImageFormatArgs>),
 }
 
 impl Command {
@@ -54,6 +55,10 @@ impl Command {
             Command::BuildKit(_) => BuildType::Kit,
             Command::BuildVariant(_) => BuildType::Variant,
             Command::RepackVariant(_) => BuildType::Repack,
+            // `variant-image-format` is a read-only query, so it has no `BuildType`
+            Command::VariantImageFormat(_) => {
+                unreachable!("variant-image-format does not have a build type")
+            }
         }
     }
 }
@@ -200,6 +205,14 @@ pub(crate) struct RepackVariantArgs {
 
     #[command(flatten)]
     pub(crate) common: Common,
+}
+
+/// Print the image format declared by a variant manifest
+#[derive(Debug, Parser)]
+pub(crate) struct VariantImageFormatArgs {
+    /// Path to the variant's `Cargo.toml` manifest.
+    #[arg(long)]
+    pub(crate) variant_manifest: PathBuf,
 }
 
 /// Returns the environment variables that need to be watched for a given `[BuildType]`.

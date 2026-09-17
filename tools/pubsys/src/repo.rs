@@ -60,8 +60,8 @@ pub(crate) struct RepoArgs {
 
     // The images to add in this update
     #[arg(long)]
-    /// Path to the image containing the boot partition
-    boot_image: PathBuf,
+    /// Path to the image containing the boot partition.
+    boot_image: Option<PathBuf>,
     #[arg(long)]
     /// Path to the image containing the root partition
     root_image: PathBuf,
@@ -125,7 +125,8 @@ fn update_manifest(repo_args: &RepoArgs, manifest: &mut Manifest) -> Result<()> 
     };
 
     let images = Images {
-        boot: filename(&repo_args.boot_image)?,
+        // Omit `boot` from the manifest when no boot image was provided
+        boot: repo_args.boot_image.as_ref().map(&filename).transpose()?,
         root: filename(&repo_args.root_image)?,
         hash: filename(&repo_args.hash_image)?,
     };
@@ -533,11 +534,12 @@ pub(crate) async fn run(args: &Args, repo_args: &RepoArgs) -> Result<()> {
 
     // Add manifest and targets to editor
     let copy_targets = &repo_args.copy_targets;
-    let link_targets = repo_args.link_targets.iter().chain(vec![
-        &repo_args.boot_image,
-        &repo_args.root_image,
-        &repo_args.hash_image,
-    ]);
+    // Add the boot image as a repo target only when one was provided.
+    let mut image_targets = vec![&repo_args.root_image, &repo_args.hash_image];
+    if let Some(boot_image) = &repo_args.boot_image {
+        image_targets.push(boot_image);
+    }
+    let link_targets = repo_args.link_targets.iter().chain(image_targets);
     let all_targets = copy_targets.iter().chain(link_targets.clone());
 
     update_editor(repo_args, &mut editor, all_targets, &manifest_path).await?;

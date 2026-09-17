@@ -19,11 +19,12 @@ mod vendormod;
 
 use crate::args::{
     BuildKitArgs, BuildPackageArgs, BuildVariantArgs, Buildsys, Command, RepackVariantArgs,
+    VariantImageFormatArgs,
 };
 use crate::builder::DockerBuild;
 use buildsys::manifest::{
-    resolved_image_layout, validate_image_features, BundleModule, ImageFeature, Manifest,
-    ManifestInfo, SupportedArch,
+    resolved_image_layout, validate_image_features, BundleModule, ImageFeature, ImageFormat,
+    Manifest, ManifestInfo, SupportedArch,
 };
 use buildsys_config::EXTERNAL_KIT_METADATA;
 use cache::LookasideCache;
@@ -121,12 +122,20 @@ fn main() {
 }
 
 fn run(args: Buildsys) -> Result<()> {
-    args::rerun_for_envs(args.command.build_type());
     match args.command {
-        Command::BuildPackage(args) => build_package(*args),
-        Command::BuildKit(args) => build_kit(*args),
-        Command::BuildVariant(args) => build_variant(*args),
-        Command::RepackVariant(args) => repack_variant(*args),
+        // A read-only query that must not emit cargo build-script directives
+        // (they would pollute the value printed to stdout).
+        Command::VariantImageFormat(args) => variant_image_format(*args),
+        command => {
+            args::rerun_for_envs(command.build_type());
+            match command {
+                Command::BuildPackage(args) => build_package(*args),
+                Command::BuildKit(args) => build_kit(*args),
+                Command::BuildVariant(args) => build_variant(*args),
+                Command::RepackVariant(args) => repack_variant(*args),
+                Command::VariantImageFormat(_) => unreachable!("handled above"),
+            }
+        }
     }
 }
 
@@ -318,6 +327,18 @@ fn repack_variant(args: RepackVariantArgs) -> Result<()> {
         .context(error::BuilderInstantiationSnafu)?
         .build()
         .context(error::BuildAttemptSnafu)
+}
+
+/// Print the variant's `image-format` to stdout
+fn variant_image_format(args: VariantImageFormatArgs) -> Result<()> {
+    let manifest_info =
+        ManifestInfo::new(&args.variant_manifest).context(error::ManifestParseSnafu)?;
+    let image_format = manifest_info
+        .image_format()
+        .map(ImageFormat::as_str)
+        .unwrap_or("raw");
+    println!("{image_format}");
+    Ok(())
 }
 
 /// Ensure that the current arch is supported by the current variant
