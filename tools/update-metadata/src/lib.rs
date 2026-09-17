@@ -79,7 +79,10 @@ pub struct UpdateWave {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Images {
-    pub boot: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // UKI images use a merged boot layout with no separate BOOT-A partition.
+    // `boot` is therefore optional and omitted for those variants
+    pub boot: Option<String>,
     pub root: String,
     pub hash: String,
 }
@@ -463,7 +466,7 @@ mod tests {
             max_version: Version::parse("1.1.1").unwrap(),
             waves: BTreeMap::new(),
             images: Images {
-                boot: String::from("boot"),
+                boot: Some(String::from("boot")),
                 root: String::from("root"),
                 hash: String::from("hash"),
             },
@@ -634,7 +637,7 @@ mod tests {
             max_version: Version::parse("1.1.0").unwrap(),
             waves: BTreeMap::new(),
             images: Images {
-                boot: String::from("boot"),
+                boot: Some(String::from("boot")),
                 root: String::from("root"),
                 hash: String::from("hash"),
             },
@@ -689,5 +692,41 @@ mod tests {
         assert!(i.next().unwrap() == "migration_1.5.0_shortcut");
         assert!(i.next().unwrap() == "migration_1.1.0_b");
         assert!(i.next().unwrap() == "migration_1.1.0_a");
+    }
+
+    #[test]
+    fn images_boot_none_round_trip() {
+        // UKI variants omit the `boot` image. Ensure `boot: None` is dropped
+        // from the serialized manifest (so consumers that predate the field
+        // don't see an unexpected key) and round-trips back to `None`.
+        let images = Images {
+            boot: None,
+            root: "root".into(),
+            hash: "hash".into(),
+        };
+        let json = serde_json::to_string(&images).unwrap();
+        assert!(
+            !json.contains("boot"),
+            "boot: None must be omitted from serialized JSON, got: {json}"
+        );
+        let parsed: Images = serde_json::from_str(&json).unwrap();
+        assert!(parsed.boot.is_none());
+        assert_eq!(parsed.root, "root");
+        assert_eq!(parsed.hash, "hash");
+    }
+
+    #[test]
+    fn images_boot_some_round_trip() {
+        // Non-UKI variants keep the `boot` image; ensure it survives a
+        // serialize/deserialize round-trip.
+        let images = Images {
+            boot: Some("boot".into()),
+            root: "root".into(),
+            hash: "hash".into(),
+        };
+        let json = serde_json::to_string(&images).unwrap();
+        assert!(json.contains("boot"));
+        let parsed: Images = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.boot.as_deref(), Some("boot"));
     }
 }

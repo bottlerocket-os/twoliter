@@ -161,14 +161,19 @@ declare -A partlabel parttype partguid partsize partoff
 set_partition_sizes \
   "${OS_IMAGE_SIZE_GIB}" "${DATA_IMAGE_SIZE_GIB}" \
   "${PARTITION_PLAN}" "${IN_PLACE_UPDATES}" \
-  partsize partoff "${STANDALONE_IMAGE}"
+  partsize partoff "${STANDALONE_IMAGE}" "${UKI_IMAGE}"
 set_partition_labels partlabel
 set_partition_types parttype "${UKI_IMAGE}"
 set_partition_uuids partguid "${PARTITION_PLAN}"
 
 declare -a partitions
 partitions=(BIOS)
-partitions+=(EFI-A BOOT-A ROOT-A HASH-A)
+if [[ "${UKI_IMAGE}" == "yes" ]]; then
+  # The ESP (EFI-A) is the single boot partition; there is no separate BOOT-A
+  partitions+=(EFI-A ROOT-A HASH-A)
+else
+  partitions+=(EFI-A BOOT-A ROOT-A HASH-A)
+fi
 if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   partitions+=(RESERVED-A)
   if [[ "${IN_PLACE_UPDATES}" == "yes" ]]; then
@@ -210,14 +215,14 @@ done
 sgdisk --clear "${partargs[@]}" --sort --print "${OS_IMAGE}"
 
 # For UKI images (single-bank only; in-place-updates is disallowed for UKI_IMAGE,
-# see the check above), BOOT-A's PARTUUID is fixed for the life of the image and
-# is known immediately after partitioning. Capture it now so it can be baked
-# into the .cmdline PE section - systemd-stub does not expand shell variables
-# the way GRUB's gptprio.next does, so a literal "$boot_uuid" placeholder would
-# otherwise reach the kernel unexpanded.
+# see the check above), EFI-A's (which in this case also plays the role of BOOT-A)
+# is fixed for the life of the image and is known immediately after partitioning.
+# Capture it now so it can be baked into the .cmdline PE section - systemd-stub
+# does not expand shell variables the way GRUB's gptprio.next does, so a literal
+# "$boot_uuid" placeholder would otherwise reach the kernel unexpanded.
 BOOT_PARTUUID=""
 if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  BOOT_PARTUUID="$(get_partition_uuid "${OS_IMAGE}" "${partlabel["BOOT-A"]}")"
+  BOOT_PARTUUID="$(get_partition_uuid "${OS_IMAGE}" "${partlabel["EFI-A"]}")"
 fi
 
 # Partition the separate data disk, if we're using the split layout.
@@ -434,18 +439,8 @@ fi
 
 # We also need an EFI partition, formatted FAT32 with the
 # EFI binary at the correct path, e.g. /efi/boot. The bootloader
-# packages (shim, and grub or systemd-boot depending on the image
+# packages (shim and grub or UKI depending on the image
 # format) have placed their binaries in /boot/efi/EFI/BOOT.
-mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
-
-pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
-
-# The shim package builds one shim per bootloader it can chain-load, and the
-# `uki-image` / `no-uki-image` capabilities ensure that exactly one flavor is
-# installed. The grub-chaining shim is installed at the platform-defined
-# default boot path, where older image builds expect to find it, while other
-# flavors are installed under a bootloader-specific name and have to be moved
-# into place.
 case "${ARCH}" in
 x86_64) efi_arch="x64" ;;
 aarch64) efi_arch="aa64" ;;
@@ -454,50 +449,31 @@ aarch64) efi_arch="aa64" ;;
   exit 1
   ;;
 esac
-shim="boot${efi_arch}.efi"
 
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  shim_flavor="shim-systemd-boot${efi_arch}.efi"
-  if [[ ! -e "${shim_flavor}" ]]; then
-    echo "no systemd-boot shim '${shim_flavor}' on the EFI system partition" >&2
-    exit 1
-  fi
-  mv "${shim_flavor}" "${shim}"
-elif [[ ! -e "${shim}" ]]; then
-  echo "no shim '${shim}' on the EFI system partition" >&2
-  exit 1
+# Set up `pesign`/`gpg` signing once, up front, if Secure Boot is enabled.
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+  sbsetup_signing_profile
 fi
 
-mokms=(mm*.efi)
-mokm="${mokms[0]}"
+if [[ "${UKI_IMAGE}" == "no" ]]; then
+  # The bootloader packages have placed their binaries in /boot/efi/EFI/BOOT.
+  mv "${ROOT_MOUNT}/boot/efi"/* "${EFI_MOUNT}"
 
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  # UKI mode: shim chain-loads systemd-boot, which is installed next to it
-  # and discovers UKIs on the XBOOTLDR partition.
-  systemd_boots=(systemd-boot*.efi)
-  systemd_boot="${systemd_boots[0]}"
-  if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    # Do the setup required for `pesign` and `gpg` signing and
-    # verification to "just work", regardless of which type of
-    # signing profile we have.
-    sbsetup_signing_profile
+  pushd "${EFI_MOUNT}/EFI/BOOT" >/dev/null
 
-    sign_shim "${shim}"
-    sign_mokm "${mokm}"
-    sign_systemd_boot "${systemd_boot}"
-  else
-    zero_shim "${shim}"
+  shim="boot${efi_arch}.efi"
+  if [[ ! -e "${shim}" ]]; then
+    echo "no shim '${shim}' on the EFI system partition" >&2
+    exit 1
   fi
-else
+
+  mokms=(mm*.efi)
+  mokm="${mokms[0]}"
+
   # GRUB mode: shim chain-loads grub.
   grubs=(grub*.efi)
   grub="${grubs[0]}"
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    # Do the setup required for `pesign` and `gpg` signing and
-    # verification to "just work", regardless of which type of
-    # signing profile we have.
-    sbsetup_signing_profile
-
     sign_shim "${shim}"
     sign_mokm "${mokm}"
     sign_grub "${grub}"
@@ -505,18 +481,17 @@ else
     zero_shim "${shim}"
     unembed_grub "${grub}"
   fi
+  popd >/dev/null
 fi
-popd >/dev/null
 
 dd if=/dev/zero of="${EFI_IMAGE}" bs=1M count="${partsize["EFI-A"]}"
 mkfs.vfat -I -S 512 "${EFI_IMAGE}" $((partsize["EFI-A"] * 1024))
 mmd -i "${EFI_IMAGE}" ::/EFI
 mmd -i "${EFI_IMAGE}" ::/EFI/BOOT
-mcopy -i "${EFI_IMAGE}" "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  # Only systemd-boot consumes `\loader\loader.conf`, and only from the volume
-  # it was loaded from, which is this EFI system partition.
-  provide_loader_config "${EFI_IMAGE}" "${EFI_MOUNT}"
+if [[ "${UKI_IMAGE}" == "no" ]]; then
+  # Copy the GRUB-mode loaders (shim/grub/MokManager) onto the ESP. In UKI mode
+  # there are no loaders to copy; the UKI is placed directly later.
+  mcopy -i "${EFI_IMAGE}" "${EFI_MOUNT}/EFI/BOOT"/*.efi ::/EFI/BOOT
 fi
 if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   # Make the signing certificate available on the EFI system partition so it
@@ -531,7 +506,9 @@ mkdir -p "${ROOT_MOUNT}/boot/grub"
 # Now that we're done messing with /, move /boot out of it
 mv "${ROOT_MOUNT}/boot"/* "${BOOT_MOUNT}"
 
-if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes"  && "${UKI_IMAGE}" == "no" ]]; then
+  # In UKI mode the kernel is embedded in the UKI and signed as part of it, so
+  # the standalone vmlinuz is never signed on its own.
   sign_vmlinuz "${BOOT_MOUNT}/vmlinuz"
 fi
 
@@ -691,17 +668,23 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
 
   # Sign UKI with do_sign if secure boot enabled
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
-    sign_systemd_boot "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
+    sign_uki "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
   fi
 
-  # Generate an HMAC for the UKI after signing. The token is relative to
-  # check-kernel-integrity.service's WorkingDirectory=/boot.
-  generate_hmac "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" "EFI/Linux/bottlerocket.efi"
+  uki_path="BOOT${efi_arch^^}.EFI"
+  # Generate an HMAC for the UKI after signing and place it next to the UKI
+  generate_hmac "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" "EFI/BOOT/${uki_path}"
+
+  # Place the signed UKI and its `.hmac` at the ESP's removable-media fallback path
+  # (EFI/BOOT/BOOT{X64,AA64}.EFI) so firmware loads it directly with no loader
+  mcopy -i "${EFI_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" \
+    "::/EFI/BOOT/${uki_path}"
+  mcopy -i "${EFI_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/.bottlerocket.efi.hmac" \
+    "::/EFI/BOOT/.bottlerocket.efi.hmac"
+  dd if="${EFI_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["EFI-A"]}"
 
   # The kernel is now embedded in the UKI's .linux PE section, so the
   # standalone kernel image is no longer needed and must not be shipped.
-  # The .bottlerocket.efi.hmac file generated above is left in place, as it
-  # is still copied into the boot partition below.
   rm -f "${BOOT_MOUNT}/vmlinuz"
 fi
 
@@ -786,24 +769,9 @@ if [[ ! -s "${BOOTCONFIG_INPUT}" ]]; then
 fi
 
 # BOTTLEROCKET-BOOT-A
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  # UKI boot partition is FAT for systemd-boot Type 2 discovery
-  chmod -R go-rwx "${BOOT_MOUNT}"
-  dd if=/dev/zero of="${BOOT_IMAGE}" bs=1M count="${partsize["BOOT-A"]}"
-  mkfs.vfat -I -S 512 "${BOOT_IMAGE}" $((partsize["BOOT-A"] * 1024))
-  # Create EFI/Linux directory and copy UKI
-  mmd -i "${BOOT_IMAGE}" ::/EFI
-  mmd -i "${BOOT_IMAGE}" ::/EFI/Linux
-  mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi" ::/EFI/Linux/
-  # Copy HMAC file if present
-  if [[ -f "${BOOT_MOUNT}/EFI/Linux/.bottlerocket.efi.hmac" ]]; then
-    mcopy -i "${BOOT_IMAGE}" "${BOOT_MOUNT}/EFI/Linux/.bottlerocket.efi.hmac" ::/EFI/Linux/
-  fi
-  dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
-
-  # Report BOOT partition usage
-  boot_usage=$(get_fat_usage "${BOOT_IMAGE}" "BOOT-A" "${partsize["BOOT-A"]}")
-else
+# Only the grub (non-UKI) layout has a separate BOOT-A partition.
+boot_usage=""
+if [[ "${UKI_IMAGE}" == "no" ]]; then
   mkdir -p "${BOOT_MOUNT}/lost+found"
   chmod -R go-rwx "${BOOT_MOUNT}"
   BOOT_LABELS=$(setfiles -n -d -F -m -r "${BOOT_MOUNT}" \
@@ -941,18 +909,13 @@ if [[ "${OUTPUT_FMT}" == "vmdk" ]]; then
   symlink_image "ova" "os_image" "${OUTPUT_DIR}"
 fi
 
-# BOOT-A is FAT for UKI images (see the UKI_IMAGE branch above), and ext4 otherwise.
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  compress_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
-else
+if [[ "${UKI_IMAGE}" == "no" ]]; then
   compress_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
 fi
 compress_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"
 compress_image "ext4.lz4" "root_image" "${OUTPUT_DIR}"
 
-if [[ "${UKI_IMAGE}" == "yes" ]]; then
-  symlink_image "fat.lz4" "boot_image" "${OUTPUT_DIR}"
-else
+if [[ "${UKI_IMAGE}" == "no" ]]; then
   symlink_image "ext4.lz4" "boot_image" "${OUTPUT_DIR}"
 fi
 symlink_image "verity.lz4" "verity_image" "${OUTPUT_DIR}"

@@ -687,20 +687,38 @@ script = [
 # Check the profile for all files needed for Secure Boot signing.
 profile="${BUILDSYS_SBKEYS_PROFILE_DIR}"
 
+# Determine the image format so we know which signing artifacts a complete
+# profile must contain. UKI images boot the Unified Kernel Image directly and
+# are signed with a single `uki-sign` identity.
+export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
+variant_manifest="${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/Cargo.toml"
+image_format="$(buildsys variant-image-format --variant-manifest "${variant_manifest}")"
+
 found=0
 # A local profile has signing keys and certificates, while an AWS profile
 # has a config for the aws-kms-pkcs11 helper. Either type is supported.
-if [ -s "${profile}/shim-sign.key" ] && \
-   [ -s "${profile}/shim-sign.crt" ] && \
-   [ -s "${profile}/code-sign.key" ] && \
-   [ -s "${profile}/code-sign.crt" ] ; then
-   let found+=1
-elif [ -s "${profile}/kms-sign.json" ] ; then
-   let found+=1
+if [ "${image_format}" == "uki" ] ; then
+  if [ -s "${profile}/uki-sign.key" ] && \
+     [ -s "${profile}/uki-sign.crt" ] ; then
+     let found+=1
+  elif [ -s "${profile}/kms-sign.json" ] ; then
+     let found+=1
+  fi
+  required_files=( {PK,KEK,db}.crt efi-vars.{json,aws} )
+else
+  if [ -s "${profile}/shim-sign.key" ] && \
+     [ -s "${profile}/shim-sign.crt" ] && \
+     [ -s "${profile}/code-sign.key" ] && \
+     [ -s "${profile}/code-sign.crt" ] ; then
+     let found+=1
+  elif [ -s "${profile}/kms-sign.json" ] ; then
+     let found+=1
+  fi
+  required_files=( {PK,KEK,db,vendor}.crt config-sign.key efi-vars.{json,aws} )
 fi
 
 expected=1
-for f in {PK,KEK,db,vendor}.crt config-sign.key efi-vars.{json,aws} ; do
+for f in "${required_files[@]}" ; do
   let expected+=1
   [ -s "${profile}/${f}" ] && let found+=1
 done
@@ -1060,16 +1078,21 @@ trap 'cleanup' EXIT
 
 export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 
-# BOOT-A is FAT for UKI images (see the UKI_IMAGE branch in rpm2img/img2img),
-# and ext4 otherwise. The variant's image format isn't plumbed through to
-# cargo-make, so pick whichever boot artifact 'cargo make' actually produced.
-bootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-boot.fat.lz4"
-if [ ! -s "${bootlz4}" ]; then
+variant_manifest="${BUILDSYS_ROOT_DIR}/variants/${BUILDSYS_VARIANT}/Cargo.toml"
+image_format="$(buildsys variant-image-format --variant-manifest "${variant_manifest}")"
+
+BOOT_IMAGE_ARG=()
+if [ "${image_format}" != "uki" ]; then
    bootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-boot.ext4.lz4"
+   if [ ! -s "${bootlz4}" ]; then
+      echo "Boot image doesn't exist for the current version/commit - ${BUILDSYS_VERSION_FULL} - please run 'cargo make'" >&2
+      exit 1
+   fi
+   BOOT_IMAGE_ARG=(--boot-image "${bootlz4}")
 fi
 rootlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-root.ext4.lz4"
 hashlz4="${BUILDSYS_VARIANT_DIR}/${BUILDSYS_NAME_FULL}-root.verity.lz4"
-if [ ! -s "${bootlz4}" ] || [ ! -s "${rootlz4}" ] || [ ! -s "${hashlz4}" ]; then
+if [ ! -s "${rootlz4}" ] || [ ! -s "${hashlz4}" ]; then
    echo "Image files don't exist for the current version/commit - ${BUILDSYS_VERSION_FULL} - please run 'cargo make'" >&2
    exit 1
 fi
@@ -1134,7 +1157,7 @@ pubsys \
    --version "${BUILDSYS_VERSION_IMAGE}" \
    --variant "${BUILDSYS_VARIANT}" \
    \
-   --boot-image "${bootlz4}" \
+   "${BOOT_IMAGE_ARG[@]}" \
    --root-image "${rootlz4}" \
    --hash-image "${hashlz4}" \
    ${LINK_REPO_TARGETS[*]} \
