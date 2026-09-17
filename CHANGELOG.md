@@ -7,11 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-* Add a new image feature, `nvidia-dual-branch`, which when enabled builds an image supporting multiple NVIDIA driver branches
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.0-rc1...HEAD
 
-### Breaking Changes
-* Bump the kit metadata version to `v4`. This release cannot consume kits built with older Twoliter versions, and its kits cannot be consumed by them
+## [0.25.0-rc1] - 2026-09-17
+
+### Added
+
+* Add a new image feature, `nvidia-dual-branch`, which when enabled builds an image supporting multiple NVIDIA driver branches ([#747])
+* Support booting directly from a UKI, signed with a single UKI-only signing key ([#742])
+
+### Fixed
+
+* Install guest artifacts as real files with mode `0644` ([#744])
+
+### Changed
+
+* Increment kit metadata version. This makes this version of Twoliter incompatible with kits built
+  from older versions of Twoliter, and older versions of Twoliter incompatible with kits built from
+  this version [(#747)]
+
+[#742]: https://github.com/bottlerocket-os/twoliter/pull/742
+[#744]: https://github.com/bottlerocket-os/twoliter/pull/744
+[#747]: https://github.com/bottlerocket-os/twoliter/pull/747
+
+[0.25.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.24.2...v0.25.0-rc1
 
 ## [0.24.2] - 2026-09-08
 
