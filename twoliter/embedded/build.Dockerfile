@@ -49,6 +49,10 @@ ARG BUILD_ID
 ARG BUILD_ID_TIMESTAMP
 ENV BUILD_ID=${BUILD_ID}
 ENV BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP}
+# Mirror BUILD_ID_TIMESTAMP into SOURCE_DATE_EPOCH so rpm clamps payload/gzip
+# mtimes. `BUILDTIME` is not derived from it here; the rpmbuild calls below
+# also pass `--define '_buildtime ...'` to force a reproducible header.
+ENV SOURCE_DATE_EPOCH=${BUILD_ID_TIMESTAMP}
 WORKDIR /home/builder
 
 USER builder
@@ -133,6 +137,13 @@ RUN --mount=source=.cargo/twoliter_cargo_config.toml,target=/home/builder/rpmbui
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
     --mount=target=/host \
+    # Require a numeric BUILD_ID_TIMESTAMP; an empty value silently disables
+    # rpm's mtime clamp and buildtime override.
+    if [[ -z "${BUILD_ID_TIMESTAMP:-}" ]] || \
+       ! [[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]]; then \
+        echo "BUILD_ID_TIMESTAMP must be a Unix seconds value for reproducible RPMs, got '${BUILD_ID_TIMESTAMP:-}'" >&2; \
+        exit 1; \
+    fi && \
     # The dist tag is set as the `Release` field in Bottlerocket RPMs. Define it to be
     # in the form <timestamp of latest commit>.<latest commit short sha>.br1
     # Remove '-dirty' from the commit sha: '-' is an illegal character for the Release field
@@ -141,6 +152,7 @@ RUN --mount=source=.cargo/twoliter_cargo_config.toml,target=/home/builder/rpmbui
       rpmbuild -bb --clean \
         --undefine _auto_set_build_flags \
         --define "_target_cpu ${ARCH}" \
+        --define "_buildtime ${BUILD_ID_TIMESTAMP}" \
         --define "dist .${BUILD_ID_TIMESTAMP}.${BUILD_ID//-dirty/}.br1" \
         rpmbuild/SPECS/${PACKAGE}.spec
 
@@ -276,20 +288,29 @@ ARG KIT_DEPENDENCIES
 ARG EXTERNAL_KIT_DEPENDENCIES
 ARG ARCH
 ARG NOCACHE
-# Forwarded to rpmbuild as SOURCE_DATE_EPOCH for the metadata RPM.
+# Forwarded to rpmbuild as SOURCE_DATE_EPOCH for mtime clamping and as
+# `_buildtime` for the RPM BUILDTIME header.
 ARG BUILD_ID_TIMESTAMP
 ENV BUILD_ID_TIMESTAMP=${BUILD_ID_TIMESTAMP}
+ENV SOURCE_DATE_EPOCH=${BUILD_ID_TIMESTAMP}
 
 WORKDIR /home/builder
 USER builder
 
 # Build the metadata RPM for the variant.
 RUN --mount=target=/host \
-   cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
+   # Require a numeric BUILD_ID_TIMESTAMP so SOURCE_DATE_EPOCH reaches rpm.
+   if [[ -z "${BUILD_ID_TIMESTAMP:-}" ]] || \
+      ! [[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]]; then \
+       echo "BUILD_ID_TIMESTAMP must be a Unix seconds value for reproducible RPMs, got '${BUILD_ID_TIMESTAMP:-}'" >&2; \
+       exit 1; \
+   fi \
+   && cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
    && cat generated.bconds /host/build/tools/metadata.spec >> rpmbuild/SPECS/metadata.spec \
    && rpmbuild -ba --clean \
       --undefine _auto_set_build_flags \
       --define "_target_cpu ${ARCH}" \
+      --define "_buildtime ${BUILD_ID_TIMESTAMP}" \
       rpmbuild/SPECS/metadata.spec \
    && rpm -qp --provides rpmbuild/RPMS/${ARCH}/bottlerocket-metadata-*.${ARCH}.rpm \
    && echo ${NOCACHE}
