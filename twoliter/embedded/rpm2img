@@ -238,7 +238,12 @@ if [[ "${STANDALONE_IMAGE}" == "no" && "${PARTITION_PLAN}" == "split" ]]; then
     --sort --print "${DATA_IMAGE}"
 fi
 
-INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Written to `InstalledTime` in application-inventory.json. Derived from
+# BUILD_ID_TIMESTAMP to keep the inventory reproducible.
+: "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP required for reproducible inventory}"
+[[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]] || \
+    { echo "BUILD_ID_TIMESTAMP must be numeric, got '${BUILD_ID_TIMESTAMP}'" >&2; exit 1; }
+INSTALL_TIME="$(date -u -d "@${BUILD_ID_TIMESTAMP}" +%Y-%m-%dT%H:%M:%SZ)"
 rpm -iv --ignorearch --root "${ROOT_MOUNT}" "${PACKAGE_DIR}"/*.rpm
 
 # Embed any declared guest variant images into the host rootfs. Each entry has the form
