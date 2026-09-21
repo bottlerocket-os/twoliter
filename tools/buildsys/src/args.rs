@@ -149,6 +149,11 @@ pub(crate) struct BuildKitArgs {
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
 
+    /// Unix seconds of the latest project commit. Forwarded to the buildkit
+    /// sandbox as `BUILD_ID_TIMESTAMP` for reproducible artifact timestamps.
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD_TIMESTAMP")]
+    pub(crate) version_build_timestamp: String,
+
     /// Version number for the workspace
     #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
     pub(crate) version_image: String,

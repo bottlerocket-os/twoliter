@@ -180,6 +180,7 @@ impl KitBuildArgs {
         args.build_arg("KIT", &self.kit);
         args.build_arg("PACKAGE_DEPENDENCIES", self.package_dependencies.join(" "));
         args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("BUILD_ID_TIMESTAMP", &self.version_build_timestamp);
         args.build_arg("VERSION_ID", &self.version_id);
         args.build_arg("EXTERNAL_KIT_METADATA", &self.external_kit_metadata);
         args.build_arg("VENDOR", &self.vendor);
@@ -195,6 +196,9 @@ struct KitBuildArgs {
     local_kits: Vec<String>,
     vendor: String,
     version_build: String,
+    /// Unix seconds of the latest project commit. Forwarded as
+    /// `BUILD_ID_TIMESTAMP` for reproducible kit OCI timestamps.
+    version_build_timestamp: String,
     version_id: String,
 }
 
@@ -503,6 +507,7 @@ impl DockerBuild {
                 external_kit_metadata: EXTERNAL_KIT_METADATA.into(),
                 package_dependencies: manifest.package_dependencies().context(error::GraphSnafu)?,
                 version_build: args.version_build,
+                version_build_timestamp: args.version_build_timestamp,
                 version_id: args.version_image,
             }),
             secrets_args: Vec::new(),
