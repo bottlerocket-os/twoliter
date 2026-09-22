@@ -60,7 +60,14 @@ fi
 tar xf "__LOCAL_FILE_NAME__"
 
 pushd "${targetdir}"
-    go list -mod=readonly ./... >/dev/null && go mod vendor
+    # Some upstreams ship a go.work (multi-module workspace); `go mod vendor`
+    # refuses to run in workspace mode, so use `go work vendor` when a go.work
+    # is present and fall back to `go mod vendor` otherwise.
+    if [ -f go.work ]; then
+        go list -mod=readonly ./... >/dev/null && go work vendor
+    else
+        go list -mod=readonly ./... >/dev/null && go mod vendor
+    fi
 popd
 
 tar czf "__OUTPUT__" "${targetdir}"/vendor
@@ -282,6 +289,8 @@ mod test {
         assert!(script.contains("tar xf \"source-1.0.tar.gz\""));
         assert!(script.contains("tar czf \"bundled-source-1.0.tar.gz\""));
         assert!(script.contains("go mod vendor"));
+        assert!(script.contains("go work vendor"));
+        assert!(script.contains("if [ -f go.work ]"));
     }
 
     #[test]

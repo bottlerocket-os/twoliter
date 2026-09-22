@@ -409,7 +409,13 @@ go_fetch() {
     --module-path "${BUILDSYS_SOURCES_DIR}/${module}" \
     --sdk-image ${TLPRIVATE_SDK_IMAGE} \
     --go-mod-cache ${GO_MOD_CACHE} \
-    --command "${GO_CMD} list -mod=readonly ./... >/dev/null && ${GO_CMD} mod vendor"
+    --command "
+      if [ -f go.work ]; then
+        ${GO_CMD} list -mod=readonly ./... >/dev/null && ${GO_CMD} work vendor
+      else
+        ${GO_CMD} list -mod=readonly ./... >/dev/null && ${GO_CMD} mod vendor
+      fi
+    "
 }
 
 for m in ${GO_MODULES}; do
