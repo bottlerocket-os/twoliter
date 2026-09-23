@@ -61,6 +61,10 @@ multiple-versions = "deny"
 wildcards = "deny"
 
 skip = [
+    # snafu 0.8 which is depended on by tough brings an older version of object
+    { name = "object" },
+    { name = "base64" },
+    { name = "miniz_oxide" },
     # governor and guppy collide bringing two versions of hashbrown and foldhash
     { name = "hashbrown" },
     { name = "foldhash" },
@@ -81,10 +85,7 @@ skip = [
     { name = "digest" },
     { name = "getrandom" },
     { name = "heck" },
-    { name = "http" },
-    { name = "http-body" },
     { name = "r-efi" },
-    { name = "rand_chacha" },
     { name = "rand_core" },
     { name = "sha2" },
     { name = "snafu" },
@@ -92,7 +93,6 @@ skip = [
     { name = "syn" },
     { name = "unicode-width" },
     { name = "untrusted" },
-    { name = "windows-sys" },
     { name = "winnow" },
 ]
 
