@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.0...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.1-rc1...HEAD
+
+## [0.25.1-rc1] - 2026-09-29
+
+### Fixed
+
+* Use `go work vendor` when an upstream Go source ships a `go.work` file ([#752])
+
+### Build
+
+* Update cargo dependencies ([#753])
+
+[#752]: https://github.com/bottlerocket-os/twoliter/pull/752
+[#753]: https://github.com/bottlerocket-os/twoliter/pull/753
+
+[0.25.1-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.0...v0.25.1-rc1
 
 ## [0.25.0] - 2026-09-18
 
