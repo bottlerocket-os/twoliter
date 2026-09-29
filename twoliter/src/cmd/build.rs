@@ -19,7 +19,7 @@ pub(crate) enum BuildCommand {
 impl BuildCommand {
     pub(crate) async fn run(self, global_opts: &GlobalOpts) -> Result<()> {
         match self {
-            BuildCommand::Clean(command) => command.run().await,
+            BuildCommand::Clean(command) => command.run(global_opts).await,
             BuildCommand::Kit(command) => command.run(global_opts).await,
             BuildCommand::Variant(command) => command.run(global_opts).await,
         }

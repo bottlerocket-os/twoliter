@@ -29,12 +29,18 @@ use std::cmp::PartialEq;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::mem::take;
+use std::path::Path;
 use tokio::fs::read_to_string;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use super::{Locked, ProjectLock, Unlocked};
 
 const TWOLITER_LOCK: &str = "Twoliter.lock";
+
+/// Filename written inside `external-kits/.sdk-digest` after a successful SDK verification.
+const SDK_DIGEST_FILE: &str = ".sdk-digest";
+/// Filename written inside `external-kits/<vendor>/<kit>/digest` after a successful kit verification.
+const KIT_DIGEST_FILE: &str = "digest";
 
 const CONCURRENT_KIT_EXTRACTIONS: usize = 8;
 
@@ -67,11 +73,20 @@ impl AsRef<LockedImage> for LockedSDK {
 impl LockedSDK {
     /// Loads the locked SDK for the given project.
     ///
-    /// Re-resolves the project's SDK to ensure that the lockfile matches the state of the world.
+    /// Re-resolves the project's SDK against the remote registry to ensure that the lockfile
+    /// matches the state of the world. If the SDK manifest digest stored in
+    /// `external-kits/.sdk-digest` already matches the digest in `Twoliter.lock`, the remote
+    /// check is skipped — the digest file is written after each successful remote verification.
     #[instrument(level = "trace", skip(project))]
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
-        info!("Resolving SDK project reference to check against lock file");
         let current_lock = Lock::current_lock_state(project).await?;
+
+        if sdk_digest_matches(&project.external_kits_dir(), &current_lock.sdk).await {
+            info!("SDK digest matches local cache, skipping remote SDK verification");
+            return Ok(LockedSDK(current_lock.sdk.clone()));
+        }
+
+        info!("Resolving SDK project reference to check against lock file");
         let resolved_lock = Self::resolve_sdk(project)
             .await?
             .context("Project does not have explicit SDK image.")?;
@@ -88,6 +103,10 @@ impl LockedSDK {
                 "Locked SDK does not match resolved SDK",
             );
             bail!("Changes have occured to Twoliter.toml or the remote SDK image that require an update to Twoliter.lock");
+        }
+
+        if let Err(e) = write_sdk_digest(&project.external_kits_dir(), &resolved_lock.0).await {
+            warn!("Failed to cache SDK digest: {}", e);
         }
 
         Ok(resolved_lock)
@@ -152,13 +171,20 @@ impl Lock {
 
     /// Loads the lockfile for the given project.
     ///
-    /// Re-resolves the project's dependencies to ensure that the lockfile matches the state of the
-    /// world.
+    /// Re-resolves all kit and SDK dependencies against the remote registry to ensure that the
+    /// lockfile matches the state of the world. If every kit and SDK manifest digest stored under
+    /// `external-kits/` already matches the corresponding digest in `Twoliter.lock`, the remote
+    /// check is skipped. Digest files are written after each successful remote verification.
     #[instrument(level = "trace", skip(project))]
     pub(super) async fn load(project: &Project<Unlocked>) -> Result<Self> {
-        info!("Resolving project references to check against lock file");
-
         let current_lock = Self::current_lock_state(project).await?;
+
+        if Self::all_local_digests_match(project, &current_lock).await {
+            info!("All kit and SDK digests match local cache, skipping remote verification");
+            return Ok(current_lock);
+        }
+
+        info!("Resolving project references to check against lock file");
         let resolved_lock = Self::resolve(project).await?;
 
         debug!(
@@ -173,6 +199,10 @@ impl Lock {
                 "Locked dependencies do not match resolved dependencies"
             );
             bail!("changes have occured to Twoliter.toml or the remote kit images that require an update to Twoliter.lock");
+        }
+
+        if let Err(e) = Self::write_all_digests(project, &resolved_lock).await {
+            warn!("Failed to cache artifact digests: {}", e);
         }
 
         Ok(resolved_lock)
@@ -387,4 +417,83 @@ impl Lock {
             project_vendor: project.project_vendor.clone(),
         })
     }
+
+    /// Returns true if every kit and SDK digest file under `external-kits/` matches
+    /// the corresponding digest in `lock`. Returns false if any file is missing or mismatches.
+    async fn all_local_digests_match(project: &Project<Unlocked>, lock: &Lock) -> bool {
+        let dir = project.external_kits_dir();
+        if !sdk_digest_matches(&dir, &lock.sdk).await {
+            return false;
+        }
+        for kit in &lock.kit {
+            if !kit_digest_matches(&dir, kit).await {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Writes digest files for all kits and the SDK after a successful remote verification.
+    async fn write_all_digests(project: &Project<Unlocked>, lock: &Lock) -> Result<()> {
+        let dir = project.external_kits_dir();
+        write_sdk_digest(&dir, &lock.sdk).await?;
+        for kit in &lock.kit {
+            write_kit_digest(&dir, kit).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Returns the path of the cached digest file for a kit:
+/// `external-kits/<vendor>/<kit-name>/digest`
+fn kit_digest_path(external_kits_dir: &Path, kit: &LockedImage) -> std::path::PathBuf {
+    external_kits_dir
+        .join(kit.vendor.as_ref())
+        .join(kit.name.as_ref())
+        .join(KIT_DIGEST_FILE)
+}
+
+/// Returns the path of the cached SDK digest file: `external-kits/.sdk-digest`
+fn sdk_digest_path(external_kits_dir: &Path) -> std::path::PathBuf {
+    external_kits_dir.join(SDK_DIGEST_FILE)
+}
+
+/// Returns true if the stored kit digest matches `kit.digest`.
+async fn kit_digest_matches(external_kits_dir: &Path, kit: &LockedImage) -> bool {
+    let path = kit_digest_path(external_kits_dir, kit);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(stored) => stored.trim() == kit.digest,
+        Err(_) => false,
+    }
+}
+
+/// Returns true if the stored SDK digest matches `sdk.digest`.
+async fn sdk_digest_matches(external_kits_dir: &Path, sdk: &LockedImage) -> bool {
+    let path = sdk_digest_path(external_kits_dir);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(stored) => stored.trim() == sdk.digest,
+        Err(_) => false,
+    }
+}
+
+/// Writes the kit's manifest digest to its digest file, creating parent directories as needed.
+async fn write_kit_digest(external_kits_dir: &Path, kit: &LockedImage) -> Result<()> {
+    let path = kit_digest_path(external_kits_dir, kit);
+    tokio::fs::create_dir_all(path.parent().expect("kit digest path always has a parent"))
+        .await
+        .context("failed to create directory for kit digest file")?;
+    tokio::fs::write(&path, &kit.digest)
+        .await
+        .with_context(|| format!("failed to write kit digest file '{}'", path.display()))
+}
+
+/// Writes the SDK's manifest digest to its digest file, creating the directory as needed.
+async fn write_sdk_digest(external_kits_dir: &Path, sdk: &LockedImage) -> Result<()> {
+    let path = sdk_digest_path(external_kits_dir);
+    tokio::fs::create_dir_all(path.parent().expect("sdk digest path always has a parent"))
+        .await
+        .context("failed to create external-kits directory for SDK digest file")?;
+    tokio::fs::write(&path, &sdk.digest)
+        .await
+        .with_context(|| format!("failed to write SDK digest file '{}'", path.display()))
 }
