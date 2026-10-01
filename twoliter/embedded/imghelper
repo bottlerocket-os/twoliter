@@ -1004,6 +1004,59 @@ generate_application_inventory() {
   local kit_inventory_query KIT_PKGS kit_list
   EXTERNAL_KIT_METADATA_PATH="${external_kits_path}/external-kit-metadata.json"
   mapfile -t kits < <(jq -r ".kit[].name" "${EXTERNAL_KIT_METADATA_PATH}")
+
+  # Populate the AWS:Application `PackageId` field with an OCI-style digest
+  # reference to the built RPM binary:
+  #   <name>-<version>-<release>.<arch>.rpm@sha256:<hex>
+  # Compute the sha256 of every on-disk RPM binary that could have contributed
+  # to this inventory (this variant's package_dir plus each kit's repo dir).
+  # Attach here — before the kit-rename loop below — so `.Name` still holds
+  # the `bottlerocket-`-prefixed name that appears in the kit repo filename.
+  # Source-parent entries have no built binary and get `PackageId: ""`. A
+  # binary entry with no matching on-disk RPM is a bug and aborts.
+  local rpm_dirs=("${package_dir}")
+  for kit in "${kits[@]}"; do
+    kit_vendor=$(jq --arg kit "${kit}" --raw-output '.kit[]|select(.name == $kit)|.vendor' "${EXTERNAL_KIT_METADATA_PATH}")
+    if [[ -n "${kit_vendor}" ]]; then
+      rpm_dirs+=("${external_kits_path}/${kit_vendor}/${kit}/${arch}")
+    fi
+  done
+  local RPM_HASH_MAP
+  RPM_HASH_MAP="$(
+    {
+      for d in "${rpm_dirs[@]}"; do
+        [[ -d "${d}" ]] || continue
+        find "${d}" -maxdepth 1 -type f -name '*.rpm' -print0 | xargs -0r sha256sum
+      done
+    } | jq --raw-input --slurp '
+      split("\n") | map(select(length > 0) | capture("^(?<h>[0-9a-f]+)\\s+.*/(?<f>[^/]+)$"))
+      | map({(.f): .h}) | add // {}
+    '
+  )"
+  local PACKAGEID_UPDATE MISSING_HASHES
+  PACKAGEID_UPDATE="$(jq \
+    --argjson shamap "${RPM_HASH_MAP}" \
+    '
+      def is_source_parent: (.Summary // "") | endswith(" (source package)");
+      def rpm_filename: .Name + "-" + .Version + "-" + .Release + "." + .Architecture + ".rpm";
+      def package_id: rpm_filename as $f | $shamap[$f] as $h |
+        if $h == null then null else ($f + "@sha256:" + $h) end;
+      {
+        inventory: (.Content |= map(
+          if is_source_parent then . + {PackageId: ""}
+          else . + {PackageId: (package_id // "")}
+          end
+        )),
+        missing: [.Content[] | select(is_source_parent | not) | select(package_id == null) | rpm_filename]
+      }
+    ' <<<"${INVENTORY_DATA}")"
+  MISSING_HASHES="$(jq -r '.missing | join(", ")' <<<"${PACKAGEID_UPDATE}")"
+  if [[ -n "${MISSING_HASHES}" ]]; then
+    echo "generate_application_inventory: no on-disk RPM found for: ${MISSING_HASHES}" >&2
+    exit 1
+  fi
+  INVENTORY_DATA="$(jq '.inventory' <<<"${PACKAGEID_UPDATE}")"
+
   for kit in "${kits[@]}"; do
     kit_version=$(jq --arg kit "${kit}" --raw-output '.kit[]|select(.name == $kit)|.version' "${EXTERNAL_KIT_METADATA_PATH}")
     kit_vendor=$(jq --arg kit "${kit}" --raw-output '.kit[]|select(.name == $kit)|.vendor' "${EXTERNAL_KIT_METADATA_PATH}")
@@ -1059,7 +1112,18 @@ generate_application_inventory() {
     echo "Inventory of RPMs does not match what was expected: '${INVENTORY_COUNT}/$((RPM_COUNT + ADDED_PARENTS))'" >&2
     exit 1
   fi
-  if grep -q "bottlerocket-release" <<<"${INVENTORY_DATA}"; then
+  # Guard: kit-provided packages must have their `bottlerocket-` prefix
+  # stripped by the kit-rename loop above. `bottlerocket-release` is a
+  # well-known core-kit package that acts as a canary; if its `.Name` still
+  # carries the prefix, the rename step did not run correctly.
+  #
+  # This check is scoped to `.Name` (not a substring grep of the whole JSON)
+  # because `PackageId` legitimately embeds the on-disk RPM filename, which
+  # retains the `bottlerocket-` prefix as part of the digest reference. It is
+  # also scoped to a kit-owned name so it does not fire on locally-built
+  # variant packages (e.g. `bottlerocket-metadata`, `bottlerocket-settings-*`,
+  # `bottlerocket-migrations`) that keep their prefix by design.
+  if jq -e '.Content[] | select(.Name == "bottlerocket-release")' >/dev/null <<<"${INVENTORY_DATA}"; then
     echo "Inventory of RPMs includes packages prefixed with 'bottlerocket-'" >&2
     exit 1
   fi
