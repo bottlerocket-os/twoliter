@@ -25,8 +25,10 @@ BUILDSYS_METADATA_DIR = "${BUILDSYS_BUILD_DIR}/metadata"
 BUILDSYS_CARGO_METADATA_PATH = "${BUILDSYS_METADATA_DIR}/cargo_metadata.json"
 BUILDSYS_SBKEYS_PROFILE = { script = ['echo "${BUILDSYS_SBKEYS_PROFILE:-local}"'] }
 BUILDSYS_VERSION_BUILD = { script = ["git describe --always --dirty --exclude '*' --abbrev=8 || echo 00000000"] }
-# The unix timestamp in ms of the latest commit of the project.
-# This is an input for setting the Release value of a package.
+# Unix seconds of the latest project commit. Threaded through buildsys and the
+# Dockerfile as `BUILD_ID_TIMESTAMP`; used as the source of truth for the RPM
+# `Release` and `BUILDTIME`, `SOURCE_DATE_EPOCH`, kit OCI `.created`, and
+# variant `InstalledTime` fields to keep build artifacts reproducible.
 BUILDSYS_VERSION_BUILD_TIMESTAMP = { script = ["git show -s --format=%ct HEAD || echo 0000000000"] }
 # For now, release config path can't be overridden with -e, because it's used
 # later in this section.  You have to edit the path here in Makefile.toml to

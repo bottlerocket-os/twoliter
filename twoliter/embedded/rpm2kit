@@ -50,7 +50,13 @@ cleanup() {
 }
 trap 'cleanup' EXIT
 
-TIMESTAMP="$(date +"%FT%T.%NZ")"
+# Written to the kit's OCI `.created` field and index
+# `org.opencontainers.image.created` annotation. Derived from
+# BUILD_ID_TIMESTAMP to keep kit metadata reproducible.
+: "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP required for reproducible kit metadata}"
+[[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]] || \
+    { echo "BUILD_ID_TIMESTAMP must be numeric, got '${BUILD_ID_TIMESTAMP}'" >&2; exit 1; }
+TIMESTAMP="$(date -u -d "@${BUILD_ID_TIMESTAMP}" +%Y-%m-%dT%H:%M:%SZ)"
 FILENAME_PREFIX="${KIT:?}-v${VERSION_ID:?}-${BUILD_ID:?}-${ARCH:?}"
 # Translate ARCH into the proper docker arch
 case "${ARCH}" in
