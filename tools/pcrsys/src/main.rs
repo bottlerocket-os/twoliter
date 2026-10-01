@@ -172,12 +172,32 @@ fn predict_pcrs(
 ) -> Result<PcrPredictions> {
     let gpt_bin = gpt::extract_primary_gpt(disk)?;
     let partitions = gpt::find_partitions(disk)?;
-    let shim = diskfs::extract_shim(disk, &partitions)?;
-    let grub = diskfs::extract_grub(disk, &partitions)?;
-    let vmlinuz = diskfs::extract_vmlinuz(disk, &partitions)?;
-    let grub_cfg = diskfs::extract_grub_cfg(disk, &partitions)?;
-    let bootconfig = diskfs::extract_bootconfig(disk, &partitions)?;
     let boot_partuuid = gpt::get_boot_partuuid(disk)?;
+
+    // The ESP removable-media fallback path (EFI/BOOT/BOOT{X64,AA64}.EFI) holds
+    // either a shim (grub variants) or the signed UKI (uki-image variants).
+    let boot_efi = diskfs::extract_shim(disk, &partitions)?;
+    let is_uki = pe::is_uki(&boot_efi);
+
+    // grub/vmlinuz/grub.cfg/bootconfig exist only in the shim->grub->vmlinuz
+    // layout. A direct-UKI image embeds the kernel and cmdline in the single UKI
+    // on the ESP (no dedicated BOOT-A), so those files are absent.
+    let (shim, uki, grub, vmlinuz, grub_cfg, bootconfig) = if is_uki {
+        (
+            Vec::new(),
+            boot_efi,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    } else {
+        let grub = diskfs::extract_grub(disk, &partitions)?;
+        let vmlinuz = diskfs::extract_vmlinuz(disk, &partitions)?;
+        let grub_cfg = diskfs::extract_grub_cfg(disk, &partitions)?;
+        let bootconfig = diskfs::extract_bootconfig(disk, &partitions)?;
+        (boot_efi, Vec::new(), grub, vmlinuz, grub_cfg, bootconfig)
+    };
 
     let ctx = PcrContext::builder()
         .platform(platform)
@@ -185,6 +205,7 @@ fn predict_pcrs(
         .partitions(&partitions)
         .gpt_bin(&gpt_bin)
         .shim(&shim)
+        .uki(&uki)
         .grub(&grub)
         .vmlinuz(&vmlinuz)
         .grub_cfg(&grub_cfg)

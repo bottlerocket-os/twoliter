@@ -12,16 +12,18 @@ use crate::predict::{
 ///
 /// AWS/Metal extend an action string before the separator, VMware does not.
 ///
+/// Shim->grub->vmlinuz layout:
 /// AWS/Metal: action -> separator -> shim -> grub -> vmlinuz
 /// VMware:              separator -> shim -> grub -> vmlinuz
+///
+/// UKI layout: firmware loads exactly one EFI application,
+/// the signed UKI, so only that single image is measured:
+/// AWS/Metal: action -> separator -> uki
+/// VMware:              separator -> uki
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
     if ctx.partitions.boot_b.is_some() {
         return Ok(None);
     }
-
-    let shim_hash = get_authenticode_hash(ctx.shim)?;
-    let grub_hash = get_authenticode_hash(ctx.grub)?;
-    let vmlinuz_hash = get_authenticode_hash(ctx.vmlinuz)?;
 
     // AWS/Metal: action string first, VMware: start with zeros
     let mut pcr = match ctx.platform {
@@ -30,12 +32,19 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
         }
         Platform::Vmware => PCR_INIT_VAL,
     };
-
-    // Common: separator -> shim -> grub -> vmlinuz
     pcr = extend_pcr_separator(&pcr);
-    pcr = extend_pcr(&pcr, &shim_hash);
-    pcr = extend_pcr(&pcr, &grub_hash);
-    pcr = extend_pcr(&pcr, &vmlinuz_hash);
+
+    if !ctx.uki.is_empty() {
+        let uki_hash = get_authenticode_hash(ctx.uki)?;
+        pcr = extend_pcr(&pcr, &uki_hash);
+    } else {
+        let shim_hash = get_authenticode_hash(ctx.shim)?;
+        let grub_hash = get_authenticode_hash(ctx.grub)?;
+        let vmlinuz_hash = get_authenticode_hash(ctx.vmlinuz)?;
+        pcr = extend_pcr(&pcr, &shim_hash);
+        pcr = extend_pcr(&pcr, &grub_hash);
+        pcr = extend_pcr(&pcr, &vmlinuz_hash);
+    }
 
     Ok(Some((PcrIndex::Pcr4, PcrRecord::new(pcr))))
 }
@@ -43,7 +52,7 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::predict::test_support::{build_test_shim, MockCtx};
+    use crate::predict::test_support::{build_test_shim, build_test_uki, MockCtx};
 
     #[test]
     fn test_predict_aws() {
@@ -98,5 +107,26 @@ mod tests {
             .vmlinuz(&pe)
             .build();
         assert!(predict(&ctx).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_predict_uki_aws() {
+        // Direct-UKI layout: only the single UKI application is measured
+        // (action -> separator -> uki), with no shim/grub/vmlinuz.
+        let uki = build_test_uki();
+        let m = MockCtx::new();
+        let ctx = PcrContext::builder()
+            .platform(Platform::Aws)
+            .efi_vars(&m.efi_vars)
+            .partitions(&m.layout)
+            .uki(&uki)
+            .build();
+        let result = predict(&ctx).unwrap().unwrap();
+        assert_eq!(result.0, PcrIndex::Pcr4);
+
+        assert_eq!(
+            result.1.sha256[0],
+            "b918b81b1a860c3934a6117896c5fcb3a92f210e9201793f4045a686bb5e8b14"
+        );
     }
 }
