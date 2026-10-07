@@ -611,3 +611,31 @@ set_partition_uuids() {
     ;;
   esac
 }
+
+# Populate the caller's table with stable GPT partition GUIDs derived via
+# `derive_uuid` (from `imghelper`). DATA-A/DATA-B retain their well-known
+# `BOTTLEROCKET_DATA_*_PARTGUID` constants because the runtime data-partition
+# discovery relies on them.
+#
+# Usage: set_all_partition_uuids <assoc_array_name> <partition_plan>
+set_all_partition_uuids() {
+  local -n _pp_uuid
+  _pp_uuid="${1:?}"
+  local partition_plan
+  partition_plan="${2:?}"
+
+  set_partition_uuids "${1}" "${partition_plan}"
+
+  _pp_uuid["BIOS"]="$(derive_uuid gpt-part-bios)"
+  _pp_uuid["EFI-A"]="$(derive_uuid gpt-part-efi-a)"
+  _pp_uuid["EFI-B"]="$(derive_uuid gpt-part-efi-b)"
+  _pp_uuid["BOOT-A"]="$(derive_uuid gpt-part-boot-a)"
+  _pp_uuid["BOOT-B"]="$(derive_uuid gpt-part-boot-b)"
+  _pp_uuid["ROOT-A"]="$(derive_uuid gpt-part-root-a)"
+  _pp_uuid["ROOT-B"]="$(derive_uuid gpt-part-root-b)"
+  _pp_uuid["HASH-A"]="$(derive_uuid gpt-part-hash-a)"
+  _pp_uuid["HASH-B"]="$(derive_uuid gpt-part-hash-b)"
+  _pp_uuid["RESERVED-A"]="$(derive_uuid gpt-part-reserved-a)"
+  _pp_uuid["RESERVED-B"]="$(derive_uuid gpt-part-reserved-b)"
+  _pp_uuid["PRIVATE"]="$(derive_uuid gpt-part-private)"
+}

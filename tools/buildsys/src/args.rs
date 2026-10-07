@@ -15,7 +15,7 @@ use url::Url;
 /// variable changes. The build type is represented with bit flags so that we can easily list
 /// multiple build types for a single variable. See `[BuildType]` and `[rerun_for_envs]` below to
 /// see how this list is used.
-const REBUILD_VARS: [(&str, u8); 14] = [
+const REBUILD_VARS: [(&str, u8); 15] = [
     ("BUILDSYS_ARCH", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_CACERTS_BUNDLE_OVERRIDE", VARIANT),
     ("BUILDSYS_KITS_DIR", KIT),
@@ -28,6 +28,7 @@ const REBUILD_VARS: [(&str, u8); 14] = [
     ("BUILDSYS_ROOT_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_STATE_DIR", PACKAGE | KIT | VARIANT),
     ("BUILDSYS_VERSION_BUILD", KIT | VARIANT),
+    ("BUILDSYS_VERSION_BUILD_TIMESTAMP", VARIANT),
     ("BUILDSYS_VERSION_IMAGE", KIT | VARIANT),
     ("TLPRIVATE_SDK_IMAGE", PACKAGE | KIT | VARIANT),
 ];
@@ -201,6 +202,11 @@ pub(crate) struct RepackVariantArgs {
 
     #[arg(long, env = "BUILDSYS_VERSION_BUILD")]
     pub(crate) version_build: String,
+
+    /// Unix seconds of the latest project commit. Seeds the deterministic-ID
+    /// helpers in `imghelper` so repacked artifacts have stable UUIDs.
+    #[arg(long, env = "BUILDSYS_VERSION_BUILD_TIMESTAMP")]
+    pub(crate) version_build_timestamp: String,
 
     #[arg(long, env = "BUILDSYS_VERSION_IMAGE")]
     pub(crate) version_image: String,

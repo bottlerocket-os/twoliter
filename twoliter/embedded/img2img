@@ -285,7 +285,8 @@ mkfs_boot_uki() {
 
   rm -f "${boot_image}"
   dd if=/dev/zero of="${boot_image}" bs=1M count="${bootpart_mib}"
-  mkfs.vfat -I -S 512 "${boot_image}" $((bootpart_mib * 1024))
+  mkfs.vfat -I -S 512 -i "$(derive_fat_volid uki-efi-vfat)" \
+    "${boot_image}" $((bootpart_mib * 1024))
   mmd -i "${boot_image}" ::/EFI
   mmd -i "${boot_image}" ::/EFI/BOOT
   # Deploy the staged UKI to the ESP removable-media fallback path so firmware
@@ -307,6 +308,10 @@ mkfs_boot_uki() {
 # Provides `discover_eif_signer_args` for the guest-EIF resign loop.
 # shellcheck source=eif-sign-helper
 . "${0%/*}/eif-sign-helper"
+
+: "${VARIANT:?VARIANT must be set}"
+: "${ARCH:?ARCH must be set}"
+: "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP must be set}"
 
 # Validate that the values for the args are sane.
 sanity_checks \

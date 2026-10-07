@@ -348,6 +348,7 @@ struct RepackVariantBuildArgs {
     variant_name: String,
     variant_platform: String,
     version_build: String,
+    version_build_timestamp: String,
     version_image: String,
     /// Newline-delimited list of `<guest>:<install_path>:<host_image_dir>` triples for host
     /// variants that embed guest images and, on repack, need to resign the guest EIFs found
@@ -374,6 +375,7 @@ impl RepackVariantBuildArgs {
         args.build_arg("VARIANT_NAME", &self.variant_name);
         args.build_arg("VARIANT_PLATFORM", &self.variant_platform);
         args.build_arg("BUILD_ID", &self.version_build);
+        args.build_arg("BUILD_ID_TIMESTAMP", &self.version_build_timestamp);
         args.build_arg("VERSION_ID", &self.version_image);
         args.build_arg("EIF_PCIE_FLAGS", &self.eif_pcie_flags);
         args.build_arg("GUEST_IMAGES", &self.guest_images);
@@ -735,6 +737,7 @@ impl DockerBuild {
                 variant_name,
                 variant_platform,
                 version_build: args.version_build,
+                version_build_timestamp: args.version_build_timestamp,
                 version_image: args.version_image,
                 guest_images: guest_images
                     .iter()

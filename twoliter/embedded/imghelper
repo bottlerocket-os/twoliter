@@ -58,6 +58,116 @@ SBKEYS="${HOME}/sbkeys"
 # Pre-emptively declare global arrays to be populated later.
 declare -a SHIM_SIGN_KEY CODE_SIGN_KEY UKI_SIGN_KEY
 
+# Reproducible identifier helpers: derive stable UUIDs, filesystem seeds, and
+# FAT volume IDs from BUILD_ID_TIMESTAMP, VARIANT, ARCH, and an id_target naming
+# the disk, partition, or filesystem the identifier is for (e.g. "root-ext4").
+
+# Emit the SHA-256 hex digest of "${BUILD_ID_TIMESTAMP}|${VARIANT}|${ARCH}|${id_target}".
+# Validation is explicit (rather than `${VAR:?}` on the printf line) because
+# printf is a shell builtin: if `${VAR:?}` fires inside the pipeline, printf
+# aborts with zero output but sha256sum still succeeds on empty input and the
+# caller sees the sha256 of the empty string instead of a failure.
+_derive_hash() {
+  local id_target input digest
+  id_target="${1:?}"
+  if [[ -z "${BUILD_ID_TIMESTAMP:-}" ]]; then
+    echo "deterministic_ids: BUILD_ID_TIMESTAMP must be set" >&2
+    exit 1
+  fi
+  if [[ -z "${VARIANT:-}" ]]; then
+    echo "deterministic_ids: VARIANT must be set" >&2
+    exit 1
+  fi
+  if [[ -z "${ARCH:-}" ]]; then
+    echo "deterministic_ids: ARCH must be set" >&2
+    exit 1
+  fi
+  input="${BUILD_ID_TIMESTAMP}|${VARIANT}|${ARCH}|${id_target}"
+  digest="$(printf '%s' "${input}" | sha256sum)"
+  printf '%s\n' "${digest%% *}"
+}
+
+# Derive an RFC 4122 version-4 shaped UUID from the inputs. The output is a
+# canonical lowercase 8-4-4-4-12 UUID with version (4) and variant (10xx)
+# bits set so that `blkid`, the kernel, and `sgdisk` accept it.
+#
+# Usage: derive_uuid <id_target>
+derive_uuid() {
+  local id_target hash b7 b9
+  id_target="${1:?}"
+  hash="$(_derive_hash "${id_target}")" || return 1
+  # `_derive_hash` runs inside `$(...)`, so an `exit` there only kills the
+  # subshell. Guard explicitly so a missing env variable fails the caller.
+  if [[ -z "${hash}" ]]; then
+    echo "derive_uuid: _derive_hash produced empty output" >&2
+    return 1
+  fi
+
+  # Set version nibble (byte 7, high nibble = 4) and variant bits (byte 9,
+  # high two bits = 10). The hash is lowercase hex already.
+  b7="4${hash:13:3}"
+  # High two bits of byte 9 must be '10' → high nibble ∈ {8,9,a,b}.
+  local nib
+  nib="${hash:16:1}"
+  case "${nib}" in
+    0|1|2|3|4|5|6|7) nib="8" ;;
+    8|9|a|b)         ;; # already in range
+    c) nib="8" ;;
+    d) nib="9" ;;
+    e) nib="a" ;;
+    f) nib="b" ;;
+  esac
+  b9="${nib}${hash:17:3}"
+
+  printf '%s-%s-%s-%s-%s\n' \
+    "${hash:0:8}" "${hash:8:4}" "${b7}" "${b9}" "${hash:20:12}"
+}
+
+# Derive an 8-hex-digit FAT32 volume ID (32 bits) from the inputs. `mkfs.vfat`
+# accepts `-i <hex>` to set this value; by default it reads the clock, so
+# pinning it is required for reproducibility.
+#
+# Usage: derive_fat_volid <id_target>
+derive_fat_volid() {
+  local id_target hash
+  id_target="${1:?}"
+  hash="$(_derive_hash "${id_target}")" || return 1
+  if [[ -z "${hash}" ]]; then
+    echo "derive_fat_volid: _derive_hash produced empty output" >&2
+    return 1
+  fi
+  printf '%s\n' "${hash:0:8}"
+}
+
+# Alias: `mkfs.ext4 -E hash_seed=` wants a UUID-shaped value and we want the
+# directory hash seed to be stable per id_target. Using the same derivation as the
+# superblock UUID is intentional: two call sites with the same id_target see the
+# same seed, two with different id_targets see different seeds.
+#
+# Usage: ext4_hash_seed <id_target>
+ext4_hash_seed() {
+  derive_uuid "${1:?}"
+}
+
+# Clamp file mtimes under <dir> to BUILD_ID_TIMESTAMP when they are newer, so
+# that filesystems built with `mkfs.ext4 -d` / `mkfs.erofs <dir>` embed stable
+# per-inode mtimes. Mirrors reproducible-builds.org's "clamp to
+# SOURCE_DATE_EPOCH" guidance: older-than-timestamp content keeps its original
+# mtime, so historical files do not look brand new.
+#
+# Usage: clamp_mtimes_to_build_id <dir>
+clamp_mtimes_to_build_id() {
+  local dir
+  dir="${1:?}"
+  : "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP must be set}"
+
+  # `find -newermt @<epoch>` matches files strictly newer than the epoch.
+  # `touch -h` updates the symlink itself rather than its target when the
+  # entry is a symlink, which preserves symlink metadata reproducibility.
+  find "${dir}" -newermt "@${BUILD_ID_TIMESTAMP}" \
+    -exec touch -h -d "@${BUILD_ID_TIMESTAMP}" {} +
+}
+
 sanity_checks() {
   local output_fmt partition_plan ovf_template uefi_secure_boot sbom_package_dir
   output_fmt="${1:?}"
@@ -355,7 +465,7 @@ x86_64-objdumpcopy() {
 }
 
 mkfs_data_ext4() {
-  local target size offset bottlerocket_data data_mount unlabeled
+  local target size offset bottlerocket_data data_mount unlabeled fs_uuid hash_seed
   target="${1:?}"
   size="${2:?}"
   offset="${3:?}"
@@ -363,7 +473,11 @@ mkfs_data_ext4() {
   data_mount="${5:?}"
   unlabeled="${6:?}"
   echo "writing ext4 filesystem for DATA"
-  mkfs.ext4 -m 0 -d "${data_mount}" "${bottlerocket_data}" "${size}"
+  fs_uuid="$(derive_uuid data-ext4)"
+  hash_seed="$(ext4_hash_seed data-ext4)"
+  clamp_mtimes_to_build_id "${data_mount}"
+  mkfs.ext4 -m 0 -U "${fs_uuid}" -E "hash_seed=${hash_seed}" \
+    -d "${data_mount}" "${bottlerocket_data}" "${size}"
   echo "${unlabeled}" | debugfs -w -f - "${bottlerocket_data}"
   dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
 }
@@ -383,22 +497,26 @@ mkfs_data_xfs() {
 }
 
 mkfs_root_erofs() {
-  local root_mount root_image selinux_file_contexts
+  local root_mount root_image selinux_file_contexts fs_uuid
   root_mount="${1:?}"
   root_image="${2:?}"
   selinux_file_contexts="${3:?}"
   # Ensure the root mount directory is not writable, to avoid permission errors
   # when interacting with the root inode at runtime.
   chmod 555 "${root_mount}"
+  fs_uuid="$(derive_uuid root-erofs)"
+  clamp_mtimes_to_build_id "${root_mount}"
   # mkfs.erofs optimizations:
   #  --all-root: use same UID/GID for all files
-  #          -T: use same mtime for all files
+  #          -T: pin per-inode mtime to BUILD_ID_TIMESTAMP for reproducibility
+  #          -U: pin the filesystem UUID (default is random)
   # -z lz4hc,12: lz4 for fast decompression, lz4hc level 12 for max compression
   #   -C 262144: use physical clusters up to 256 KiB to align with EBS I/O size
   mkfs.erofs \
     --file-contexts="${selinux_file_contexts}" \
     --all-root \
-    -T "$(stat -c '%Y' "${root_mount}/root")" \
+    -U "${fs_uuid}" \
+    -T "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP must be set}" \
     -z lz4hc,12 \
     -C 262144 \
     "${root_image}" "${root_mount}"
