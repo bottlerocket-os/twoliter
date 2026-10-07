@@ -74,7 +74,7 @@ assert_contains_tokens() {
 echo "Test 1: UKI + FIPS variant includes systemd and FIPS tokens"
 out="$(uki_bootconfig_cmdline "aws-k8s-1.35-fips")"
 assert_contains_tokens "${out}" "fips variant: systemd tokens present" \
-  "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1" "SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25" "module_blacklist=i8042"
+  "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1" "SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25"
 assert_contains_tokens "${out}" "fips variant: FIPS tokens present" \
   "fips=1" "init.systemd.unit=fipscheck.target"
 
@@ -82,7 +82,7 @@ echo
 echo "Test 1b: UKI + FIPS variant with an extra flavor segment (nvidia-fips)"
 out="$(uki_bootconfig_cmdline "aws-k8s-1.34-nvidia-fips")"
 assert_contains_tokens "${out}" "nvidia-fips variant: systemd tokens present" \
-  "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1" "SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25" "module_blacklist=i8042"
+  "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1" "SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25"
 assert_contains_tokens "${out}" "nvidia-fips variant: FIPS tokens present" \
   "fips=1" "init.systemd.unit=fipscheck.target"
 
@@ -90,7 +90,7 @@ echo
 echo "Test 2: UKI + non-FIPS variant includes systemd tokens only"
 out="$(uki_bootconfig_cmdline "aws-k8s-1.35")"
 assert_contains_tokens "${out}" "non-fips variant: systemd tokens present" \
-  "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1" "SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25" "module_blacklist=i8042"
+  "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1" "SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25"
 if [[ " ${out} " == *" fips=1 "* ]] || [[ " ${out} " == *" init.systemd.unit=fipscheck.target "* ]]; then
   fail "non-fips variant: FIPS tokens must be absent, got '${out}'"
 else

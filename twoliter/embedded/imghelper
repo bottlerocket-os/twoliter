@@ -805,7 +805,7 @@ sign_vmlinuz() {
 uki_bootconfig_cmdline() {
   local variant tokens
   variant="${1:?}"
-  tokens="SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25 module_blacklist=i8042"
+  tokens="SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=25"
   if [[ "${variant}" == *-fips ]]; then
     tokens="${tokens} fips=1 init.systemd.unit=fipscheck.target"
   fi
