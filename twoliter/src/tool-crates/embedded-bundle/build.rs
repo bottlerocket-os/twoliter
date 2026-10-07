@@ -53,6 +53,9 @@ fn main() {
     let mut buf_writer = Vec::new().writer();
     let enc = ZlibEncoder::new(&mut buf_writer, Compression::default());
     let mut tar = tar::Builder::new(enc);
+    // Zero mtimes/uids/gids and mask modes so the embedded tarball is
+    // byte-identical across builds of the same source tree.
+    tar.mode(tar::HeaderMode::Deterministic);
     tar.append_dir_all("", &paths.prep_dir).unwrap();
 
     // Drop tar object to ensure any finalizing steps are done.
