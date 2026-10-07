@@ -2,8 +2,9 @@ use super::archive::OCIArchive;
 use super::views::ManifestListView;
 use crate::common::fs::create_dir_all;
 use crate::compatibility::SUPPORTED_KIT_METADATA_VERSION;
+use crate::docker::ImageUri;
 use crate::project::{Image, ProjectImage, ValidIdentifier, VendedArtifact};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use base64::Engine;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use log::trace;
@@ -192,6 +193,8 @@ impl Debug for EncodedKitMetadata {
 pub struct ImageResolver {
     image: ProjectImage,
     skip_metadata_retrieval: bool,
+    /// Memoized manifest list, fetched at most once per resolver.
+    manifest_cache: tokio::sync::OnceCell<(ManifestListView, Vec<u8>)>,
 }
 
 impl ImageResolver {
@@ -199,6 +202,7 @@ impl ImageResolver {
         Ok(Self {
             image: image.clone(),
             skip_metadata_retrieval: false,
+            manifest_cache: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -210,21 +214,22 @@ impl ImageResolver {
         self
     }
 
+    /// Encodes a manifest's SHA-256 as the base64 form stored in `Twoliter.lock`.
+    fn manifest_digest_b64(manifest_bytes: &[u8]) -> String {
+        let raw = sha2::Sha256::digest(manifest_bytes);
+        base64::engine::general_purpose::STANDARD.encode(raw)
+    }
+
+    /// Calculates the digest of the locked image by hashing the cached manifest bytes.
     #[instrument(
         level = "trace",
         fields(image = %self.image, uri = %self.image.project_image_uri())
     )]
-    /// Calculate the digest of the locked image
     async fn calculate_digest(&self, image_tool: &ImageTool) -> Result<String> {
         let image_uri = self.image.project_image_uri();
-        let image_uri_str = image_uri.to_string();
-        let manifest_bytes = image_tool.get_manifest(image_uri_str.as_str()).await?;
-        let digest = sha2::Sha256::digest(manifest_bytes.as_slice());
-        let digest = base64::engine::general_purpose::STANDARD.encode(digest);
-        debug!(
-            "Calculated digest for locked image '{}': '{}'",
-            image_uri, digest,
-        );
+        let (_list, manifest_bytes) = self.get_manifest_with_bytes(image_tool).await?;
+        let digest = Self::manifest_digest_b64(manifest_bytes.as_slice());
+        debug!("Calculated digest for locked image '{image_uri}': '{digest}'");
         Ok(digest)
     }
 
@@ -233,11 +238,35 @@ impl ImageResolver {
         fields(image = %self.image, uri = %self.image.project_image_uri())
     )]
     async fn get_manifest(&self, image_tool: &ImageTool) -> Result<ManifestListView> {
-        let uri = self.image.project_image_uri().to_string();
-        debug!(image=%self.image, uri, "Fetching image manifest.");
-        let manifest_bytes = image_tool.get_manifest(uri.as_str()).await?;
-        serde_json::from_slice(manifest_bytes.as_slice())
-            .context("failed to deserialize manifest list")
+        let (list, _bytes) = self.get_manifest_with_bytes(image_tool).await?;
+        Ok(list.clone())
+    }
+
+    /// Fetches the manifest list once per resolver and returns cached bytes + parse.
+    ///
+    /// Callers that need to verify the bytes against a lockfile-recorded digest (or
+    /// re-parse without a second HTTP round-trip) reuse this. The result is memoized in
+    /// `self.manifest_cache`, so the SDK manifest is fetched at most once per command
+    /// even though `resolve`, `calculate_digest`, `resolve_arch_digest`, and `extract`
+    /// each need it.
+    #[instrument(
+        level = "trace",
+        fields(image = %self.image, uri = %self.image.project_image_uri())
+    )]
+    async fn get_manifest_with_bytes(
+        &self,
+        image_tool: &ImageTool,
+    ) -> Result<&(ManifestListView, Vec<u8>)> {
+        self.manifest_cache
+            .get_or_try_init(|| async {
+                let uri = self.image.project_image_uri().to_string();
+                debug!(image=%self.image, uri, "Fetching image manifest.");
+                let manifest_bytes = image_tool.get_manifest(uri.as_str()).await?;
+                let list: ManifestListView = serde_json::from_slice(manifest_bytes.as_slice())
+                    .context("failed to deserialize manifest list")?;
+                anyhow::Ok((list, manifest_bytes))
+            })
+            .await
     }
 
     #[instrument(
@@ -305,11 +334,73 @@ impl ImageResolver {
         Ok((locked_image, Some(metadata)))
     }
 
+    /// Returns the per-arch image manifest digest (`sha256:<hex>`) after verifying the
+    /// fetched manifest-list bytes against `expected_lock_digest` from `Twoliter.lock`.
+    #[instrument(
+        level = "trace",
+        fields(uri = %self.image.project_image_uri(), arch)
+    )]
+    pub(crate) async fn resolve_arch_digest(
+        &self,
+        image_tool: &ImageTool,
+        arch: &str,
+        expected_lock_digest: &str,
+    ) -> Result<String> {
+        let uri = self.image.project_image_uri();
+        let (manifest_list, manifest_bytes) = self.get_manifest_with_bytes(image_tool).await?;
+
+        let computed = Self::manifest_digest_b64(manifest_bytes.as_slice());
+        if computed != expected_lock_digest {
+            error!(
+                %uri,
+                expected = %expected_lock_digest,
+                actual = %computed,
+                "Manifest list digest does not match Twoliter.lock"
+            );
+            bail!(
+                "manifest list digest for {uri} does not match Twoliter.lock \
+                 (expected '{expected_lock_digest}', got '{computed}'); \
+                 the registry served different bytes than were authorized in the lockfile — \
+                 refusing to build a pinned URI from unauthorized content"
+            );
+        }
+
+        let docker_arch = DockerArchitecture::try_from(arch)?;
+        let manifest = manifest_list
+            .manifests
+            .iter()
+            .find(|m| {
+                m.platform
+                    .as_ref()
+                    .map(|p| p.architecture == docker_arch)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .with_context(|| {
+                format!("could not find image for architecture '{docker_arch}' at {uri}")
+            })?;
+
+        validate_oci_digest(&manifest.digest).with_context(|| {
+            format!(
+                "manifest for arch '{docker_arch}' at {uri} has malformed digest '{}'",
+                manifest.digest
+            )
+        })?;
+
+        Ok(manifest.digest)
+    }
+
     #[instrument(
         level = "trace",
         fields(uri = %self.image.project_image_uri(), path = %path.as_ref().display())
     )]
-    pub(crate) async fn extract<P>(&self, image_tool: &ImageTool, path: P, arch: &str) -> Result<()>
+    pub(crate) async fn extract<P>(
+        &self,
+        image_tool: &ImageTool,
+        path: P,
+        arch: &str,
+        expected_lock_digest: &str,
+    ) -> Result<()>
     where
         P: AsRef<Path>,
     {
@@ -327,24 +418,16 @@ impl ImageResolver {
         create_dir_all(&target_path).await?;
         create_dir_all(&cache_path).await?;
 
-        // First get the manifest for the specific requested architecture
         let uri = self.image.project_image_uri();
-        let manifest_list = self.get_manifest(image_tool).await?;
-        let docker_arch = DockerArchitecture::try_from(arch)?;
-        let manifest = manifest_list
-            .manifests
-            .iter()
-            .find(|x| x.platform.as_ref().unwrap().architecture == docker_arch)
-            .cloned()
-            .context(format!(
-                "could not find image for architecture '{docker_arch}' at {uri}"
-            ))?;
+        let arch_digest = self
+            .resolve_arch_digest(image_tool, arch, expected_lock_digest)
+            .await?;
 
         let registry = uri.registry.context("failed to resolve image registry")?;
         let oci_archive = OCIArchive::new(
             registry.as_str(),
             uri.repo.as_str(),
-            manifest.digest.as_str(),
+            arch_digest.as_str(),
             &cache_path,
         )?;
 
@@ -357,6 +440,53 @@ impl ImageResolver {
 
         Ok(())
     }
+}
+
+/// Builds a `registry/repo@sha256:<hex>` reference pinned to the per-arch image digest,
+/// after verifying the manifest list against `expected_lock_digest` from `Twoliter.lock`.
+pub(crate) async fn build_pinned_uri(
+    image: &ProjectImage,
+    image_tool: &ImageTool,
+    arch: &str,
+    expected_lock_digest: &str,
+) -> Result<String> {
+    let uri = image.project_image_uri();
+    let base = uri_without_tag(&uri)?;
+    let arch_digest = ImageResolver::from_image(image)?
+        .resolve_arch_digest(image_tool, arch, expected_lock_digest)
+        .await?;
+    Ok(format!("{base}@{arch_digest}"))
+}
+
+fn uri_without_tag(uri: &ImageUri) -> Result<String> {
+    let registry = uri.registry.as_ref().with_context(|| {
+        format!(
+            "cannot build a digest-pinned reference for '{}': no registry recorded — \
+             refusing to fall back to Docker Hub",
+            uri.repo
+        )
+    })?;
+    Ok(format!("{}/{}", registry, uri.repo))
+}
+
+/// Enforces canonical OCI digest form: `sha256:` + 64 lowercase-hex characters.
+pub(crate) fn validate_oci_digest(digest: &str) -> Result<()> {
+    const PREFIX: &str = "sha256:";
+    const HEX_LEN: usize = 64;
+
+    let hex = digest
+        .strip_prefix(PREFIX)
+        .with_context(|| format!("digest must start with '{PREFIX}', got '{digest}'"))?;
+    ensure!(
+        hex.len() == HEX_LEN,
+        "digest hex portion must be {HEX_LEN} characters, got {} ('{digest}')",
+        hex.len()
+    );
+    ensure!(
+        hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        "digest hex portion must be lowercase hexadecimal ('{digest}')"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -446,6 +576,120 @@ mod test {
             })
             .unwrap(),
             "bar".to_string()
+        );
+    }
+
+    fn hex64(byte: u8) -> String {
+        std::iter::repeat_n(char::from(byte), 64).collect()
+    }
+
+    #[test]
+    fn validate_oci_digest_accepts_canonical_form() {
+        validate_oci_digest(&format!("sha256:{}", hex64(b'a'))).expect("all-a hex");
+        validate_oci_digest(&format!("sha256:{}", hex64(b'0'))).expect("all-0 hex");
+        validate_oci_digest(&format!(
+            "sha256:{}",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ))
+        .expect("mixed hex");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_empty() {
+        let err = validate_oci_digest("").unwrap_err().to_string();
+        assert!(err.contains("must start with 'sha256:'"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_missing_prefix() {
+        let err = validate_oci_digest(&hex64(b'a')).unwrap_err().to_string();
+        assert!(err.contains("must start with 'sha256:'"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_wrong_algorithm() {
+        let err = validate_oci_digest(&format!("sha512:{}", hex64(b'a')))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("must start with 'sha256:'"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_short_hex() {
+        let err = validate_oci_digest("sha256:abc").unwrap_err().to_string();
+        assert!(err.contains("64 characters"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_long_hex() {
+        let err = validate_oci_digest(&format!("sha256:{}a", hex64(b'a')))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("64 characters"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_uppercase_hex() {
+        let err = validate_oci_digest(&format!("sha256:{}", hex64(b'A')))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("lowercase"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_non_hex() {
+        let err = validate_oci_digest(&format!("sha256:{}", hex64(b'z')))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("lowercase"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_oci_digest_rejects_shell_metacharacters() {
+        // The critical property: a digest that would inject arguments into a `docker` or
+        // `krane` command line if concatenated unquoted must not slip through.
+        for injection in [
+            "sha256:aaa' ; docker run --privileged evil #",
+            "sha256:aaa aaa",
+            "sha256:$(pwn)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sha256:\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            assert!(
+                validate_oci_digest(injection).is_err(),
+                "digest with injection payload should be rejected: {injection:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uri_without_tag_requires_registry() {
+        let with_registry = ImageUri {
+            registry: Some("example.com".to_string()),
+            repo: "org/repo".to_string(),
+            tag: "v1.0.0".to_string(),
+        };
+        assert_eq!(
+            uri_without_tag(&with_registry).unwrap(),
+            "example.com/org/repo"
+        );
+
+        let without_registry = ImageUri {
+            registry: None,
+            repo: "org/repo".to_string(),
+            tag: "v1.0.0".to_string(),
+        };
+        let err = uri_without_tag(&without_registry).unwrap_err().to_string();
+        assert!(err.contains("no registry recorded"), "got: {err}");
+        assert!(err.contains("Docker Hub"), "got: {err}");
+    }
+
+    #[test]
+    fn manifest_digest_b64_matches_known_vector() {
+        // sha256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        // base64(sha256("")) = 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+        assert_eq!(
+            ImageResolver::manifest_digest_b64(b""),
+            "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
         );
     }
 }

@@ -20,7 +20,10 @@ impl BuildClean {
         tools::install_tools(&toolsdir).await?;
         let makefile_path = toolsdir.join("Makefile.toml");
 
-        CargoMake::new(&project.sdk_image().project_image_uri().to_string())?
+        // `clean` does not run anything inside the SDK, so skip the registry lookup.
+        let sdk_uri = project.sdk_image().project_image_uri().to_string();
+
+        CargoMake::new(&sdk_uri)?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .makefile(makefile_path)
             .project_dir(project.project_dir())
