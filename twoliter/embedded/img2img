@@ -197,8 +197,8 @@ repack_uki() {
     exit 1
   fi
 
-  # Reassemble. No measured-boot options are passed: predicted PCR values are
-  # not supported for these images.
+  # Reassemble without embedding measured-boot policy. PCR predictions are
+  # generated from the final signed disk below.
   #
   # --sbat: a single-line placeholder, not new SBAT content. ukify merges in
   # the stub's carried-over `.sbat` regardless. Omitting this flag lets ukify
@@ -681,8 +681,7 @@ fi
 echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT_DIR}/artifact-metadata.json"
 
 # Predict PCR values after all signing is complete.
-# Skipped for UKI images, matching `rpm2img`.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   "${0%/*}/pcrsys" disk \
     --image "${OS_IMAGE}" \
     --efi-vars "${SBKEYS}/efi-vars.json" \

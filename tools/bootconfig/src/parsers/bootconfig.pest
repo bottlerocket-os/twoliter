@@ -1,0 +1,15 @@
+// The supported Linux bootconfig subset. Assignment operators += and := are
+// deliberately rejected. Backslashes are literal, not shell escapes.
+config = { SOI ~ statement* ~ EOI }
+statement = _{ block | pair | flag | NEWLINE }
+block = { key ~ "{" ~ statement* ~ "}" ~ ";"? }
+pair = { key ~ "=" ~ value ~ ("," ~ value)* ~ (";" | &NEWLINE | &"}" | &EOI) }
+flag = { key ~ (";" | &NEWLINE | &"}" | &EOI) }
+key = @{ identifier ~ ("." ~ identifier)* }
+identifier = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+value = { double | single | unquoted }
+double = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+single = @{ "'" ~ (!"'" ~ ANY)* ~ "'" }
+unquoted = @{ (!("," | ";" | NEWLINE | "#" | "}" | "\"" | "'") ~ ANY)* }
+WHITESPACE = _{ " " | "\t" | "\r" }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }

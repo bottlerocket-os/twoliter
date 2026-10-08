@@ -634,6 +634,36 @@ else
 fi
 dd if="${VERITY_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["HASH-A"]}"
 
+# Combine any bootconfig snippets in /boot for later use, then clean up.
+if [[ -d "${BOOT_MOUNT}/boot-config.d" ]]; then
+  # Verify all bootconfig snippets are single-line key=value format
+  if grep -E '^\s*[^#].*([:+]=|[{]|[,]\s*$)' "${BOOT_MOUNT}/boot-config.d"/* 2>/dev/null; then
+    echo "ERROR: bootconfig snippets must be single-line 'key = value' format" >&2
+    echo "Unsupported: braces, multi-line arrays, := and += operators" >&2
+    exit 1
+  fi
+
+  # Concatenate and sort snippets to ensure consistent ordering
+  find "${BOOT_MOUNT}/boot-config.d" -type f -mindepth 1 -maxdepth 1 -print0 |
+    xargs -0 cat | sort >"${BOOTCONFIG_INPUT}"
+  rm -rf "${BOOT_MOUNT}/boot-config.d"
+fi
+
+# Generate a no-op bootconfig if there weren't any snippets.
+if [[ ! -s "${BOOTCONFIG_INPUT}" ]]; then
+  echo -e "kernel {}\ninit {}" >"${BOOTCONFIG_INPUT}"
+fi
+
+# Construct binary bootconfig before UKI assembly, including ephemeral-key images.
+BOOTCONFIG_DATA="${BOOTCONFIG_DIR}/bootconfig.data"
+touch "${BOOTCONFIG_DATA}"
+bootconfig -a "${BOOTCONFIG_INPUT}" "${BOOTCONFIG_DATA}"
+
+# Image-specific arguments are shared by the GRUB and UKI adapters. Package
+# settings are supplied by bootconfig, not by the variant name.
+BASE_KERNEL_ARGS="root=/dev/dm-0 rootwait ro raid=noautodetect random.trust_cpu=on selinux=1 enforcing=1"
+BASE_INIT_ARGS="systemd.log_target=journal-or-kmsg systemd.log_color=0 systemd.show_status=true"
+
 # Assemble UKI with ukify if UKI_IMAGE mode
 if [[ "${UKI_IMAGE}" == "yes" ]]; then
   # Find systemd-stub from uki-stub package
@@ -652,28 +682,23 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
     exit 1
   fi
 
-  # Build cmdline EXACTLY mirroring grub.cfg
-  # bootconfig is not yet supported for UKI images: see uki_bootconfig_cmdline
-  # in imghelper for details on the hard-coded FIPS/systemd cmdline tokens
-  # used in place of it.
-  uki_bootconfig="$(uki_bootconfig_cmdline "${VARIANT}")"
-
-  # The escaped quotes around the verity table are intentional: the kernel's
-  # dm-mod.create= value contains spaces, so the literal quote characters must
-  # be part of the command line itself (this mirrors grub.cfg).
-  # shellcheck disable=SC2016
-  uki_cmdline="${KERNEL_PARAMETERS} ${uki_bootconfig} root=/dev/dm-0 rootwait ro raid=noautodetect random.trust_cpu=on selinux=1 enforcing=1 dm-mod.create=\"${DM_VERITY_ROOT[*]}\" -- systemd.log_target=journal-or-kmsg systemd.log_color=0 systemd.show_status=true"
+  # Preserve literal quotes around the verity table without shell reparsing.
+  uki_cmdline_file="${BOOTCONFIG_DIR}/cmdline"
+  "${0%/*}/ukisys" cmdline \
+    --bootconfig "${BOOTCONFIG_DATA}" \
+    --kernel-args "${KERNEL_PARAMETERS} ${BASE_KERNEL_ARGS} dm-mod.create=\"${DM_VERITY_ROOT[*]}\"" \
+    --init-args "${BASE_INIT_ARGS}" \
+    --output "${uki_cmdline_file}"
 
   # Create EFI/Linux directory for UKI
   mkdir -p "${BOOT_MOUNT}/EFI/Linux"
 
   # Build UKI with ukify
-  # Note: bootconfig initrd is handled at runtime via PRIVATE partition
   ukify build \
     --stub "${stub_efi}" \
     --linux "${BOOT_MOUNT}/vmlinuz" \
     --uname "${kver_dir}" \
-    --cmdline "${uki_cmdline}" \
+    --cmdline "@${uki_cmdline_file}" \
     --os-release "@${ROOT_MOUNT}/${SYS_ROOT}/usr/lib/os-release" \
     --output "${BOOT_MOUNT}/EFI/Linux/bottlerocket.efi"
 
@@ -699,7 +724,7 @@ if [[ "${UKI_IMAGE}" == "yes" ]]; then
   rm -f "${BOOT_MOUNT}/vmlinuz"
 fi
 
-# write GRUB config (skip for UKI mode which uses systemd-boot)
+# write GRUB config (skip for direct UKI boot)
 if [[ "${UKI_IMAGE}" != "yes" ]]; then
   # Include the parameters that support Boot Config. Stripped-down images
   # (`standalone-image = true`) have no PRIVATE partition to hold
@@ -739,15 +764,10 @@ menuentry "${PRETTY_NAME} ${VERSION_ID}" --unrestricted {
    linux (\$root)/vmlinuz \\
        ${KERNEL_PARAMETERS} \\
        ${BOOTCONFIG} \\
-       root=/dev/dm-0 rootwait ro \\
-       raid=noautodetect \\
-       random.trust_cpu=on \\
-       selinux=1 enforcing=1 \\
+       ${BASE_KERNEL_ARGS} \\
        dm-mod.create="\$dm_verity_root" \\
        -- \\
-       systemd.log_target=journal-or-kmsg \\
-       systemd.log_color=0 \\
-       systemd.show_status=true
+       ${BASE_INIT_ARGS}
    ${INITRD}
    boot
    ${FALLBACK}
@@ -757,26 +777,6 @@ EOF
   if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
     sign_grubcfg "${BOOT_MOUNT}/grub/grub.cfg"
   fi
-fi
-
-# Combine any bootconfig snippets in /boot for later use, then clean up.
-if [[ -d "${BOOT_MOUNT}/boot-config.d" ]]; then
-  # Verify all bootconfig snippets are single-line key=value format
-  if grep -E '^\s*[^#].*([:+]=|[{]|[,]\s*$)' "${BOOT_MOUNT}/boot-config.d"/* 2>/dev/null; then
-    echo "ERROR: bootconfig snippets must be single-line 'key = value' format" >&2
-    echo "Unsupported: braces, multi-line arrays, := and += operators" >&2
-    exit 1
-  fi
-
-  # Concatenate and sort snippets to ensure consistent ordering
-  find "${BOOT_MOUNT}/boot-config.d" -type f -mindepth 1 -maxdepth 1 -print0 |
-    xargs -0 cat | sort >"${BOOTCONFIG_INPUT}"
-  rm -rf "${BOOT_MOUNT}/boot-config.d"
-fi
-
-# Generate a no-op bootconfig if there weren't any snippets.
-if [[ ! -s "${BOOTCONFIG_INPUT}" ]]; then
-  echo -e "kernel {}\ninit {}" >"${BOOTCONFIG_INPUT}"
 fi
 
 # BOTTLEROCKET-BOOT-A
@@ -806,12 +806,13 @@ echo "${root_usage}" "${boot_usage}" | jq -s 'add | {disk_usage: .}' > "${OUTPUT
 
 # BOTTLEROCKET-PRIVATE
 if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
-  # Generate bootconfig file for the image. When ephemeral encryption keys are
-  # enabled, bootconfig.data was baked onto the BOOT partition above (PRIVATE is
-  # LUKS-encrypted and grub-unreadable), so skip seeding it here.
+  # Seed PRIVATE with the package bootconfig for images with persistent keys.
+  # GRUB reads this file as its initrd; direct UKI boot instead uses the arguments
+  # embedded in the signed .cmdline section above. Ephemeral-key images are
+  # required to use UKI and recreate encrypted PRIVATE at runtime, so they do
+  # not need an initial bootconfig.data file on this partition.
   if [[ "${EPHEMERAL_ENCRYPTION_KEYS}" != "yes" ]]; then
-    touch "${PRIVATE_MOUNT}/bootconfig.data"
-    bootconfig -a "${BOOTCONFIG_INPUT}" "${PRIVATE_MOUNT}/bootconfig.data"
+    cp "${BOOTCONFIG_DATA}" "${PRIVATE_MOUNT}/bootconfig.data"
   fi
 
   # Targeted toward the current API server implementation.
@@ -828,10 +829,7 @@ if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
 fi
 
 # Predict PCR values after all partitions are written.
-# Skipped for UKI images: pcrsys currently assumes an ext4 BOOT-A partition
-# (for reading grub.cfg/vmlinuz), but UKI images use a FAT BOOT-A partition,
-# so PCR prediction would fail here.
-if [[ "${UEFI_SECURE_BOOT}" == "yes" && "${UKI_IMAGE}" == "no" ]]; then
+if [[ "${UEFI_SECURE_BOOT}" == "yes" ]]; then
   "${0%/*}/pcrsys" disk \
     --image "${OS_IMAGE}" \
     --efi-vars "${SBKEYS}/efi-vars.json" \

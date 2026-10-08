@@ -1,7 +1,10 @@
 //! PCR 11: Boot Phases (sysinit, preconfigured, configured, ready, shutdown, final)
 
 use crate::error::Result;
-use crate::predict::{extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL};
+use crate::pe::UKI_SECTIONS;
+use crate::predict::{
+    extend_pcr_data, extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL,
+};
 
 /// Systemd boot phase strings extended into PCR 11.
 const PHASES: &[&str] = &[
@@ -14,9 +17,21 @@ const PHASES: &[&str] = &[
 ];
 
 /// Predict PCR 11 values for all boot phases.
-pub fn predict(_ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    let mut digests = Vec::with_capacity(PHASES.len() + 1);
+pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
     let mut pcr = PCR_INIT_VAL;
+    if let Some(uki) = ctx.uki {
+        for name in UKI_SECTIONS {
+            let data = uki.section(name);
+            if data.is_empty() {
+                continue;
+            }
+            let mut terminated = name.as_bytes().to_vec();
+            terminated.push(0);
+            pcr = extend_pcr_data(&pcr, &terminated);
+            pcr = extend_pcr_data(&pcr, data);
+        }
+    }
+    let mut digests = Vec::with_capacity(PHASES.len() + 1);
     digests.push(pcr);
     for phase in PHASES {
         pcr = extend_pcr_string(&pcr, phase);

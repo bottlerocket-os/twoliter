@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::efi::EfiVars;
 use crate::gpt::PartitionLayout;
+use crate::pe::UkiImage;
 use crate::platform::Platform;
 
 use crate::error::Result;
@@ -52,7 +53,10 @@ impl Serialize for PcrIndex {
 pub struct PcrContext<'a> {
     pub platform: Platform,
     pub efi_vars: &'a EfiVars,
-    pub partitions: &'a PartitionLayout,
+    /// GRUB bank layout; direct UKI boot has no BOOT partitions.
+    pub partitions: Option<&'a PartitionLayout>,
+    /// Validated UKI payloads, when the firmware fallback is a UKI.
+    pub uki: Option<&'a UkiImage<'a>>,
     #[builder(default)]
     pub gpt_bin: &'a [u8],
     #[builder(default)]
@@ -125,6 +129,11 @@ pub fn extend_pcr(current: &[u8; 32], digest: &[u8; 32]) -> [u8; 32] {
     hasher.update(current);
     hasher.update(digest);
     hasher.finalize().into()
+}
+
+/// Extend a PCR with an event payload by first hashing its bytes.
+pub fn extend_pcr_data(current: &[u8; 32], data: &[u8]) -> [u8; 32] {
+    extend_pcr(current, &Sha256::digest(data).into())
 }
 
 /// Extend a PCR with a string by first hashing the string.

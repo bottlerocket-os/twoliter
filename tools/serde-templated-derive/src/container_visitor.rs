@@ -165,7 +165,7 @@ mod test {
         "not a container"
     )]
     fn test_visit_container_leaves_of_type(mut subject: syn::Type, visited: &[syn::Type]) {
-        let expected_visited = visited.into_iter().cloned().collect::<HashSet<_>>();
+        let expected_visited = visited.iter().cloned().collect::<HashSet<_>>();
 
         let mut visited = HashSet::new();
         let mut visitor = |ty: &mut syn::Type| {

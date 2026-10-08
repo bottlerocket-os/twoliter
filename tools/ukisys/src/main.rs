@@ -1,7 +1,5 @@
-//! ukisys: derives the unsigned systemd-stub PE a Bottlerocket UKI was
-//! built from, by stripping its Authenticode signature and truncating the
-//! trailing payload sections. Those sections are `.osrel`, `.cmdline`,
-//! `.uname`, and `.linux`.
+//! UKI command-line construction and recovery of an unsigned systemd-stub
+//! from a finished Bottlerocket UKI.
 
 mod error;
 mod pe;
@@ -22,16 +20,29 @@ const TRAILING_SECTIONS_TO_REMOVE: &[&str] = &[".osrel", ".cmdline", ".uname", "
 #[derive(Parser)]
 #[command(
     version,
-    about = "PE section removal for Bottlerocket Unified Kernel Images"
+    about = "Command-line construction and PE section removal for Bottlerocket UKIs"
 )]
 struct Args {
     #[command(subcommand)]
     command: Command,
 }
 
-/// Subcommands for UKI repack section removal.
+/// Subcommands for UKI construction and repacking.
 #[derive(Subcommand)]
 enum Command {
+    /// Construct a UKI command-line file from generated binary bootconfig.
+    Cmdline {
+        #[arg(long)]
+        bootconfig: PathBuf,
+        /// Base kernel arguments, with literal kernel quoting.
+        #[arg(long, allow_hyphen_values = true)]
+        kernel_args: String,
+        /// Base init arguments (after the separator).
+        #[arg(long, allow_hyphen_values = true)]
+        init_args: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Derive an unsigned systemd-stub PE from a finished, signed UKI.
     DeriveStub {
         /// Path to the finished, signed UKI to strip.
@@ -47,6 +58,19 @@ fn main() -> Result<()> {
     let args = Args::parse();
     match &args.command {
         Command::DeriveStub { uki, stub } => derive_stub(uki, stub),
+        Command::Cmdline {
+            bootconfig,
+            kernel_args,
+            init_args,
+            output,
+        } => {
+            let data = std::fs::read(bootconfig)
+                .with_whatever_context(|_| format!("Failed to read '{}'", bootconfig.display()))?;
+            let config = bootconfig::parse(&data)?;
+            let cmdline = config.uki_cmdline(kernel_args, init_args)?;
+            std::fs::write(output, cmdline)
+                .with_whatever_context(|_| format!("Failed to write '{}'", output.display()))
+        }
     }
 }
 

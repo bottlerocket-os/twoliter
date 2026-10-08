@@ -38,10 +38,12 @@ JSON output with predicted PCR values, keyed by PCR index:
 
 ## Supported PCRs
 
+The table below describes GRUB images. Direct UKI boot is described below.
+
 | PCR | Description |
 |-----|-------------|
 | 0 | Platform firmware (static per platform) |
-| 1 | Platform configuration (static per platform) |
+| 1 | Platform configuration (VMware only) |
 | 2 | Option ROM code (separator only) |
 | 3 | Option ROM configuration (separator only) |
 | 4 | Boot manager code (shim, grub, vmlinuz authenticode hashes) |
@@ -57,6 +59,9 @@ JSON output with predicted PCR values, keyed by PCR index:
 | 15 | Zero (unused) |
 
 PCRs 4 and 9 are skipped for images with A/B boot partitions since the active kernel and root hash can change.
+
+On AWS, PCRs 1 and 8 are omitted for both boot paths because they depend on
+instance-specific firmware configuration and runtime OS settings.
 
 ## Supported Platforms
 
@@ -85,6 +90,25 @@ JSON file containing Secure Boot variables:
 
 ### Disk image
 
-GPT-partitioned disk image containing:
+For GRUB, a GPT-partitioned disk image containing:
+
 - EFI System Partition (FAT) with `/EFI/BOOT/boot{aa64,x64}.efi` (shim) and `grub{aa64,x64}.efi`
-- Boot partition (ext4) with `/vmlinuz`, `/grub.cfg`, and `/bootconfig.data`
+- Boot partition (ext4) with `/vmlinuz` and `/grub/grub.cfg`
+- PRIVATE partition (ext4) with `/bootconfig.data`
+
+## Direct UKI boot
+
+Both subcommands also support Bottlerocket Unified Kernel Images (UKIs) on AWS,
+for x86_64 and aarch64. The GPT image must contain one fallback executable at
+`/EFI/BOOT/boot{aa64,x64}.efi` on the ESP, with nonempty `.linux`, `.osrel`,
+`.cmdline`, and `.uname` sections. GRUB boot partitions must be absent; PRIVATE
+is not read.
+
+Predictions include PCRs 0, 2-7, and 9-15. PCR 4 measures the whole UKI,
+PCR 7 uses the Secure Boot policy without shim events, PCR 9 measures EFI
+LoadOptions and the stub-generated os-release initrd, and PCR 11 measures UKI
+sections followed by boot phases. PCRs 10 and 12-15 are zero.
+
+PCR 11 values are ordered as sections measured, `sysinit`, `preconfigured`,
+`configured`, `ready`, `shutdown`, and `final`. Compare against the phase the
+running system has reached.

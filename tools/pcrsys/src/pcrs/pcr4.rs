@@ -1,4 +1,4 @@
-//! PCR 4: Boot Manager Code (shim, grub, vmlinuz)
+//! PCR 4: Boot Manager Code (shim, grub, vmlinuz or direct UKI)
 
 use crate::error::Result;
 use crate::pe::get_authenticode_hash;
@@ -8,6 +8,8 @@ use crate::predict::{
     PCR_INIT_VAL,
 };
 
+use snafu::OptionExt;
+
 /// Predict PCR 4 value.
 ///
 /// AWS/Metal extend an action string before the separator, VMware does not.
@@ -15,7 +17,19 @@ use crate::predict::{
 /// AWS/Metal: action -> separator -> shim -> grub -> vmlinuz
 /// VMware:              separator -> shim -> grub -> vmlinuz
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    if ctx.partitions.boot_b.is_some() {
+    if let Some(uki) = ctx.uki {
+        let mut pcr = extend_pcr_string(&PCR_INIT_VAL, "Calling EFI Application from Boot Option");
+        pcr = extend_pcr_separator(&pcr);
+        // Firmware measures the whole UKI once, not its embedded kernel separately.
+        pcr = extend_pcr(&pcr, &get_authenticode_hash(uki.image)?);
+        return Ok(Some((PcrIndex::Pcr4, PcrRecord::new(pcr))));
+    }
+    if ctx
+        .partitions
+        .whatever_context("GRUB partition layout missing")?
+        .boot_b
+        .is_some()
+    {
         return Ok(None);
     }
 
