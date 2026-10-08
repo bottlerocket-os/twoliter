@@ -164,7 +164,7 @@ set_partition_sizes \
   partsize partoff "${STANDALONE_IMAGE}" "${UKI_IMAGE}"
 set_partition_labels partlabel
 set_partition_types parttype "${UKI_IMAGE}"
-set_partition_uuids partguid "${PARTITION_PLAN}"
+set_all_partition_uuids partguid "${PARTITION_PLAN}"
 
 declare -a partitions
 partitions=(BIOS)
@@ -200,7 +200,9 @@ for part in "${partitions[@]}"; do
   partargs+=(-n "0:${part_start}M:${part_end}")
   partargs+=(-c "0:${partlabel[${part}]}")
   partargs+=(-t "0:${parttype[${part}]}")
-  partargs+=(-u "0:${partguid[${part}]:-R}")
+  # `set_all_partition_uuids` populates a pinned GUID for every partition we
+  # create, so there is no `:-R` fallback here: a missing entry is a bug.
+  partargs+=(-u "0:${partguid[${part}]}")
 
   # Boot partition attributes:
   #  48 = gptprio priority bit
@@ -212,7 +214,8 @@ for part in "${partitions[@]}"; do
   esac
 done
 
-sgdisk --clear "${partargs[@]}" --sort --print "${OS_IMAGE}"
+sgdisk --clear -U "$(derive_uuid gpt-disk-os)" \
+  "${partargs[@]}" --sort --print "${OS_IMAGE}"
 
 # For UKI images (single-bank only; in-place-updates is disallowed for UKI_IMAGE,
 # see the check above), EFI-A's (which in this case also plays the role of BOOT-A)
@@ -230,7 +233,7 @@ if [[ "${STANDALONE_IMAGE}" == "no" && "${PARTITION_PLAN}" == "split" ]]; then
   data_start="${partoff["DATA-B"]}"
   data_end=$((data_start + partsize["DATA-A"]))
   data_end=$((data_end * 2048 - 1))
-  sgdisk --clear \
+  sgdisk --clear -U "$(derive_uuid gpt-disk-data)" \
     -n "0:${data_start}M:${data_end}" \
     -c "0:${partlabel["DATA-B"]}" \
     -t "0:${parttype["DATA-B"]}" \
@@ -490,7 +493,8 @@ if [[ "${UKI_IMAGE}" == "no" ]]; then
 fi
 
 dd if=/dev/zero of="${EFI_IMAGE}" bs=1M count="${partsize["EFI-A"]}"
-mkfs.vfat -I -S 512 "${EFI_IMAGE}" $((partsize["EFI-A"] * 1024))
+mkfs.vfat -I -S 512 -i "$(derive_fat_volid efi-vfat)" \
+  "${EFI_IMAGE}" $((partsize["EFI-A"] * 1024))
 mmd -i "${EFI_IMAGE}" ::/EFI
 mmd -i "${EFI_IMAGE}" ::/EFI/BOOT
 if [[ "${UKI_IMAGE}" == "no" ]]; then
@@ -602,7 +606,9 @@ else
   ROOT_LABELS=$(setfiles -n -d -F -m -r "${ROOT_MOUNT}" \
     "${SELINUX_FILE_CONTEXTS}" "${ROOT_MOUNT}" |
     awk -v root="${ROOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
-  mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH},num_backup_sb=0" -m 0 \
+  clamp_mtimes_to_build_id "${ROOT_MOUNT}"
+  mkfs.ext4 -E "lazy_itable_init=0,stride=${ROOT_STRIDE},stripe_width=${ROOT_STRIPE_WIDTH},num_backup_sb=0,hash_seed=$(ext4_hash_seed root-ext4)" -m 0 \
+    -U "$(derive_uuid root-ext4)" \
     -O ^has_journal -O ^resize_inode -O sparse_super2 \
     -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
   echo "${ROOT_LABELS}" | debugfs -w -f - "${ROOT_IMAGE}"
@@ -782,7 +788,11 @@ if [[ "${UKI_IMAGE}" == "no" ]]; then
   BOOT_LABELS=$(setfiles -n -d -F -m -r "${BOOT_MOUNT}" \
     "${SELINUX_FILE_CONTEXTS}" "${BOOT_MOUNT}" |
     awk -v root="${BOOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
-  mkfs.ext4 -O ^has_journal -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}M"
+  clamp_mtimes_to_build_id "${BOOT_MOUNT}"
+  mkfs.ext4 -O ^has_journal \
+    -U "$(derive_uuid boot-ext4)" \
+    -E "hash_seed=$(ext4_hash_seed boot-ext4)" \
+    -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}M"
   echo "${BOOT_LABELS}" | debugfs -w -f - "${BOOT_IMAGE}"
   resize2fs -M "${BOOT_IMAGE}"
   dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
@@ -809,7 +819,11 @@ if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   # - adjust the inode ratio since we expect lots of small files
   # - retain the inode size to allow most settings to be stored inline
   # - retain the block size to handle worse-case alignment for hardware
-  mkfs.ext4 -b 4096 -i 4096 -I 256 -d "${PRIVATE_MOUNT}" "${PRIVATE_IMAGE}" "${partsize[PRIVATE]}M"
+  clamp_mtimes_to_build_id "${PRIVATE_MOUNT}"
+  mkfs.ext4 -b 4096 -i 4096 -I 256 \
+    -U "$(derive_uuid private-ext4)" \
+    -E "hash_seed=$(ext4_hash_seed private-ext4)" \
+    -d "${PRIVATE_MOUNT}" "${PRIVATE_IMAGE}" "${partsize[PRIVATE]}M"
   dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRIVATE]}"
 fi
 

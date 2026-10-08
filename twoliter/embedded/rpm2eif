@@ -174,7 +174,9 @@ esac
 : "${BUILD_ID:?BUILD_ID must be set}"
 : "${IMAGE_NAME:?IMAGE_NAME must be set}"
 : "${VARIANT_NAME:?VARIANT_NAME must be set}"
+: "${VARIANT:?VARIANT must be set}"
 : "${ARCH:?ARCH must be set}"
+: "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP must be set}"
 
 # Store output artifacts in a versioned directory.
 OUTPUT_DIR="${OUTPUT_DIR}/${VERSION_ID}-${BUILD_ID}"
@@ -527,8 +529,11 @@ HASH_START="$(( HASH_OFF_MIB * 2048 ))"
 HASH_END="$(( (HASH_OFF_MIB + HASH_SIZE_MIB) * 2048 - 1 ))"
 
 sgdisk \
+    --disk-guid="$(derive_uuid gpt-disk-eif)" \
     --new=1:${ROOT_START}:${ROOT_END} --typecode=1:${ROOT_TYPE_GUID} --change-name=1:ROOT-A \
+    --partition-guid=1:"$(derive_uuid eif-root)" \
     --new=2:${HASH_START}:${HASH_END} --typecode=2:${HASH_TYPE_GUID} --change-name=2:HASH-A \
+    --partition-guid=2:"$(derive_uuid eif-hash)" \
     "${DISK_TMP}"
 
 # Write rootfs and verity data to partitions. When ROOT-A is padded, the
