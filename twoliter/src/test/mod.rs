@@ -10,30 +10,37 @@ be compiled for `cfg(test)`, which is accomplished at its declaration in `main.r
 #[cfg(feature = "integ-tests")]
 mod cargo_make;
 
+use path_absolutize::Absolutize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-/// Return the canonical path to the directory where we store test data.
+/// Return the absolute path to the directory where we store test data.
 pub(crate) fn data_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("test")
         .join("data")
-        .canonicalize()
+        .absolutize()
         .unwrap()
+        .into_owned()
 }
 
 pub(crate) fn projects_dir() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.pop();
-    path.join("tests").join("projects").canonicalize().unwrap()
+    path.join("tests")
+        .join("projects")
+        .absolutize()
+        .unwrap()
+        .into_owned()
 }
 
 pub(crate) fn project_dir(name: &str) -> PathBuf {
     let path = projects_dir().join(name);
-    path.canonicalize()
-        .unwrap_or_else(|_| panic!("Unable to canonicalize '{}'", path.display()))
+    path.absolutize()
+        .unwrap_or_else(|_| panic!("Unable to absolutize '{}'", path.display()))
+        .into_owned()
 }
 
 pub(crate) fn copy_project_to_temp_dir(project: &str) -> TempDir {

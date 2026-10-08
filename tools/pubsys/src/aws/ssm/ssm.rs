@@ -34,24 +34,29 @@ use tokio_retry::{
 const SSM_VALIDATION_RETRY_EXP_BASE_MILLIS: u64 = 2_000;
 const SSM_VALIDATION_NUM_RETRIES: usize = 3;
 
-// Configures the rate limit used for SSM parameter fetching.
-// SSM service quotas are provided on https://docs.aws.amazon.com/general/latest/gr/ssm.html
-// This rate limiter applies to SSM:
-// * GetParameter
-// * GetParameters
-// * GetParametersByPath
-const GET_PARAMETERS_RATE_LIMIT_PER_SEC: u32 = 40;
-// Configures the maximum "token bucket" size for the SSM rate limiter.
-const GET_PARAMETERS_BURST_LIMIT: u32 = 20;
-type RegionKeyRateLimiter =
-    RateLimiter<Region, DefaultKeyedStateStore<Region>, DefaultClock, NoOpMiddleware>;
-
 lazy_static! {
     static ref GET_PARAMETERS_MAX_JITTER: Jitter = Jitter::up_to(Duration::from_millis(20));
-    static ref GET_PARAMETERS_RATE_LIMITER: RegionKeyRateLimiter = RateLimiter::keyed(
-        Quota::per_second(nonzero!(GET_PARAMETERS_RATE_LIMIT_PER_SEC))
-            .allow_burst(nonzero!(GET_PARAMETERS_BURST_LIMIT))
-    );
+    static ref GET_PARAMETERS_RATE_LIMITER: RateLimiter<
+        Region,
+        DefaultKeyedStateStore<Region>,
+        DefaultClock,
+        NoOpMiddleware,
+    > = {
+        // Configures the rate limit used for SSM parameter fetching.
+        // SSM service quotas are provided on https://docs.aws.amazon.com/general/latest/gr/ssm.html
+        // This rate limiter applies to SSM:
+        // * GetParameter
+        // * GetParameters
+        // * GetParametersByPath
+        const GET_PARAMETERS_RATE_LIMIT_PER_SEC: u32 = 40;
+        // Configures the maximum "token bucket" size for the SSM rate limiter.
+        const GET_PARAMETERS_BURST_LIMIT: u32 = 20;
+
+        RateLimiter::keyed(
+            Quota::per_second(nonzero!(GET_PARAMETERS_RATE_LIMIT_PER_SEC))
+                .allow_burst(nonzero!(GET_PARAMETERS_BURST_LIMIT)),
+        )
+    };
 }
 
 /// Async throttling function to be called before calling SSM GetParameter* functions.

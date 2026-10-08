@@ -451,7 +451,7 @@ mod tests {
         // Helper to write FAT12 entry
         let write_fat12 = |fat: &mut [u8], cluster: usize, value: u16| {
             let offset = cluster + cluster / 2;
-            if cluster % 2 == 0 {
+            if cluster.is_multiple_of(2) {
                 fat[offset] = (value & 0xFF) as u8;
                 fat[offset + 1] = (fat[offset + 1] & 0xF0) | ((value >> 8) & 0x0F) as u8;
             } else {
