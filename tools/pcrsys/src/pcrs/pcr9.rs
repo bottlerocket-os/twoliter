@@ -8,106 +8,8 @@
 //! `<kernel.* params> BOOT_IMAGE=<path> <grub params before --> -- <init.* params> <grub params after -->`
 
 use crate::error::Result;
-use crate::parsers::{bootconfig, grub};
 use crate::predict::{extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL};
-use snafu::whatever;
-
-const KERNEL_PATH_PREFIX: &str = "()/vmlinuz ";
-
-/// Transform grub.cfg shell-style quoting `key="value"` to kernel cmdline format `"key=value"`.
-///
-/// grub.cfg uses shell-style quoting where values are quoted: `root="UUID=abc"`
-/// The kernel command line expects the entire key=value pair quoted: `"root=UUID=abc"`
-/// This function performs that transformation for PCR 9 prediction.
-fn repair_quotes(cmdline: &str) -> String {
-    let mut result = String::with_capacity(cmdline.len());
-    let mut chars = cmdline.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '=' && chars.peek() == Some(&'"') {
-            // Found `="`; scan back to find start of key
-            let key_start = result.rfind(' ').map(|i| i + 1).unwrap_or(0);
-            let key = result[key_start..].to_string();
-            result.truncate(key_start);
-
-            // Skip the opening quote
-            chars.next();
-
-            // Collect value until closing quote
-            let mut value = String::new();
-            for vc in chars.by_ref() {
-                if vc == '"' {
-                    break;
-                }
-                value.push(vc);
-            }
-
-            // Output as "key=value"
-            result.push('"');
-            result.push_str(&key);
-            result.push('=');
-            result.push_str(&value);
-            result.push('"');
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-/// Predict /proc/cmdline from grub.cfg and bootconfig.
-///
-/// The kernel constructs /proc/cmdline as:
-/// `<kernel.* bootconfig> BOOT_IMAGE=<path> <grub args> -- <init.* bootconfig> <grub args after -->`
-///
-/// If `boot_partuuid` is provided, replaces `PARTUUID=/PARTNROFF=` with the actual UUID.
-fn predict_cmdline(
-    grub_cfg: &[u8],
-    bootconfig_data: &[u8],
-    boot_partuuid: Option<&str>,
-) -> Result<String> {
-    let grub_cmdline = grub::parse(grub_cfg)?;
-    let bootconfig_params = bootconfig::parse(bootconfig_data)?;
-    let kernel_params = bootconfig::format_params(&bootconfig_params.kernel);
-    let init_params = bootconfig::format_params(&bootconfig_params.init);
-
-    // Verify and transform kernel path
-    if !grub_cmdline.starts_with(KERNEL_PATH_PREFIX) {
-        whatever!(
-            "grub.cfg kernel path must start with '{}', got: {}",
-            KERNEL_PATH_PREFIX.trim(),
-            &grub_cmdline[..grub_cmdline.len().min(20)]
-        );
-    }
-    let mut grub_args = grub_cmdline.replacen(KERNEL_PATH_PREFIX, "BOOT_IMAGE=/vmlinuz ", 1);
-
-    // Substitute PARTUUID placeholder with actual boot partition UUID
-    if let Some(uuid) = boot_partuuid {
-        grub_args = grub_args.replace(
-            "PARTUUID=/PARTNROFF=",
-            &format!("PARTUUID={uuid}/PARTNROFF="),
-        );
-    }
-
-    // Apply kernel's quote repair transformation to grub args
-    grub_args = repair_quotes(&grub_args);
-
-    // Split grub args at "--"
-    let (before_sep, after_sep) = if let Some(pos) = grub_args.find(" -- ") {
-        (&grub_args[..pos], &grub_args[pos + 4..])
-    } else {
-        (grub_args.as_str(), "")
-    };
-
-    // Construct final cmdline
-    let mut cmdline = String::new();
-    cmdline.push_str(&kernel_params);
-    cmdline.push_str(before_sep);
-    cmdline.push_str(" -- ");
-    cmdline.push_str(&init_params);
-    cmdline.push_str(after_sep);
-
-    Ok(cmdline)
-}
+use bootconfig::predict_grub_cmdline as predict_cmdline;
 
 /// Predict PCR 9 value.
 ///
@@ -130,29 +32,15 @@ mod tests {
     use test_case::test_case;
 
     fn make_bootconfig(text: &str) -> Vec<u8> {
-        let text_bytes = text.as_bytes();
-        let size = text_bytes.len() as u32;
-        let checksum: u32 = text_bytes.iter().map(|&b| b as u32).sum();
-        let padding = (4 - (text_bytes.len() % 4)) % 4;
-        let mut data = text_bytes.to_vec();
-        data.extend(vec![0u8; padding]);
+        let mut data = text.as_bytes().to_vec();
+        data.push(0);
+        data.resize(data.len().next_multiple_of(4), 0);
+        let size = data.len() as u32;
+        let checksum: u32 = data.iter().map(|&b| u32::from(b)).sum();
         data.extend(size.to_le_bytes());
         data.extend(checksum.to_le_bytes());
         data.extend(b"#BOOTCONFIG\n");
         data
-    }
-
-    #[test_case("key=value", "key=value" ; "no_quotes_unchanged")]
-    #[test_case("simple", "simple" ; "no_equals_unchanged")]
-    #[test_case(r#"key="value""#, r#""key=value""# ; "simple_quoted_value")]
-    #[test_case(r#"key="value with spaces""#, r#""key=value with spaces""# ; "quoted_value_with_spaces")]
-    #[test_case(r#"foo=bar key="quoted value" baz=qux"#, r#"foo=bar "key=quoted value" baz=qux"# ; "mixed_quoted_and_unquoted")]
-    #[test_case(r#"dm-mod.create="root,,,ro,0 123 verity""#, r#""dm-mod.create=root,,,ro,0 123 verity""# ; "dm_mod_create_style")]
-    #[test_case(r#"a="1" b="2" c="3""#, r#""a=1" "b=2" "c=3""# ; "multiple_quoted_values")]
-    #[test_case(r#"first="val""#, r#""first=val""# ; "quoted_at_start")]
-    #[test_case("", "" ; "empty_string")]
-    fn test_repair_quotes(input: &str, expected: &str) {
-        assert_eq!(repair_quotes(input), expected);
     }
 
     #[test_case(

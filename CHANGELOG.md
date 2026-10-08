@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* Add a shared `bootconfig` library for boot argument construction.
+
+### Fixed
+
+* Render flags and arrays in GRUB command-line predictions using Linux argument syntax.
+
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.1...HEAD
 
 ## [0.25.1] - 2026-09-30
