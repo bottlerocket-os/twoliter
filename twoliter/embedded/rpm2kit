@@ -22,6 +22,10 @@ KIT_DIR="${OUTPUT_DIR}/${ARCH}"
 
 rm -rf "${KIT_DIR}"
 
+: "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP required for reproducible kit metadata}"
+[[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]] || \
+    { echo "BUILD_ID_TIMESTAMP must be numeric, got '${BUILD_ID_TIMESTAMP}'" >&2; exit 1; }
+
 mkdir -p "${KIT_DIR}/Packages"
 for pkg in ${PACKAGES} ; do
   mkdir -p "${KIT_DIR}/Packages/${pkg}"
@@ -33,14 +37,18 @@ for pkg in ${PACKAGES} ; do
     ! -name '*-debugsource-*' \
     -size +0c \
     -exec install -p -m 0644 -t "${KIT_DIR}/Packages/${pkg}" {} \+
-  # Set a reproducible timestamp on the directory, so that the tar archive for
-  # this package will be the same if the package has not otherwise changed.
-  refpkg="$(ls -1 "${PACKAGES_DIR}/${pkg}" | awk 'NR==1 {pkg = $0} END {print pkg}')"
-  touch -r "${PACKAGES_DIR}/${pkg}/${refpkg}" "${KIT_DIR}/Packages/${pkg}"
 done
+
+# Normalize mtimes before createrepo_c scans so primary.xml's `<time file=>`
+# tracks BUILD_ID_TIMESTAMP instead of the rpmbuild wall-clock.
+find "${KIT_DIR}/Packages" -mindepth 1 -exec touch -d "@${BUILD_ID_TIMESTAMP}" {} +
 
 createrepo_c "${KIT_DIR}"
 dnf --disablerepo '*' --repofrompath "kit,file:///${KIT_DIR}" repoquery
+
+# Normalize the generated repodata files so the kit's repodata-layer tar
+# entries are also deterministic.
+find "${KIT_DIR}/repodata" -mindepth 1 -exec touch -d "@${BUILD_ID_TIMESTAMP}" {} +
 
 WORK_DIR="$(mktemp -d)"
 
@@ -50,12 +58,7 @@ cleanup() {
 }
 trap 'cleanup' EXIT
 
-# Written to the kit's OCI `.created` field and index
-# `org.opencontainers.image.created` annotation. Derived from
-# BUILD_ID_TIMESTAMP to keep kit metadata reproducible.
-: "${BUILD_ID_TIMESTAMP:?BUILD_ID_TIMESTAMP required for reproducible kit metadata}"
-[[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]] || \
-    { echo "BUILD_ID_TIMESTAMP must be numeric, got '${BUILD_ID_TIMESTAMP}'" >&2; exit 1; }
+# Written to the kit's OCI `.created` field and index annotation.
 TIMESTAMP="$(date -u -d "@${BUILD_ID_TIMESTAMP}" +%Y-%m-%dT%H:%M:%SZ)"
 FILENAME_PREFIX="${KIT:?}-v${VERSION_ID:?}-${BUILD_ID:?}-${ARCH:?}"
 # Translate ARCH into the proper docker arch
