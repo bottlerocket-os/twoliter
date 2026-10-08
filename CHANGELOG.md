@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.26.0-rc1...HEAD
+
+## [0.26.0-rc1] - 2026-10-09
+
+### Added
+
+* Record the built RPM filename and sha256 digest in the `PackageId` field of application inventory entries ([#756])
+
+### Changed
+
+* Derive build artifact timestamps from `BUILD_ID_TIMESTAMP` instead of the build time, for reproducible
+  kits, RPMs, OCI images, and tools ([#754])
+* Use deterministic filesystem UUIDs and hashes, and set filesystem source timestamps from `BUILD_ID_TIMESTAMP` ([#759])
+
+### Fixed
+
+* Clamp file modification times inside RPMs to `SOURCE_DATE_EPOCH`; the SDK's RPM macros had disabled the clamp ([#761])
+* Normalize RPM and repodata timestamps in kits so kit layers are byte-identical between builds ([#761])
+
+### Build
+
+* Bump `actions/checkout` from 6.0.2 to 7.0.1 ([#689])
+* Bump `actions/setup-go` from 6.4.0 to 7.0.0 ([#684])
+* Update cargo dependencies
+
+[#684]: https://github.com/bottlerocket-os/twoliter/pull/684
+[#689]: https://github.com/bottlerocket-os/twoliter/pull/689
+[#754]: https://github.com/bottlerocket-os/twoliter/pull/754
+[#756]: https://github.com/bottlerocket-os/twoliter/pull/756
+[#759]: https://github.com/bottlerocket-os/twoliter/pull/759
+[#761]: https://github.com/bottlerocket-os/twoliter/pull/761
+
+[0.26.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.1...v0.26.0-rc1
 
 ## [0.25.1] - 2026-09-30
 
