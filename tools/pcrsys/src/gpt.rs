@@ -151,6 +151,53 @@ const BOTTLEROCKET_PRIVATE: [u8; 16] = uuid_to_guid(hex!("440408bb eb0b 4328 a6e
 /// EFI System Partition type GUID.
 const EFI_SYSTEM_PARTITION: [u8; 16] = uuid_to_guid(hex!("c12a7328 f81f 11d2 ba4b 00a0c93ec93b"));
 
+/// Locate the ESP independently of GRUB's BOOT and PRIVATE partitions.
+pub fn find_esp<R: Read + Seek>(disk: &mut R) -> Result<PartitionInfo> {
+    let gpt = GPT::find_from(disk).whatever_context("failed to parse GPT")?;
+    snafu::ensure_whatever!(
+        gpt.sector_size == 512
+            && gpt.header.primary_lba == 1
+            && gpt.header.partition_entry_lba == 2
+            && gpt.header.number_of_partition_entries == 128
+            && gpt.header.size_of_partition_entry == 128,
+        "unsupported or damaged primary GPT layout"
+    );
+    let disk_sectors = disk
+        .seek(SeekFrom::End(0))
+        .whatever_context("failed to size disk")?
+        / 512;
+    let mut entries = gpt
+        .iter()
+        .filter(|(_, p)| p.partition_type_guid == EFI_SYSTEM_PARTITION);
+    let (number, part) = entries
+        .next()
+        .whatever_context("EFI-A partition not found")?;
+    snafu::ensure_whatever!(entries.next().is_none(), "ambiguous layout: multiple ESPs");
+    snafu::ensure_whatever!(
+        part.starting_lba >= gpt.header.first_usable_lba
+            && part.starting_lba <= part.ending_lba
+            && part.ending_lba <= gpt.header.last_usable_lba
+            && part.ending_lba < disk_sectors,
+        "ESP partition is outside disk bounds"
+    );
+    Ok(PartitionInfo {
+        number,
+        start_lba: part.starting_lba,
+        end_lba: part.ending_lba,
+    })
+}
+
+/// Reject mixed GRUB/UKI layouts rather than inventing boot priority states.
+pub fn validate_uki_layout<R: Read + Seek>(disk: &mut R) -> Result<()> {
+    let gpt = GPT::find_from(disk).whatever_context("failed to parse GPT")?;
+    snafu::ensure_whatever!(
+        !gpt.iter()
+            .any(|(_, p)| p.partition_type_guid == BOTTLEROCKET_BOOT),
+        "ambiguous UKI layout: separate GRUB boot partition present"
+    );
+    Ok(())
+}
+
 /// Get the unique GUID of the first boot partition (BOOT-A).
 pub fn get_boot_partuuid<R: Read + Seek>(disk: &mut R) -> Result<String> {
     let gpt = GPT::find_from(disk).whatever_context("failed to parse GPT")?;

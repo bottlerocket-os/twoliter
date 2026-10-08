@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 * Add a shared `bootconfig` library and `ukisys cmdline` for file-driven UKI boot arguments.
+* Predict UKI PCR values when building and repacking Secure Boot images, including Mantle variants.
 
 ### Fixed
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * Compose UKI arguments in Linux bootconfig order, with package parameters before variant parameters.
   Existing attestation policies must account for changed PCR 4, 9 and 11 values.
+  Unsupported UKI measurement inputs now fail image builds and repacks instead of skipping predictions.
 
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.25.1...HEAD
 

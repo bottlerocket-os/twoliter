@@ -1,4 +1,4 @@
-//! PCR 9: Kernel Command Line
+//! PCR 9: Kernel Command Line and UKI initrd
 //!
 //! PCR 9 measures the kernel command line, which for Bottlerocket consists of:
 //! 1. Static parameters from grub.cfg
@@ -6,17 +6,40 @@
 //!
 //! The final /proc/cmdline format is:
 //! `<kernel.* params> BOOT_IMAGE=<path> <grub params before --> -- <init.* params> <grub params after -->`
+//!
+//! Direct UKI boot instead measures EFI LoadOptions followed by the loaded initrd.
 
 use crate::error::Result;
-use crate::predict::{extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL};
+use crate::predict::{
+    extend_pcr_data, extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL,
+};
 use bootconfig::predict_grub_cmdline as predict_cmdline;
+use snafu::{OptionExt, ResultExt};
+use std::fmt::Write;
+
+// The stub uses uppercase B in the trailer's namesize field. Preserve the exact
+// bytes because the archive is measured into PCR 9.
+const CPIO_TRAILER: &[u8] = b"07070100000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000B00000000TRAILER!!!\0\0\0\0";
 
 /// Predict PCR 9 value.
 ///
-/// PCR 9 = extend(init, SHA256(cmdline + newline))
-/// The trailing newline matches /proc/cmdline format.
+/// GRUB extends the command line plus a newline matching /proc/cmdline.
+/// UKI extends LoadOptions and the stub-generated os-release initrd.
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    if ctx.partitions.boot_b.is_some() {
+    if let Some(uki) = ctx.uki {
+        // Linux EFI stub measures LoadOptions, then the complete loaded initrd.
+        // The supported stub supplies only the generated os-release CPIO archive.
+        let options = bootconfig::uki_load_options(uki.cmdline()?)?;
+        let pcr = extend_pcr_data(&PCR_INIT_VAL, &options);
+        let pcr = extend_pcr_data(&pcr, &osrel_archive(uki.section(".osrel"))?);
+        return Ok(Some((PcrIndex::Pcr9, PcrRecord::new(pcr))));
+    }
+    if ctx
+        .partitions
+        .whatever_context("GRUB partition layout missing")?
+        .boot_b
+        .is_some()
+    {
         return Ok(None);
     }
 
@@ -24,6 +47,31 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
     cmdline.push('\n');
     let pcr9 = extend_pcr_string(&PCR_INIT_VAL, &cmdline);
     Ok(Some((PcrIndex::Pcr9, PcrRecord::new(pcr9))))
+}
+
+// systemd v257.13 pack_cpio_literal(".extra", "os-release", 0555, 0444).
+fn osrel_archive(data: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    cpio_entry(&mut out, ".extra", 1, 0o40555, &[])?;
+    cpio_entry(&mut out, ".extra/os-release", 2, 0o100444, data)?;
+    out.extend_from_slice(CPIO_TRAILER);
+    Ok(out)
+}
+
+fn cpio_entry(out: &mut Vec<u8>, name: &str, inode: u32, mode: u32, data: &[u8]) -> Result<()> {
+    let size = u32::try_from(data.len()).whatever_context("CPIO payload too large")?;
+    let namesize = u32::try_from(name.len() + 1).whatever_context("CPIO name too long")?;
+    let mut header = String::from("070701");
+    for word in [inode, mode, 0, 0, 1, 0, size, 0, 0, 0, 0, namesize, 0] {
+        write!(&mut header, "{word:08x}").whatever_context("failed to format CPIO header")?;
+    }
+    out.extend(header.as_bytes());
+    out.extend(name.as_bytes());
+    out.push(0);
+    out.resize(out.len().next_multiple_of(4), 0);
+    out.extend(data);
+    out.resize(out.len().next_multiple_of(4), 0);
+    Ok(())
 }
 
 #[cfg(test)]

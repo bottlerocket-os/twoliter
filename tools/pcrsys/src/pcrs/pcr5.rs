@@ -19,6 +19,7 @@ use crate::predict::{
     PCR_INIT_VAL,
 };
 use sha2::{Digest, Sha256};
+use snafu::OptionExt;
 
 /// Priority bit combinations: (priority, tries_left, successful)
 const COMBINATIONS: [(u8, u8, bool); 6] = [
@@ -38,7 +39,20 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
         return Ok(None);
     }
 
-    let boot_b_combos: &[(u8, u8, bool)] = if ctx.partitions.boot_b.is_some() {
+    if ctx.uki.is_some() {
+        let mut pcr = extend_pcr_separator(&PCR_INIT_VAL);
+        pcr = extend_pcr(
+            &pcr,
+            &Sha256::digest(build_efi_gpt_data(ctx.gpt_bin)?).into(),
+        );
+        pcr = extend_pcr_string(&pcr, "Exit Boot Services Invocation");
+        pcr = extend_pcr_string(&pcr, "Exit Boot Services Returned with Success");
+        return Ok(Some((PcrIndex::Pcr5, PcrRecord::new(pcr))));
+    }
+    let partitions = ctx
+        .partitions
+        .whatever_context("GRUB partition layout missing")?;
+    let boot_b_combos: &[(u8, u8, bool)] = if partitions.boot_b.is_some() {
         &COMBINATIONS
     } else {
         &[(0, 0, false)] // Single placeholder for single-bank
@@ -55,14 +69,14 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
                 // Set BOOT-A priority bits
                 set_gpt_priority_bits(
                     &mut gpt_copy,
-                    ctx.partitions.boot_a.number,
+                    partitions.boot_a.number,
                     a_prio,
                     a_tries,
                     a_succ,
                 )?;
 
                 // Set BOOT-B priority bits if present
-                if let Some(boot_b) = &ctx.partitions.boot_b {
+                if let Some(boot_b) = &partitions.boot_b {
                     set_gpt_priority_bits(
                         &mut gpt_copy,
                         boot_b.number,
@@ -73,7 +87,7 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
                 }
 
                 // Set PRIVATE bit 57 explicitly (clear or set based on iteration)
-                set_private_succeeded(&mut gpt_copy, ctx.partitions.private.number, private_bit57);
+                set_private_succeeded(&mut gpt_copy, partitions.private.number, private_bit57);
 
                 // Recalculate CRCs after all modifications
                 recalculate_gpt_crcs(&mut gpt_copy);

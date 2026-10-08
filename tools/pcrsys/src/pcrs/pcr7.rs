@@ -1,17 +1,18 @@
 //! PCR 7: Secure Boot Policy
 
 use crate::efi::{
-    generate_efi_variable_data, EslHeader, EFI_GLOBAL_VARIABLE_GUID,
+    generate_efi_variable_data, EfiVars, EslHeader, EFI_GLOBAL_VARIABLE_GUID,
     EFI_IMAGE_SECURITY_DATABASE_GUID, SHIM_LOCK_GUID,
 };
 use crate::error::Result;
 use crate::pe::{extract_sbat_level, extract_vendor_cert};
 use crate::platform::Platform;
 use crate::predict::{
-    extend_pcr, extend_pcr_separator, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL,
+    extend_pcr, extend_pcr_data, extend_pcr_separator, PcrContext, PcrIndex, PcrRecord,
+    PCR_INIT_VAL,
 };
 use sha2::{Digest, Sha256};
-use snafu::{OptionExt, ResultExt};
+use snafu::{ensure_whatever, OptionExt, ResultExt};
 
 /// VMware SignatureOwner GUID used when enrolling Secure Boot keys via OVF.
 const VMWARE_SIGNATURE_OWNER_GUID: [u8; 16] = [
@@ -32,6 +33,12 @@ const VMWARE_SIGNATURE_OWNER_GUID: [u8; 16] = [
 /// - AWS/Metal: uses SignatureOwner GUID from efi-vars.json
 /// - VMware: uses VMware's SignatureOwner GUID for enrolled keys
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
+    if ctx.uki.is_some() {
+        return Ok(Some((
+            PcrIndex::Pcr7,
+            PcrRecord::new(predict_uki(ctx.efi_vars)?),
+        )));
+    }
     let vendor_cert = extract_vendor_cert(ctx.shim)?;
     let sbat_level = extract_sbat_level(ctx.shim)?;
 
@@ -164,6 +171,53 @@ fn extract_first_sig_from_esl(esl: &[u8]) -> Result<Vec<u8>> {
     let header = EslHeader::parse(esl)?;
     header.ensure_x509()?;
     Ok(esl[header.sig_start..header.sig_start + header.sig_size].to_vec())
+}
+
+fn predict_uki(vars: &EfiVars) -> Result<[u8; 32]> {
+    let mut pcr = extend_pcr_data(
+        &PCR_INIT_VAL,
+        &generate_efi_variable_data(&EFI_GLOBAL_VARIABLE_GUID, "SecureBoot", &[1]),
+    );
+    for name in ["PK", "KEK", "db", "dbx"] {
+        ensure_whatever!(
+            vars.variables.iter().filter(|v| v.name == name).count() == 1,
+            "ambiguous EFI variable '{name}'"
+        );
+        let var = vars.get(name).whatever_context(format!("missing {name}"))?;
+        let guid = if matches!(name, "PK" | "KEK") {
+            &EFI_GLOBAL_VARIABLE_GUID
+        } else {
+            &EFI_IMAGE_SECURITY_DATABASE_GUID
+        };
+        pcr = extend_pcr_data(
+            &pcr,
+            &generate_efi_variable_data(
+                guid,
+                name,
+                &hex::decode(&var.data).whatever_context("invalid EFI variable hex")?,
+            ),
+        );
+    }
+    pcr = extend_pcr_separator(&pcr);
+    let db = hex::decode(&vars.get("db").whatever_context("missing db")?.data)
+        .whatever_context("invalid db hex")?;
+    let header = EslHeader::parse(&db)?;
+    header.ensure_x509()?;
+    let list_size = u32::from_le_bytes(db[16..20].try_into().unwrap()) as usize;
+    ensure_whatever!(
+        list_size == db.len()
+            && header.sig_size > 16
+            && header.sig_start + header.sig_size == db.len(),
+        "UKI requires one unambiguous db X.509 authority"
+    );
+    Ok(extend_pcr_data(
+        &pcr,
+        &generate_efi_variable_data(
+            &EFI_IMAGE_SECURITY_DATABASE_GUID,
+            "db",
+            &db[header.sig_start..],
+        ),
+    ))
 }
 
 #[cfg(test)]

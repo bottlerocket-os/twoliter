@@ -10,6 +10,10 @@ use sha2::{Digest, Sha256};
 ///
 /// PCR 14 = extend(MokList ESL) -> extend(MokListX ESL) -> extend(MokListTrusted)
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
+    if ctx.uki.is_some() {
+        // Direct UKI boot has no shim MOK measurements.
+        return Ok(Some((PcrIndex::Pcr14, PcrRecord::new(PCR_INIT_VAL))));
+    }
     let vendor_cert = extract_vendor_cert(ctx.shim)?;
 
     // MokList: X509 ESL containing vendor certificate

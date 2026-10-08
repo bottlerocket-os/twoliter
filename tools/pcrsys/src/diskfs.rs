@@ -10,11 +10,67 @@ use fatfs::{FileSystem, FsOptions};
 use snafu::{whatever, ResultExt};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
-/// Extract shim EFI binary from ESP (EFI-A partition) using fatfs.
-///
-/// Tries `bootaa64.efi` (ARM64) then `bootx64.efi` (x86_64).
-pub fn extract_shim<R: Read + Seek>(disk: &mut R, partitions: &PartitionLayout) -> Result<Vec<u8>> {
-    extract_efi_file(disk, partitions, &["bootaa64.efi", "bootx64.efi"])
+/// Read the single architecture-specific firmware fallback executable.
+/// Return the expected PE machine and whether the ESP contains stub sidecars.
+pub fn extract_fallback<R: Read + Seek>(
+    disk: &mut R,
+    esp: &crate::gpt::PartitionInfo,
+) -> Result<(Vec<u8>, u16, bool)> {
+    disk.seek(SeekFrom::Start(esp.offset_bytes()))
+        .whatever_context("failed to seek to ESP")?;
+    let size = usize::try_from(esp.size_bytes()).whatever_context("ESP size overflow")?;
+    let mut data = vec![0; size];
+    disk.read_exact(&mut data)
+        .whatever_context("failed to read ESP")?;
+    let fs = FileSystem::new(Cursor::new(data), FsOptions::new())
+        .whatever_context("failed to mount ESP")?;
+    let root = fs.root_dir();
+    let mut found = None;
+    for (path, machine) in [
+        ("EFI/BOOT/bootx64.efi", 0x8664),
+        ("EFI/BOOT/bootaa64.efi", 0xaa64),
+    ] {
+        match root.open_file(path) {
+            Ok(mut file) => {
+                snafu::ensure_whatever!(
+                    found.is_none(),
+                    "ambiguous ESP: multiple fallback executables"
+                );
+                let mut data = Vec::new();
+                file.read_to_end(&mut data)
+                    .whatever_context("failed to read fallback executable")?;
+                found = Some((data, machine));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).whatever_context("failed to open fallback executable"),
+        }
+    }
+    let (data, machine) = found
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+        .whatever_context("no firmware fallback executable on ESP")?;
+    let sidecars = has_sidecars(&root, 0)?;
+    Ok((data, machine, sidecars))
+}
+
+fn has_sidecars<T: fatfs::ReadWriteSeek>(dir: &fatfs::Dir<'_, T>, depth: usize) -> Result<bool> {
+    snafu::ensure_whatever!(depth < 32, "ESP directory nesting exceeds supported depth");
+    for entry in dir.iter() {
+        let entry = entry.whatever_context("failed to enumerate ESP")?;
+        let name = entry.file_name().to_ascii_lowercase();
+        if name == "." || name == ".." {
+            continue;
+        }
+        if [".addon.efi", ".cred", ".sysext.raw", ".confext.raw"]
+            .iter()
+            .any(|s| name.ends_with(s))
+        {
+            return Ok(true);
+        }
+        if entry.is_dir() && has_sidecars(&entry.to_dir(), depth + 1)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Extract grub EFI binary from ESP (EFI-A partition) using fatfs.
@@ -510,7 +566,7 @@ mod tests {
         let esp_img = generate_esp_image();
         let mut cursor = std::io::Cursor::new(&esp_img);
         let layout = mock_layout_esp();
-        let shim = extract_shim(&mut cursor, &layout).unwrap();
+        let shim = extract_fallback(&mut cursor, &layout.efi_a).unwrap().0;
         assert_eq!(shim, b"bootaa64.efi");
     }
 
@@ -586,7 +642,7 @@ mod tests {
         let esp_img = generate_esp_image_x64();
         let mut cursor = std::io::Cursor::new(&esp_img);
         let layout = mock_layout_esp();
-        let shim = extract_shim(&mut cursor, &layout).unwrap();
+        let shim = extract_fallback(&mut cursor, &layout.efi_a).unwrap().0;
         assert!(shim.starts_with(b"bootx64.efi"));
     }
 
@@ -622,8 +678,8 @@ mod tests {
 
         let mut cursor = std::io::Cursor::new(&img);
         let layout = mock_layout_esp();
-        let err = extract_shim(&mut cursor, &layout).unwrap_err();
-        assert!(err.to_string().contains("none of"));
+        let err = extract_fallback(&mut cursor, &layout.efi_a).unwrap_err();
+        assert!(err.to_string().contains("fallback"));
     }
 
     #[test]
@@ -644,8 +700,8 @@ mod tests {
 
         let mut cursor = std::io::Cursor::new(&img);
         let layout = mock_layout_esp();
-        let err = extract_shim(&mut cursor, &layout).unwrap_err();
-        assert!(err.to_string().contains("EFI"));
+        let err = extract_fallback(&mut cursor, &layout.efi_a).unwrap_err();
+        assert!(err.to_string().contains("ESP"));
     }
 
     #[test]
@@ -669,7 +725,7 @@ mod tests {
 
         let mut cursor = std::io::Cursor::new(&img);
         let layout = mock_layout_esp();
-        let err = extract_shim(&mut cursor, &layout).unwrap_err();
-        assert!(err.to_string().contains("BOOT"));
+        let err = extract_fallback(&mut cursor, &layout.efi_a).unwrap_err();
+        assert!(err.to_string().contains("ESP"));
     }
 }
