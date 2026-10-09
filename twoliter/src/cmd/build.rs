@@ -6,7 +6,6 @@ use crate::project::{self, Locked};
 use crate::tools::install_tools;
 use anyhow::{Context, Result};
 use clap::Parser;
-use oci_cli_wrapper::ImageTool;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -68,10 +67,7 @@ impl BuildKit {
             optional_envs.push(("BUILDSYS_LOOKASIDE_CACHE", lookaside_cache))
         }
 
-        let image_tool = ImageTool::from_builtin_krane();
-        let sdk_uri = project.sdk_image_uri(&image_tool).await?;
-
-        CargoMake::new(&sdk_uri)?
+        CargoMake::new(&project.sdk_image().project_image_uri().to_string())?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_KIT", &self.kit)
@@ -146,10 +142,7 @@ impl BuildVariant {
             ))
         }
 
-        let image_tool = ImageTool::from_builtin_krane();
-        let sdk_uri = project.sdk_image_uri(&image_tool).await?;
-
-        CargoMake::new(&sdk_uri)?
+        CargoMake::new(&project.sdk_image().project_image_uri().to_string())?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_ARCH", &self.arch)
             .env("BUILDSYS_VARIANT", &self.variant)

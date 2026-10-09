@@ -4,7 +4,6 @@ use crate::project::{self, Locked, SDKLocked, Unlocked};
 use crate::tools::install_tools;
 use anyhow::Result;
 use clap::Parser;
-use oci_cli_wrapper::ImageTool;
 use std::path::PathBuf;
 
 // Most subcommands do not require kits and thus do not need to resolve and verify them against the
@@ -80,22 +79,19 @@ impl Make {
         target_allows_kit_verification_skip && project_has_explicit_sdk_dep
     }
 
-    /// Returns the digest-pinned SDK image URI for the project.
+    /// Returns the locked SDK image for the project.
     ///
     /// Fetches kits if needed.
     async fn lock_and_fetch(&self, project: &project::Project<Unlocked>) -> Result<String> {
-        let image_tool = ImageTool::from_builtin_krane();
-        if self.can_skip_kit_verification(project) {
-            project
-                .load_lock::<SDKLocked>()
-                .await?
-                .sdk_image_uri(&image_tool)
-                .await
+        Ok(if self.can_skip_kit_verification(project) {
+            project.load_lock::<SDKLocked>().await?.sdk_image()
         } else {
             let project = project.load_lock::<Locked>().await?;
             project.fetch(self.arch.as_str()).await?;
-            project.sdk_image_uri(&image_tool).await
+            project.sdk_image()
         }
+        .project_image_uri()
+        .to_string())
     }
 }
 
@@ -225,8 +221,7 @@ mod test {
             .await
             .unwrap();
         let project = project.load_lock::<SDKLocked>().await.unwrap();
-        let image_tool = ImageTool::from_builtin_krane();
-        let sdk_source = project.sdk_image_uri(&image_tool).await.unwrap();
+        let sdk_source = project.sdk_image().project_image_uri().to_string();
 
         if delete_verifier_tags {
             // Clean up tags so that the build fails

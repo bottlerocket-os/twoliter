@@ -3,7 +3,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::fmt::{Display, Formatter};
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug)]
 pub(crate) struct ManifestListView {
     pub manifests: Vec<ManifestView>,
 }

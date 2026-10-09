@@ -12,7 +12,6 @@ mod verification;
 /// Implements view models of common OCI manifest and configuration types
 mod views;
 
-pub(crate) use self::image::{build_pinned_uri, LockedImage};
 pub(crate) use self::verification::VerificationTagger;
 
 use crate::common::fs::{create_dir_all, read, write};
@@ -21,7 +20,7 @@ use crate::project::{Project, ValidIdentifier};
 use crate::schema_version::SchemaVersion;
 use anyhow::{bail, ensure, Context, Result};
 use futures::{stream, StreamExt, TryStreamExt};
-use image::ImageResolver;
+use image::{ImageResolver, LockedImage};
 use oci_cli_wrapper::ImageTool;
 use olpc_cjson::CanonicalFormatter as CanonicalJsonFormatter;
 use semver::Version;
@@ -265,7 +264,7 @@ impl Lock {
                     let image = project.as_project_image(kit)?;
                     let resolver = ImageResolver::from_image(&image)?;
                     resolver
-                        .extract(&image_tool, &project.external_kits_dir(), arch, &kit.digest)
+                        .extract(&image_tool, &project.external_kits_dir(), arch)
                         .await?;
                     Ok(())
                 })

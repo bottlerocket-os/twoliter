@@ -60,8 +60,13 @@ ENV PACKAGE=${PACKAGE} ARCH=${ARCH}
 COPY ./packages/${PACKAGE}/${PACKAGE}.spec .
 
 # Copy over the target-specific macros, and put sources in the right place.
+# The SDK's platform macros set `%source_date_epoch_from_changelog 0`, which
+# also drops `%clamp_mtime_to_source_date_epoch` to 0 since the latter
+# defaults to the former. Re-enable the clamp so cpio mtimes track
+# SOURCE_DATE_EPOCH rather than the install wall-clock.
 RUN \
    cp "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" .rpmmacros \
+   && echo '%clamp_mtime_to_source_date_epoch 1' >> .rpmmacros \
    && cat ${PACKAGE}.spec >> rpmbuild/SPECS/${PACKAGE}.spec \
    && find . -maxdepth 1 -not -path '*/\.*' -type f -exec mv {} rpmbuild/SOURCES/ \; \
    && echo ${NOCACHE}
@@ -306,6 +311,7 @@ RUN --mount=target=/host \
        exit 1; \
    fi \
    && cat "/usr/lib/rpm/platform/${ARCH}-bottlerocket/macros" generated.rpmmacros > .rpmmacros \
+   && echo '%clamp_mtime_to_source_date_epoch 1' >> .rpmmacros \
    && cat generated.bconds /host/build/tools/metadata.spec >> rpmbuild/SPECS/metadata.spec \
    && rpmbuild -ba --clean \
       --undefine _auto_set_build_flags \
