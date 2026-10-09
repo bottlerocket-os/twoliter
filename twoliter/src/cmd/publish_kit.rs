@@ -3,7 +3,6 @@ use crate::project::{self, Locked};
 use crate::tools::install_tools;
 use anyhow::Result;
 use clap::Parser;
-use oci_cli_wrapper::ImageTool;
 use std::path::PathBuf;
 
 /// Group all publish commands
@@ -49,10 +48,7 @@ impl PublishKit {
             Some(kit_repo) => kit_repo,
             None => &self.kit_name,
         };
-        let image_tool = ImageTool::from_builtin_krane();
-        let sdk_uri = project.sdk_image_uri(&image_tool).await?;
-
-        CargoMake::new(&sdk_uri)?
+        CargoMake::new(project.sdk_image().project_image_uri().to_string().as_str())?
             .env("TWOLITER_TOOLS_DIR", toolsdir.display().to_string())
             .env("BUILDSYS_KIT", &self.kit_name)
             .env("BUILDSYS_VERSION_IMAGE", project.release_version())
