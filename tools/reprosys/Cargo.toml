@@ -1,0 +1,20 @@
+[package]
+name = "reprosys"
+version = "0.1.0"
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+publish = false
+
+[dependencies]
+aws-config.workspace = true
+aws-sdk-ebs.workspace = true
+aws-sdk-ec2.workspace = true
+aws-sdk-sts.workspace = true
+clap = { workspace = true, features = ["derive"] }
+coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
+pcrsys.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+snafu.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }

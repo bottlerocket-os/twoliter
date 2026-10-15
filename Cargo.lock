@@ -3913,6 +3913,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "reprosys"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-ebs",
+ "aws-sdk-ec2",
+ "aws-sdk-sts",
+ "clap",
+ "coldsnap",
+ "pcrsys",
+ "regex",
+ "serde",
+ "serde_json",
+ "snafu 0.8.9",
+ "tokio",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
