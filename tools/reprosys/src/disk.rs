@@ -23,7 +23,8 @@ pub enum Policy {
     MustMatch,
     /// Bytes must be identical and all zero in the published image.
     MustBeZero,
-    /// Files must match; currently compared byte for byte.
+    /// Files must match, except for the differences [`crate::fsfiles::Rules::Root`]
+    /// expects: kernel module signatures, the TUF root role and the SBOMs.
     FilesMustMatch,
     /// Depends on the random verity salt; differences do not fail verification.
     Verity,

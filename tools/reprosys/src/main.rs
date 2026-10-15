@@ -6,6 +6,7 @@ mod disk;
 mod download;
 mod error;
 mod fsfiles;
+mod kmod;
 
 use crate::error::Result;
 use clap::{Args as ClapArgs, Parser, Subcommand};

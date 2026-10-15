@@ -3922,8 +3922,10 @@ dependencies = [
  "aws-sdk-sts",
  "clap",
  "coldsnap",
+ "flate2",
  "gptman",
  "hex",
+ "lzma-rs",
  "pcrsys",
  "regex",
  "serde",
@@ -3932,6 +3934,7 @@ dependencies = [
  "snafu 0.8.9",
  "tempfile",
  "tokio",
+ "zstd",
 ]
 
 [[package]]
