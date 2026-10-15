@@ -4,6 +4,7 @@ mod ami;
 mod compare;
 mod disk;
 mod download;
+mod erofs;
 mod error;
 mod fsfiles;
 mod kmod;
