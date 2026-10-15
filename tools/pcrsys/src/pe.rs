@@ -5,7 +5,7 @@
 use crate::error::Result;
 use authenticode::authenticode_digest;
 use object::read::pe::PeFile;
-use object::{pe, Object, ObjectSection};
+use object::{pe, LittleEndian as LE, Object, ObjectSection};
 use sha2::{Digest, Sha256};
 use snafu::{ensure_whatever, whatever, OptionExt};
 use std::borrow::Cow;
@@ -93,6 +93,74 @@ pub fn extract_sbat_level(pe_data: &[u8]) -> Result<Vec<u8>> {
     ensure_whatever!(end > HEADER_SIZE, "empty SBAT level string");
 
     Ok(section_data[HEADER_SIZE..end].to_vec())
+}
+
+/// Get the name and raw data of every section of a PE32+ file, in file order.
+pub fn sections(pe_data: &[u8]) -> Result<Vec<(String, &[u8])>> {
+    let pe = PeFile::<pe::ImageNtHeaders64>::parse(pe_data)
+        .ok()
+        .whatever_context("failed to parse PE32+ file")?;
+    pe.sections()
+        .map(|section| {
+            let name = section
+                .name()
+                .ok()
+                .whatever_context("failed to read section name")?;
+            let data = section
+                .data()
+                .ok()
+                .whatever_context("failed to read section data")?;
+            Ok((name.to_string(), data))
+        })
+        .collect()
+}
+
+/// `pe_data` without its checksum or certificate table, and with the contents and virtual sizes
+/// of the sections at `cleared` (indices in file order, as `sections` returns them) zeroed, so
+/// that binaries differing only in their signatures and those sections are equal.
+pub fn normalize(pe_data: &[u8], cleared: &[usize]) -> Result<Vec<u8>> {
+    let pe = PeFile::<pe::ImageNtHeaders64>::parse(pe_data)
+        .ok()
+        .whatever_context("failed to parse PE32+ file")?;
+    // The parsed headers borrow `pe_data`, so their offsets in it are where they point.
+    let offset = |field: *const u8| field as usize - pe_data.as_ptr() as usize;
+    let mut out = pe_data.to_vec();
+    let mut clear = |at: usize, len: usize| -> Result<()> {
+        out.get_mut(at..at.saturating_add(len))
+            .whatever_context("PE section beyond the end of the file")?
+            .fill(0);
+        Ok(())
+    };
+    let check_sum = &pe.nt_headers().optional_header.check_sum;
+    clear(offset(std::ptr::from_ref(check_sum).cast()), 4)?;
+    let certificates = pe
+        .data_directory(pe::IMAGE_DIRECTORY_ENTRY_SECURITY)
+        .map(|dir| {
+            let range = (dir.virtual_address.get(LE), dir.size.get(LE));
+            (offset(std::ptr::from_ref(dir).cast()), range)
+        });
+    if let Some((entry, _)) = certificates {
+        clear(entry, 8)?;
+    }
+    for (i, header) in pe.section_table().iter().enumerate() {
+        if cleared.contains(&i) {
+            clear(offset(std::ptr::from_ref(&header.virtual_size).cast()), 4)?;
+            clear(
+                header.pointer_to_raw_data.get(LE) as usize,
+                header.size_of_raw_data.get(LE) as usize,
+            )?;
+        }
+    }
+    // Signatures differ in length, so remove the certificate table, which is at a file offset.
+    if let Some((_, (start, len))) = certificates.filter(|(_, (_, len))| *len > 0) {
+        let (start, len) = (start as usize, len as usize);
+        let end = start
+            .checked_add(len)
+            .filter(|end| *end <= out.len())
+            .whatever_context("certificate table beyond the end of the file")?;
+        out.drain(start..end);
+    }
+    Ok(out)
 }
 
 /// Get raw data from a named PE section.
@@ -224,6 +292,33 @@ pub(crate) mod tests {
         let cert = extract_vendor_cert(&shim).unwrap();
         assert_eq!(&cert[0..2], &[0x30, 0x82]); // ASN.1 SEQUENCE
         assert_eq!(cert.len(), 7);
+    }
+
+    #[test]
+    fn test_normalize() {
+        let shim = build_test_shim();
+        let sections = sections(&shim).unwrap();
+        let names: Vec<_> = sections.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, [".text", ".sbatlevel", ".vendor_cert"]);
+        assert_eq!(sections[0].1, &shim[0x200..0x210]); // .text, trimmed to VirtualSize
+
+        let normalized = normalize(&shim, &[2]).unwrap();
+        assert_eq!(&normalized[0x600..0x800], &[0; 0x200]); // .vendor_cert
+        assert_eq!(&normalized[0x1a0..0x1a4], &[0; 4]); // its VirtualSize
+        assert_eq!(&normalized[..0x1a0], &shim[..0x1a0]);
+        assert_eq!(&normalized[0x1a4..0x600], &shim[0x1a4..0x600]);
+
+        // A signature is removed along with its directory entry and the checksum.
+        let mut signed = shim.clone();
+        signed[0x98..0x9c].copy_from_slice(&7u32.to_le_bytes()); // CheckSum
+        let len = signed.len() as u32;
+        signed[0xe8..0xec].copy_from_slice(&len.to_le_bytes()); // certificate table offset
+        signed[0xec..0xf0].copy_from_slice(&16u32.to_le_bytes()); // and size
+        signed.extend([7u8; 16]);
+        assert_eq!(
+            normalize(&signed, &[]).unwrap(),
+            normalize(&shim, &[]).unwrap()
+        );
     }
 
     #[test]
