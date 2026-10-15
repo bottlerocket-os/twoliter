@@ -1,6 +1,7 @@
 //! File-level comparison of partitions whose bytes are expected to differ.
 
 use crate::error::Result;
+use crate::eventlog;
 use crate::kmod;
 use crate::verity;
 use crc::{Algorithm, Crc};
@@ -8,7 +9,7 @@ use ext4_view::Ext4;
 use fatfs::{FileSystem, FsOptions};
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2_0_11::{Digest, Sha256, Sha512};
 use snafu::{ensure_whatever, OptionExt, ResultExt};
 use std::collections::{BTreeMap, BTreeSet};
@@ -334,7 +335,6 @@ pub fn ext4_files(partition: Vec<u8>) -> Result<Files> {
     Ok(files)
 }
 
-/// How a region or a file of the published image compares to the rebuilt one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
@@ -1024,14 +1024,27 @@ pub fn compare_files(expected: &Files, actual: &Files, rules: Rules) -> Vec<File
                 expected.get(p).map(Vec::as_slice),
                 actual.get(p).map(Vec::as_slice),
             );
-            match (e, a) {
+            let report = match (e, a) {
                 (Some(e), Some(a))
                     if rules == Rules::Boot && p.to_ascii_lowercase().ends_with(HMAC_SUFFIX) =>
                 {
                     compare_hmac(p, e, a, actual)
                 }
                 _ => compare_file(p, e, a, rules),
+            };
+            if eventlog::enabled() {
+                eventlog::event(
+                    "file",
+                    json!({
+                        "path": report.path,
+                        "status": report.status,
+                        "detail": report.detail,
+                        "rebuilt": e.map(ContentDigest::of_slice),
+                        "published": a.map(ContentDigest::of_slice),
+                    }),
+                );
             }
+            report
         })
         .filter(|r| r.status != Status::Match)
         .collect()
@@ -1082,20 +1095,65 @@ impl Kind {
     }
 }
 
-/// The attributes of a filesystem entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Serialize for Kind {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(self.name())
+    }
+}
+
+/// The attributes of a filesystem entry, as logged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Entry {
     pub kind: Kind,
     /// Permission bits, including setuid, setgid and sticky.
+    #[serde(serialize_with = "octal_mode")]
     pub mode: u32,
     pub uid: u32,
     pub gid: u32,
+    #[serde(serialize_with = "lossy_text")]
     pub link: Option<Vec<u8>>,
+    #[serde(serialize_with = "xattrs_json")]
     pub xattrs: Xattrs,
     /// Size of a regular file's contents, which are compared separately.
     pub size: u64,
     /// Major and minor number of a character or block device.
+    #[serde(serialize_with = "device_number")]
     pub device: Option<(u32, u32)>,
+}
+
+fn octal_mode<S: serde::Serializer>(mode: &u32, s: S) -> std::result::Result<S::Ok, S::Error> {
+    s.serialize_str(&format!("{mode:04o}"))
+}
+
+fn lossy_text<S: serde::Serializer>(
+    text: &Option<Vec<u8>>,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    text.as_deref().map(display).serialize(s)
+}
+
+fn device_number<S: serde::Serializer>(
+    device: &Option<(u32, u32)>,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    device
+        .map(|(major, minor)| format!("{major}:{minor}"))
+        .serialize(s)
+}
+
+/// Xattrs by name, with values as text or hex.
+fn xattrs_json<S: serde::Serializer>(
+    xattrs: &Xattrs,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    s.collect_map(xattrs.iter().map(|(name, value)| {
+        let text = value.strip_suffix(b"\0").unwrap_or(value);
+        let value = match std::str::from_utf8(text) {
+            Ok(text) if text.chars().all(|c| c.is_ascii_graphic() || c == ' ') => json!(text),
+            _ => json!({ "hex": hex::encode(value) }),
+        };
+        (display(name), value)
+    }))
 }
 
 /// Split a `new_encode_dev` device number into its major and minor number.
@@ -1192,10 +1250,19 @@ pub trait FileTree {
 }
 
 /// The size and sha256 of a file's contents.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Serialize)]
 pub struct ContentDigest {
     size: u64,
+    #[serde(serialize_with = "hex_bytes")]
     sha256: [u8; 32],
+}
+
+/// Serialize bytes as a hex string.
+pub fn hex_bytes<S: serde::Serializer>(
+    bytes: impl AsRef<[u8]>,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    s.serialize_str(&hex::encode(bytes))
 }
 
 impl ContentDigest {
@@ -1249,6 +1316,18 @@ fn read_contents(reader: impl Read, size: u64) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+fn log_contents(path: &[u8], method: &str, expected: &ContentDigest, actual: &ContentDigest) {
+    eventlog::event(
+        "contents",
+        json!({
+            "path": display(path),
+            "method": method,
+            "rebuilt": expected,
+            "published": actual,
+        }),
+    );
+}
+
 /// A regular file in a tree: the tree, the file's handle and its size.
 type TreeFile<'a, T> = (&'a T, &'a <T as FileTree>::Handle, u64);
 
@@ -1285,10 +1364,19 @@ fn compare_contents<E: FileTree, A: FileTree>(
         }
         let expected = read_contents(e_tree.open(e_handle)?, e_size)?;
         let actual = read_contents(a_tree.open(a_handle)?, a_size)?;
+        if eventlog::enabled() {
+            log_contents(
+                path,
+                "content-aware",
+                &ContentDigest::of_slice(&expected),
+                &ContentDigest::of_slice(&actual),
+            );
+        }
         return Ok(compare_file(path, Some(&expected), Some(&actual), rules));
     }
     let expected = ContentDigest::of(e_tree.open(e_handle)?, e_size)?;
     let actual = ContentDigest::of(a_tree.open(a_handle)?, a_size)?;
+    log_contents(path, "sha256", &expected, &actual);
     Ok(if expected == actual {
         report(path, Status::Match, "identical")
     } else {
@@ -1303,9 +1391,25 @@ fn compare_contents<E: FileTree, A: FileTree>(
 /// The xattr holding an entry's SELinux label.
 pub const SELINUX_XATTR: &[u8] = b"security.selinux";
 
+/// Log the comparison of an entry.
+fn log_entry(file: &FileReport, expected: Option<&Entry>, actual: Option<&Entry>) {
+    if eventlog::enabled() {
+        eventlog::event(
+            "entry",
+            json!({
+                "path": file.path,
+                "status": file.status,
+                "detail": file.detail,
+                "rebuilt": expected,
+                "published": actual,
+            }),
+        );
+    }
+}
+
 /// Compare the metadata of two filesystems' entries, but not their contents.
 /// Entries that differ only in the `expected_xattr` are expected differences;
-/// identical entries are omitted.
+/// identical entries are logged but not returned.
 pub fn compare_entries(
     expected: &BTreeMap<FsPath, Entry>,
     actual: &BTreeMap<FsPath, Entry>,
@@ -1335,6 +1439,7 @@ pub fn compare_entries(
                 report(path, Status::Mismatch, format!("missing from {side} image"))
             }
         };
+        log_entry(&file, e, a);
         if file.status != Status::Match {
             reports.push(file);
         }
@@ -1377,6 +1482,7 @@ pub fn compare_trees<E: FileTree, A: FileTree>(
                 report(path, Status::Mismatch, format!("missing from {side} image"))
             }
         };
+        log_entry(&file, e.map(|(_, e)| e), a.map(|(_, a)| a));
         if file.status != Status::Match {
             reports.push(file);
         }
@@ -1387,7 +1493,6 @@ pub fn compare_trees<E: FileTree, A: FileTree>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use serde_json::json;
     use std::io::Write;
 
     /// Build a small FAT image containing `files` (paths relative to the root).

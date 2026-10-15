@@ -2,7 +2,9 @@
 //! and data size, and hash tree verification.
 
 use crate::error::Result;
+use crate::fsfiles::hex_bytes;
 use regex::bytes::Regex;
+use serde::Serialize;
 use sha2_0_11::{Digest, Sha256};
 use snafu::{ensure_whatever, OptionExt, ResultExt};
 use std::fs::File;
@@ -22,7 +24,7 @@ static TABLE_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub const SECTOR_SIZE: u64 = 512;
 
 /// Parameters of a dm-verity device as given in its device-mapper table.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VerityTable {
     /// The length of the device-mapper target in sectors, if the table gives it.
     pub sectors: Option<u64>,
@@ -34,7 +36,9 @@ pub struct VerityTable {
     pub data_blocks: u64,
     pub hash_start_block: u64,
     pub algorithm: String,
+    #[serde(serialize_with = "hex_bytes")]
     pub root_hash: Vec<u8>,
+    #[serde(serialize_with = "hex_bytes")]
     pub salt: Vec<u8>,
 }
 

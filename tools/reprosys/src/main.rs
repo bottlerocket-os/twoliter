@@ -6,6 +6,7 @@ mod disk;
 mod download;
 mod erofs;
 mod error;
+mod eventlog;
 mod ext4;
 mod fsfiles;
 mod kmod;
@@ -96,6 +97,23 @@ struct CompareArgs {
     /// Also write the JSON report to this file
     #[arg(long)]
     report: Option<PathBuf>,
+
+    /// Write a detailed log of every comparison step to this file, as JSON
+    /// Lines
+    #[arg(long)]
+    log: Option<PathBuf>,
+
+    /// The AMI's description, as printed by `resolve`, for the log
+    #[arg(long)]
+    ami_info: Option<PathBuf>,
+
+    /// The twoliter version that rebuilt the image, for the log
+    #[arg(long)]
+    twoliter_version: Option<String>,
+
+    /// The source checkout the image was rebuilt from, for the log
+    #[arg(long)]
+    source_dir: Option<PathBuf>,
 }
 
 #[derive(Serialize)]
@@ -149,12 +167,41 @@ fn print_json<T: Serialize>(value: &T) -> Result<String> {
 }
 
 fn compare(args: CompareArgs) -> Result<ExitCode> {
+    let info = (args.ami_info.as_ref())
+        .map(|path| -> Result<ami::AmiInfo> {
+            let json = std::fs::read(path)
+                .whatever_context(format!("failed to read {}", path.display()))?;
+            serde_json::from_slice(&json)
+                .whatever_context(format!("failed to parse {}", path.display()))
+        })
+        .transpose()?;
+    if let Some(path) = &args.log {
+        eventlog::open(path)?;
+        eventlog::event(
+            "verify",
+            serde_json::json!({
+                "twoliter_version": args.twoliter_version,
+                "ami": info,
+                "source_dir": args.source_dir,
+                "rebuilt_image": args.expected,
+                "rebuilt_data_image": args.expected_data,
+                "published_image": args.actual,
+                "published_data_image": args.actual_data,
+            }),
+        );
+    }
     let result = compare::compare(
         &args.expected,
         &args.actual,
         args.expected_data.as_deref(),
         args.actual_data.as_deref(),
-    )?;
+    );
+    if let Err(e) = &result {
+        eventlog::error(snafu::Report::from_error(e));
+    }
+    let closed = eventlog::close();
+    let result = result?;
+    closed?;
     let json = print_json(&result)?;
     if let Some(path) = args.report {
         std::fs::write(&path, json)

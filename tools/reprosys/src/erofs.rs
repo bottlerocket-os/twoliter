@@ -4,10 +4,12 @@
 //! supported.
 
 use crate::error::Result;
+use crate::eventlog;
 use crate::fsfiles::{
     self, display, Entry, FileTree, FsPath, Kind, Xattrs, S_IFBLK, S_IFCHR, S_IFMT,
 };
 use regex::bytes::Regex;
+use serde_json::json;
 use snafu::{ensure_whatever, OptionExt, ResultExt};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -535,6 +537,7 @@ impl FileTree for ErofsTree {
         let sb = self.superblock(&image)?;
         let root = self.root();
         let mut entries = BTreeMap::new();
+        let mut not_extracted = Vec::new();
         for (fs_path, nid, file_type) in listed {
             let name = display(&fs_path);
             let kind = file_type_kind(file_type).with_whatever_context(|| {
@@ -552,7 +555,10 @@ impl FileTree for ErofsTree {
             // Extraction skips device nodes, which need privileges to create.
             let extracted = fs::symlink_metadata(&path).map(|m| extracted_kind(m.file_type()));
             let link = match kind {
-                Kind::CharDevice | Kind::BlockDevice => None,
+                Kind::CharDevice | Kind::BlockDevice => {
+                    not_extracted.push(name);
+                    None
+                }
                 _ if extracted.ok() != Some(kind) => {
                     snafu::whatever!("{name} is in the erofs image but was not extracted");
                 }
@@ -576,6 +582,14 @@ impl FileTree for ErofsTree {
             fsfiles::insert_unique(&mut entries, fs_path, (path, entry))?;
         }
 
+        eventlog::event(
+            "erofs-listing",
+            json!({
+                "image": self.image,
+                "entries": entries.len(),
+                "device_nodes_not_extracted": not_extracted,
+            }),
+        );
         Ok(entries)
     }
 
