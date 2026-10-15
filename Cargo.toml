@@ -34,6 +34,7 @@ members = [
     "twoliter/src/tool-crates/pipesys",
     "twoliter/src/tool-crates/pubsys",
     "twoliter/src/tool-crates/pubsys-setup",
+    "twoliter/src/tool-crates/reprosys",
     "twoliter/src/tool-crates/tuftool",
     "twoliter/src/tool-crates/ukisys",
     "twoliter/src/tool-crates/unplug",
@@ -90,6 +91,7 @@ twoliter-tool-pcrsys = { version = "0.1", path = "twoliter/src/tool-crates/pcrsy
 twoliter-tool-pipesys = { version = "0.1", path = "twoliter/src/tool-crates/pipesys" }
 twoliter-tool-pubsys = { version = "0.1", path = "twoliter/src/tool-crates/pubsys" }
 twoliter-tool-pubsys-setup = { version = "0.1", path = "twoliter/src/tool-crates/pubsys-setup" }
+twoliter-tool-reprosys = { version = "0.1", path = "twoliter/src/tool-crates/reprosys" }
 twoliter-tool-tuftool = { version = "0.1", path = "twoliter/src/tool-crates/tuftool" }
 twoliter-tool-ukisys = { version = "0.1", path = "twoliter/src/tool-crates/ukisys" }
 twoliter-tool-unplug = { version = "0.1", path = "twoliter/src/tool-crates/unplug" }

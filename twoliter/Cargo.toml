@@ -51,6 +51,7 @@ twoliter-tool-pcrsys.workspace = true
 twoliter-tool-pipesys.workspace = true
 twoliter-tool-pubsys.workspace = true
 twoliter-tool-pubsys-setup.workspace = true
+twoliter-tool-reprosys.workspace = true
 twoliter-tool-tuftool.workspace = true
 twoliter-tool-ukisys.workspace = true
 twoliter-tool-unplug.workspace = true
