@@ -56,7 +56,7 @@ impl RegionReport {
         }
     }
 
-    fn failed(&self) -> bool {
+    pub fn failed(&self) -> bool {
         self.fatal && self.status == Status::Mismatch
     }
 

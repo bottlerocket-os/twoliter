@@ -348,6 +348,9 @@ pub struct FileReport {
     pub path: String,
     pub status: Status,
     pub detail: String,
+    /// The published TUF root role, for the summary.
+    #[serde(skip)]
+    pub root_role: Option<RootRole>,
 }
 
 fn is_pe(data: &[u8]) -> bool {
@@ -583,45 +586,55 @@ fn compare_module(path: &[u8], expected: &[u8], actual: &[u8]) -> (Status, Strin
     }
 }
 
+/// The published TUF root role, which users check by hand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootRole {
+    pub sha512: String,
+    pub version: String,
+    pub expires: String,
+    pub keys: Vec<String>,
+}
+
+impl RootRole {
+    fn parse(data: &[u8]) -> Option<Self> {
+        let root = serde_json::from_slice::<Value>(data).ok()?;
+        let signed = root.get("signed")?;
+        if signed.get("_type")?.as_str()? != "root" {
+            return None;
+        }
+        Some(Self {
+            sha512: hex::encode(Sha512::digest(data)),
+            version: signed.get("version")?.to_string(),
+            expires: signed.get("expires")?.as_str()?.to_string(),
+            keys: signed.get("keys")?.as_object()?.keys().cloned().collect(),
+        })
+    }
+}
+
 /// Describe the published TUF root role so it can be checked by hand.
-fn describe_root_role(actual: &[u8]) -> (Status, String) {
-    let summary = serde_json::from_slice::<serde_json::Value>(actual)
-        .ok()
-        .and_then(|root| {
-            let signed = root.get("signed")?;
-            if signed.get("_type")?.as_str()? != "root" {
-                return None;
-            }
-            let keys: Vec<&str> = signed
-                .get("keys")?
-                .as_object()?
-                .keys()
-                .map(String::as_str)
-                .collect();
-            Some(format!(
-                "version {}, expires {}, keys {}",
-                signed.get("version")?,
-                signed.get("expires")?.as_str()?,
-                keys.join(", ")
-            ))
-        });
-    match summary {
-        Some(summary) => (
-            Status::ExpectedDifference,
-            format!(
-                "TUF root role; rebuilds generate their own because the release root role keys \
-                 are not available. Check the published root role against the one your \
-                 repository publishes: sha512 {}, {summary}",
-                hex::encode(Sha512::digest(actual))
-            ),
-        ),
-        None => (
+fn describe_root_role(path: &[u8], actual: &[u8]) -> FileReport {
+    let Some(role) = RootRole::parse(actual) else {
+        return report(
+            path,
             Status::Mismatch,
             format!(
                 "published file is not a TUF root role ({})",
                 ContentDigest::of_slice(actual)
             ),
-        ),
+        );
+    };
+    let detail = format!(
+        "TUF root role; rebuilds generate their own because the release root role keys are not \
+         available. Check the published root role against the one your repository publishes: \
+         sha512 {}, version {}, expires {}, keys {}",
+        role.sha512,
+        role.version,
+        role.expires,
+        role.keys.join(", ")
+    );
+    FileReport {
+        root_role: Some(role),
+        ..report(path, Status::ExpectedDifference, detail)
     }
 }
 
@@ -881,6 +894,7 @@ fn report(path: &[u8], status: Status, detail: impl Into<String>) -> FileReport 
         path: display(path),
         status,
         detail: detail.into(),
+        root_role: None,
     }
 }
 
@@ -927,8 +941,7 @@ fn compare_file(
                 return report(path, status, detail);
             }
             if path.ends_with(TUF_ROOT_ROLE) {
-                let (status, detail) = describe_root_role(actual);
-                return report(path, status, detail);
+                return describe_root_role(path, actual);
             }
             if is_sbom(path) {
                 let (status, detail) = compare_sbom(expected, actual);
