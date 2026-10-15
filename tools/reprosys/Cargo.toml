@@ -12,6 +12,7 @@ aws-sdk-ec2.workspace = true
 aws-sdk-sts.workspace = true
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
+ext4-view.workspace = true
 flate2.workspace = true
 gptman.workspace = true
 hex.workspace = true

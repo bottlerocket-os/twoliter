@@ -3922,6 +3922,7 @@ dependencies = [
  "aws-sdk-sts",
  "clap",
  "coldsnap",
+ "ext4-view",
  "flate2",
  "gptman",
  "hex",

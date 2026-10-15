@@ -4,8 +4,10 @@ use crate::disk::{self, DiskLayout, Partition, Policy, RangeHash};
 use crate::erofs::{self, ErofsTree};
 use crate::error::Result;
 use crate::fsfiles::{self, FileReport, Rules, Status};
+use crate::verity::VerityTable;
 use serde::Serialize;
-use snafu::{ensure_whatever, ResultExt};
+use sha2::{Digest, Sha256};
+use snafu::{ensure_whatever, OptionExt, ResultExt};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -109,6 +111,9 @@ pub struct Report {
     pub notes: Vec<String>,
 }
 
+/// The GRUB configuration in BOOT-A, which holds the kernel command line.
+const GRUB_CFG: &[u8] = b"/grub/grub.cfg";
+
 const NOTES: &[&str] = &[];
 
 struct Images {
@@ -168,6 +173,13 @@ impl Images {
             disk::hash_ranges(&mut self.actual, ranges)?,
         ))
     }
+
+    fn read(&mut self, p: &Partition) -> Result<(Vec<u8>, Vec<u8>)> {
+        Ok((
+            disk::read_range(&mut self.expected, p.offset, p.len)?,
+            disk::read_range(&mut self.actual, p.offset, p.len)?,
+        ))
+    }
 }
 
 fn assess_region(
@@ -189,7 +201,7 @@ fn assess_region(
     };
     RegionReport {
         status,
-        fatal: policy != Policy::Verity,
+        fatal: policy != Policy::SaltDependent,
         expected_sha256: expected.map(RangeHash::hex),
         actual_sha256: Some(actual.hex()),
         ..RegionReport::mismatch(name, policy, offset, len, detail.to_string())
@@ -234,20 +246,44 @@ pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
         ));
     }
 
+    let mut grub_cfgs = (None, None);
     for p in &layout.partitions {
         let policy = p.policy();
         let ranges = [(p.offset, p.len)];
         let (e, a) = images.hash(&ranges)?;
         let mut r = assess_region(&p.name, policy, &ranges, Some(&e), &a);
         match policy {
-            Policy::MustMatch | Policy::MustBeZero | Policy::Verity => {}
+            Policy::MustMatch | Policy::MustBeZero | Policy::BootConfig => {}
+            Policy::SaltDependent => {
+                if r.status != Status::Match {
+                    r.status = Status::ExpectedDifference;
+                    r.detail = "differs; depends on the random verity salt and is not compared"
+                        .to_string();
+                }
+            }
             Policy::FilesMustMatch if r.status != Status::Match => {
                 compare_root(&images, p, &mut r)?
             }
             Policy::FilesMustMatch => {}
-            Policy::SigningDependent => {}
+            Policy::SigningDependent => {
+                if p.name == "BOOT-A" {
+                    let (exp, act) = images.read(p)?;
+                    let exp = fsfiles::ext4_files(exp)?;
+                    let act = fsfiles::ext4_files(act)?;
+                    grub_cfgs = (exp.get(GRUB_CFG).cloned(), act.get(GRUB_CFG).cloned());
+                }
+            }
         }
         report.regions.push(r);
+    }
+
+    if layout.find("HASH-A").is_some() {
+        let result = check_boot_config(grub_cfgs.0.as_deref(), grub_cfgs.1.as_deref());
+        report.regions.push(boot_config_region(
+            layout.find("BOOT-A"),
+            &grub_cfgs,
+            &result,
+        ));
     }
 
     if let Some(mut r) = images.padding()? {
@@ -316,6 +352,71 @@ fn compare_root(images: &Images, p: &Partition, r: &mut RegionReport) -> Result<
         Err(e) => r.unreadable(e),
     }
     Ok(())
+}
+
+/// Check that the published boot configuration matches the rebuilt one except
+/// for the verity root hash and salt, with a single verity table for the same
+/// devices, and return the published table.
+fn check_boot_config(expected: Option<&[u8]>, actual: Option<&[u8]>) -> Result<VerityTable> {
+    let expected =
+        expected.whatever_context("no /grub/grub.cfg could be read from the rebuilt BOOT-A")?;
+    let actual =
+        actual.whatever_context("no /grub/grub.cfg could be read from the published BOOT-A")?;
+    let same_beyond_verity =
+        fsfiles::normalize_verity(expected) == fsfiles::normalize_verity(actual);
+    ensure_whatever!(
+        same_beyond_verity,
+        "the published grub.cfg differs from the rebuilt grub.cfg beyond the verity root hash and salt"
+    );
+    let table = |grub_cfg: &[u8], side: &str| -> Result<VerityTable> {
+        // The whole file must hold a single table, not just the parsed command line.
+        VerityTable::find_unique(grub_cfg)
+            .with_whatever_context(|_| format!("invalid {side} grub.cfg"))?;
+        let cmdline = pcrsys::parsers::grub::parse(grub_cfg)
+            .whatever_context(format!("failed to parse the {side} grub.cfg"))?;
+        VerityTable::find_unique(cmdline.as_bytes())
+            .with_whatever_context(|_| format!("invalid {side} kernel command line"))
+    };
+    let rebuilt = table(expected, "rebuilt")?;
+    let published = table(actual, "published")?;
+    ensure_whatever!(
+        VerityTable {
+            root_hash: rebuilt.root_hash.clone(),
+            salt: rebuilt.salt.clone(),
+            ..published.clone()
+        } == rebuilt,
+        "the published verity table differs from the rebuilt one beyond the root hash and salt"
+    );
+    Ok(published)
+}
+
+fn boot_config_region(
+    boot: Option<&Partition>,
+    (expected, actual): &(Option<Vec<u8>>, Option<Vec<u8>>),
+    result: &Result<VerityTable>,
+) -> RegionReport {
+    let sha256 = |f: &Option<Vec<u8>>| f.as_ref().map(|f| hex::encode(Sha256::digest(f)));
+    let (status, detail) = match result {
+        Ok(_) if expected == actual => (Status::Match, "grub.cfg identical".to_string()),
+        Ok(table) => (
+            Status::ExpectedDifference,
+            format!(
+                "grub.cfg differs only in the verity root hash and salt; the published image boots \
+                 ROOT-A ({}) and HASH-A ({}) with root hash {}",
+                table.data_device,
+                table.hash_device,
+                hex::encode(&table.root_hash)
+            ),
+        ),
+        Err(e) => (Status::Mismatch, e.to_string()),
+    };
+    let (offset, len) = boot.map_or((0, 0), |p| (p.offset, p.len));
+    RegionReport {
+        status,
+        expected_sha256: sha256(expected),
+        actual_sha256: sha256(actual),
+        ..RegionReport::mismatch("BOOT-CONFIG", Policy::BootConfig, offset, len, detail)
+    }
 }
 
 /// Compare the data image over the rebuilt image's length, and check that the rest is zero.
@@ -490,6 +591,54 @@ mod tests {
                 assert_eq!(region(data, "DATA").status, Status::Mismatch);
             }
         }
+    }
+
+    pub(super) fn grub_cfg(root: &str, salt: &str, extra: &str) -> Vec<u8> {
+        format!(
+            "set default=\"0\"\n\
+             set dm_verity_root=\"root,,,ro,0 2400 verity 1 PARTUUID=$boot_uuid/PARTNROFF=1 \
+             PARTUUID=$boot_uuid/PARTNROFF=2 4096 4096 300 1 sha256 {root} {salt} 2 \
+             restart_on_corruption ignore_zero_blocks\"\n\
+             menuentry \"Bottlerocket OS\" {{\n\
+             \x20  linux ($root)/vmlinuz root=/dev/dm-0 ro{extra} dm-mod.create=\"$dm_verity_root\" -- \
+             systemd.log_target=journal\n\
+             \x20  initrd ($private)/bootconfig.data\n\
+             }}\n"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn grub_boot_config() {
+        let (root, other_root) = ("a".repeat(64), "b".repeat(64));
+        let rebuilt = grub_cfg(&root, "00", "");
+        let published = grub_cfg(&other_root, "11", "");
+        let table = check_boot_config(Some(&rebuilt), Some(&published)).unwrap();
+        assert_eq!(hex::encode(&table.root_hash), other_root);
+        assert_eq!(table.salt, [0x11]);
+        let cfgs = (Some(rebuilt.clone()), Some(published.clone()));
+        let checked = check_boot_config(Some(&rebuilt), Some(&published));
+        let region = boot_config_region(None, &cfgs, &checked);
+        assert_eq!(region.status, Status::ExpectedDifference, "{region:#?}");
+        assert!(!region.failed());
+
+        let decoy = format!("# verity 1 a b 4096 4096 300 1 sha256 {root} 00\n");
+        for (i, bad) in [
+            Some(grub_cfg(&other_root, "11", " init=/bin/sh")),
+            Some([published.clone(), decoy.into_bytes()].concat()),
+            None,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let result = check_boot_config(Some(&rebuilt), bad.as_deref());
+            assert!(result.is_err(), "case {i}");
+        }
+
+        // A second table is rejected even when the rebuilt grub.cfg has one too.
+        let twice = |r: &str, s: &str| [grub_cfg(r, s, ""), grub_cfg(r, s, "")].concat();
+        let (rebuilt, published) = (twice(&root, "00"), twice(&other_root, "11"));
+        assert!(check_boot_config(Some(&rebuilt), Some(&published)).is_err());
     }
 }
 
@@ -684,5 +833,102 @@ mod rootfs_tests {
             let r = super::tests::region(&report.os, "ROOT-A");
             assert_eq!(r.status, *status, "{i}: {r:#?}");
         }
+    }
+
+    /// An ext4 filesystem `name.fs` of `size` with 1 KiB blocks, holding `files`
+    /// and hardlinks to them.
+    fn mkfs_ext4(
+        dir: &Path,
+        name: &str,
+        size: &str,
+        files: &[(&str, &[u8])],
+        links: &[(&str, &str)],
+    ) -> PathBuf {
+        let src = dir.join(format!("{name}-src"));
+        std::fs::create_dir_all(&src).unwrap();
+        for (path, contents) in files {
+            let path = src.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
+        for (target, link) in links {
+            std::fs::hard_link(src.join(target), src.join(link)).unwrap();
+        }
+        let fs = dir.join(format!("{name}.fs"));
+        // SOURCE_DATE_EPOCH clamps the timestamps copied from `src`, so that
+        // images built a second apart are identical.
+        let output = Command::new("mkfs.ext4")
+            .env("E2FSPROGS_FAKE_TIME", "1")
+            .env("SOURCE_DATE_EPOCH", "1")
+            .args(["-q", "-b", "1024"])
+            .args(["-U", "11111111-1111-1111-1111-111111111111"])
+            .args([
+                "-E",
+                "hash_seed=22222222-2222-2222-2222-222222222222,root_owner=0:0,no_copy_xattrs",
+                "-d",
+            ])
+            .arg(&src)
+            .arg(&fs)
+            .arg(size)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        fs
+    }
+
+    fn boot_fs(dir: &Path, name: &str, files: &[(&str, &[u8])], links: &[(&str, &str)]) -> Vec<u8> {
+        std::fs::read(mkfs_ext4(dir, name, "2M", files, links)).unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs mkfs.ext4"]
+    fn hash_a_may_differ_by_salt() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let root = vec![7u8; 300 * 4096];
+
+        let image = |name: &str, root_hash: &str, salt: &str, hash: &[u8]| {
+            let grub = super::tests::grub_cfg(root_hash, salt, "");
+            let boot = boot_fs(d, name, &[("grub/grub.cfg", &grub)], &[]);
+            let path = d.join(format!("{name}.img"));
+            let mut f = File::create_new(&path).unwrap();
+            write_gpt(
+                &mut f,
+                8 * MIB,
+                &[
+                    ("BOTTLEROCKET-BOOT-A", [1; 16], 1, 2),
+                    ("BOTTLEROCKET-ROOT-A", [1; 16], 3, 2),
+                    ("BOTTLEROCKET-HASH-A", [1; 16], 5, 1),
+                ],
+            );
+            f.write_all_at(&boot, MIB).unwrap();
+            f.write_all_at(&root, 3 * MIB).unwrap();
+            f.write_all_at(hash, 5 * MIB).unwrap();
+            path
+        };
+        let rebuilt = image("rebuilt", &"a".repeat(64), "00", b"rebuilt hash tree");
+
+        // Another salt changes both grub.cfg and HASH-A; neither fails verification.
+        let salted = image("salted", &"b".repeat(64), "11", b"other hash tree");
+        let report = compare(&rebuilt, &salted, None, None).unwrap();
+        for name in ["HASH-A", "BOOT-CONFIG"] {
+            let r = super::tests::region(&report.os, name);
+            assert_eq!(r.status, Status::ExpectedDifference, "{r:#?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs mkfs.ext4"]
+    fn boot_files_are_read_within_the_partition_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = vec![7u8; 512 << 10];
+        let links: Vec<_> = (0..8).map(|i| ("big", format!("link{i}"))).collect();
+        let links: Vec<_> = links.iter().map(|(t, l)| (*t, l.as_str())).collect();
+        let fs = boot_fs(dir.path(), "linked", &[("big", &big)], &links);
+        let err = fsfiles::ext4_files(fs).unwrap_err().to_string();
+        assert!(err.contains("more file data than the"), "{err}");
+
+        let fs = boot_fs(dir.path(), "unlinked", &[("big", &big)], &[]);
+        assert_eq!(fsfiles::ext4_files(fs).unwrap().len(), 1);
     }
 }

@@ -8,6 +8,7 @@ mod erofs;
 mod error;
 mod fsfiles;
 mod kmod;
+mod verity;
 
 use crate::error::Result;
 use clap::{Args as ClapArgs, Parser, Subcommand};

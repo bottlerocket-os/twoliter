@@ -1,6 +1,8 @@
 //! File-level comparison of root filesystem contents and metadata.
 use crate::error::Result;
 use crate::kmod;
+use ext4_view::Ext4;
+use regex::bytes::Regex;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
@@ -8,6 +10,7 @@ use snafu::{ensure_whatever, ResultExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::{Cursor, Read};
+use std::sync::LazyLock;
 
 /// The TUF root role, which rebuilds cannot reproduce without the release keys.
 const TUF_ROOT_ROLE: &[u8] = b"/usr/share/updog/root.json";
@@ -29,6 +32,11 @@ pub enum Rules {
     /// PRIVATE: none; compared only to explain a difference.
     Exact,
 }
+
+/// The verity root hash and salt in a device-mapper table.
+static VERITY_DIGESTS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(sha256) [0-9a-fA-F]{64} (?:[0-9a-fA-F]+|-)").expect("valid regex")
+});
 
 /// An absolute path within a filesystem. File names are bytes and need not be UTF-8.
 pub type FsPath = Vec<u8>;
@@ -67,6 +75,70 @@ pub fn first_n(items: &[String], n: usize) -> String {
     }
 }
 
+/// Bounds the file data read from a partition to the partition's size.
+struct ReadBudget {
+    limit: u64,
+    remaining: u64,
+}
+
+impl ReadBudget {
+    fn new(partition: &[u8]) -> Self {
+        let limit = partition.len() as u64;
+        Self {
+            limit,
+            remaining: limit,
+        }
+    }
+
+    /// Account for reading `len` bytes of `path`.
+    fn take(&mut self, path: &str, len: u64) -> Result<()> {
+        ensure_whatever!(
+            len <= self.remaining,
+            "reading {path} ({len} bytes) would read more file data than the {}-byte partition holds",
+            self.limit
+        );
+        self.remaining -= len;
+        Ok(())
+    }
+}
+
+/// Read every regular file from an ext4 filesystem image.
+pub fn ext4_files(partition: Vec<u8>) -> Result<Files> {
+    let mut budget = ReadBudget::new(&partition);
+    let fs = Ext4::load(Box::new(partition)).whatever_context("failed to mount ext4 filesystem")?;
+    let mut files = Files::new();
+    let mut stack = vec![ext4_view::PathBuf::new("/")];
+    while let Some(dir) = stack.pop() {
+        let entries = fs
+            .read_dir(&dir)
+            .whatever_context(format!("failed to read directory {}", dir.display()))?;
+        for entry in entries {
+            let entry =
+                entry.whatever_context(format!("failed to read directory {}", dir.display()))?;
+            let name = entry.file_name();
+            let name = name.as_ref();
+            if name == b"." || name == b".." || name == b"lost+found" {
+                continue;
+            }
+            let path = entry.path();
+            let metadata = entry
+                .metadata()
+                .whatever_context(format!("failed to stat {}", path.display()))?;
+            if metadata.is_dir() {
+                stack.push(path);
+            } else if metadata.file_type().is_regular_file() {
+                // Sparse files and hardlinks can claim more than the partition holds.
+                budget.take(&path.display().to_string(), metadata.len())?;
+                let contents = fs
+                    .read(&path)
+                    .whatever_context(format!("failed to read {}", path.display()))?;
+                insert_unique(&mut files, path.as_ref().to_vec(), contents)?;
+            }
+        }
+    }
+    Ok(files)
+}
+
 /// How a region or a file of the published image compares to the rebuilt one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -81,6 +153,13 @@ pub struct FileReport {
     pub path: String,
     pub status: Status,
     pub detail: String,
+}
+
+/// Replace the verity root hash and salt in `data` with placeholders.
+pub fn normalize_verity(data: &[u8]) -> Vec<u8> {
+    VERITY_DIGESTS_RE
+        .replace_all(data, &b"$1 <root-hash> <salt>"[..])
+        .into_owned()
 }
 
 /// Compare a kernel module, ignoring its appended signature.

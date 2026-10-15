@@ -4,7 +4,7 @@ use crate::error::Result;
 use gptman::GPT;
 use pcrsys::gpt::uuid_to_guid;
 use sha2::{Digest, Sha256};
-use snafu::ResultExt;
+use snafu::{ensure_whatever, ResultExt};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -26,10 +26,12 @@ pub enum Policy {
     /// Files must match, except for the differences [`crate::fsfiles::Rules::Root`]
     /// expects: kernel module signatures, the TUF root role and the SBOMs.
     FilesMustMatch,
-    /// Depends on the random verity salt; differences do not fail verification.
-    Verity,
+    /// Depends on the random verity salt; not compared.
+    SaltDependent,
     /// Contents depend on signing keys; currently compared byte for byte.
     SigningDependent,
+    /// grub.cfg must match, except for the verity root hash and salt.
+    BootConfig,
 }
 
 /// A partition from the GPT.
@@ -46,7 +48,7 @@ impl Partition {
         match self.name.as_str() {
             "EFI-A" | "BOOT-A" => Policy::SigningDependent,
             "ROOT-A" => Policy::FilesMustMatch,
-            "HASH-A" => Policy::Verity,
+            "HASH-A" => Policy::SaltDependent,
             n if n.starts_with("RESERVED") || n.ends_with("-B") => Policy::MustBeZero,
             _ => Policy::MustMatch,
         }
@@ -180,6 +182,17 @@ pub fn hash_ranges(file: &mut File, ranges: &[(u64, u64)]) -> Result<RangeHash> 
     })
 }
 
+/// Read `len` bytes at `offset`, refusing ranges over 1 GiB.
+pub fn read_range(file: &mut File, offset: u64, len: u64) -> Result<Vec<u8>> {
+    ensure_whatever!(len <= 1 << 30, "refusing to read {len} bytes into memory");
+    file.seek(SeekFrom::Start(offset))
+        .whatever_context(format!("failed to seek to {offset}"))?;
+    let mut buf = vec![0u8; len as usize];
+    file.read_exact(&mut buf)
+        .whatever_context(format!("failed to read {len} bytes at {offset}"))?;
+    Ok(buf)
+}
+
 pub fn file_len(file: &File) -> Result<u64> {
     Ok(file
         .metadata()
@@ -267,7 +280,7 @@ pub(crate) mod tests {
             ("EFI-A", Policy::SigningDependent),
             ("BOOT-A", Policy::SigningDependent),
             ("ROOT-A", Policy::FilesMustMatch),
-            ("HASH-A", Policy::Verity),
+            ("HASH-A", Policy::SaltDependent),
             ("EFI-B", Policy::MustBeZero),
             ("HASH-B", Policy::MustBeZero),
             ("RESERVED-A", Policy::MustBeZero),
