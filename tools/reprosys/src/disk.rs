@@ -3,7 +3,7 @@
 use crate::error::Result;
 use gptman::GPT;
 use pcrsys::gpt::uuid_to_guid;
-use sha2::{Digest, Sha256};
+use sha2_0_11::{Digest, Sha256};
 use snafu::{ensure_whatever, ResultExt};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -26,11 +26,13 @@ pub enum Policy {
     /// Files must match, except for the differences [`crate::fsfiles::Rules::Root`]
     /// expects: kernel module signatures, the TUF root role and the SBOMs.
     FilesMustMatch,
-    /// Depends on the random verity salt; not compared.
+    /// Depends on the random verity salt; not compared with the rebuilt image, but
+    /// checked against the published data device and verity table.
     SaltDependent,
-    /// Contents depend on signing keys; currently compared byte for byte.
+    /// Files may differ only in signing-dependent content.
     SigningDependent,
-    /// grub.cfg must match, except for the verity root hash and salt.
+    /// The kernel command line must match except for the verity root hash, salt
+    /// and data size.
     BootConfig,
 }
 
