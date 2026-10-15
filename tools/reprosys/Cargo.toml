@@ -12,9 +12,13 @@ aws-sdk-ec2.workspace = true
 aws-sdk-sts.workspace = true
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
+gptman.workspace = true
+hex.workspace = true
 pcrsys.workspace = true
 regex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+sha2.workspace = true
 snafu.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
