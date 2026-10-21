@@ -7,7 +7,7 @@ mod models;
 use clap::Parser;
 use error::{error::*, Result};
 use models::{Advisory, Args, Epoch, PackageName, PackageVersionManifest, EV};
-use rpm::rpm_evr_compare;
+use rpm_version::Evr;
 use snafu::{ensure, ResultExt};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -167,7 +167,7 @@ fn validate_advisories(advisories_dir: &Path, packages_dir: &Path) -> Result<()>
                         continue;
                     }
                     let advisory_ev = EV::new(&product.patched_epoch, &product.patched_version);
-                    if rpm_evr_compare(&spec_ev.to_string(), &advisory_ev.to_string()).is_lt() {
+                    if Evr::parse(&spec_ev.to_string()) < Evr::parse(&advisory_ev.to_string()) {
                         violations.push(format!(
                             "BRSA ID: {}\n package name: {}\n package version: {spec_ev}\n min. expected version: {advisory_ev}",
                             advisory.advisory_info.id, package_name

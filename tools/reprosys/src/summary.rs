@@ -10,14 +10,12 @@ const LONG_HASH: usize = 32;
 /// Width the summary's prose is wrapped to.
 const WRAP_WIDTH: usize = 100;
 
-impl RegionReport {
-    /// The summary's marker for this region, and its rank: failures are listed first.
-    fn marker(&self) -> (&'static str, u8) {
-        match self.status {
-            Status::Match => ("ok", 2),
-            Status::ExpectedDifference => ("note", 1),
-            Status::Mismatch => ("FAIL", 0),
-        }
+/// The summary's marker for a status.
+pub(crate) fn marker(status: Status) -> &'static str {
+    match status {
+        Status::Match => "ok",
+        Status::ExpectedDifference => "note",
+        Status::Mismatch => "FAIL",
     }
 }
 
@@ -43,13 +41,13 @@ pub fn summary(report: &Report, info: &AmiInfo, verbose: bool) -> String {
         out.push(String::new());
         out.push(title.to_string());
         let mut regions: Vec<&RegionReport> = image.regions.iter().collect();
-        regions.sort_by_key(|r| r.marker().1);
+        regions.sort_by_key(|r| std::cmp::Reverse(r.status));
         let (identical, differing): (Vec<_>, Vec<_>) =
             regions.into_iter().partition(|r| r.status == Status::Match);
         for region in differing {
             out.push(format!(
                 "  {:<5} {:<12} {}",
-                region.marker().0,
+                marker(region.status),
                 region.name,
                 shorten(&region.detail)
             ));
@@ -117,7 +115,7 @@ pub fn summary(report: &Report, info: &AmiInfo, verbose: bool) -> String {
 }
 
 /// Shorten hex strings of at least `LONG_HASH` characters to their first 12.
-fn shorten_hashes(text: &str) -> String {
+pub(crate) fn shorten_hashes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find(|c: char| c.is_ascii_hexdigit()) {
@@ -139,7 +137,7 @@ fn shorten_hashes(text: &str) -> String {
 }
 
 /// Wrap `text` to `WRAP_WIDTH`, indenting continuation lines by `indent` spaces.
-fn wrap(text: &str, indent: usize) -> String {
+pub(crate) fn wrap(text: &str, indent: usize) -> String {
     let mut out = String::new();
     let mut column = indent;
     for word in text.split_whitespace() {
