@@ -472,7 +472,11 @@ impl DockerBuild {
                 version_build: args.version_build,
                 version_build_timestamp: args.version_build_timestamp,
             }),
-            secrets_args: Vec::new(),
+            secrets_args: if manifest.info().module_signing() {
+                module_signing_secret_args(package, args.module_signing_key.as_deref())?
+            } else {
+                Vec::new()
+            },
         })
     }
 
@@ -984,6 +988,23 @@ fn check_docker_version() -> Result<()> {
 
 // =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
 
+/// The `--secret` arguments that pass the kit module-signing key to `package`, which sets
+/// `module-signing = true`. Only these packages get the key; the caller decides which they are.
+/// buildsys never opens the key: Docker reads it when BuildKit asks for the secret.
+fn module_signing_secret_args(
+    package: &str,
+    module_signing_key: Option<&Path>,
+) -> Result<Vec<String>> {
+    let key = module_signing_key.context(error::ModuleSigningKeyMissingSnafu { package })?;
+    let mut args = Vec::new();
+    args.build_secret(
+        "file",
+        "module-signing-key.pem",
+        key.to_string_lossy().as_ref(),
+    );
+    Ok(args)
+}
+
 /// Add secrets that might be needed for builds. Since most builds won't use
 /// them, they are not automatically tracked for changes. If necessary, builds
 /// can emit the relevant cargo directives for tracking in their build script.
@@ -1401,6 +1422,32 @@ mod test {
     use semver::Version;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_module_signing_secret_args_without_key_returns_error() {
+        let error = module_signing_secret_args("kernel-6.18", None).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                error::Error::ModuleSigningKeyMissing { package } if package == "kernel-6.18"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn test_module_signing_secret_args_with_key_returns_one_secret() {
+        let key =
+            Path::new("/run/user/1000/twoliter-module-signing/key.1.0/module-signing-key.pem");
+        assert_eq!(
+            module_signing_secret_args("kernel-6.18", Some(key)).unwrap(),
+            [
+                "--secret",
+                "type=file,id=module-signing-key.pem,\
+                src=/run/user/1000/twoliter-module-signing/key.1.0/module-signing-key.pem",
+            ]
+        );
+    }
 
     #[test]
     fn test_docker_version_req_25_0_5_passes() {

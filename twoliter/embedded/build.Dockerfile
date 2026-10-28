@@ -142,12 +142,21 @@ RUN --mount=source=.cargo/twoliter_cargo_config.toml,target=/home/builder/rpmbui
     --mount=type=cache,target=/home/builder/.cache,from=cache,source=/cache \
     --mount=source=sources,target=/home/builder/rpmbuild/BUILD/sources \
     --mount=target=/host \
+    # Mode 0444: rpmbuild runs as builder.
+    --mount=type=secret,id=module-signing-key.pem,target=/run/secrets/module-signing-key.pem,mode=0444 \
     # Require a numeric BUILD_ID_TIMESTAMP; an empty value silently disables
     # rpm's mtime clamp and buildtime override.
     if [[ -z "${BUILD_ID_TIMESTAMP:-}" ]] || \
        ! [[ "${BUILD_ID_TIMESTAMP}" =~ ^[0-9]+$ ]]; then \
         echo "BUILD_ID_TIMESTAMP must be a Unix seconds value for reproducible RPMs, got '${BUILD_ID_TIMESTAMP:-}'" >&2; \
         exit 1; \
+    fi && \
+    # Packages that have the module-signing key turn on module signing and get a
+    # macro naming the key.
+    key=/run/secrets/module-signing-key.pem && \
+    signing=() && \
+    if [[ -f "${key}" ]]; then \
+        signing=(--define "cross_sign_kernel_modules 1" --define "_cross_module_signing_key ${key}"); \
     fi && \
     # The dist tag is set as the `Release` field in Bottlerocket RPMs. Define it to be
     # in the form <timestamp of latest commit>.<latest commit short sha>.br1
@@ -159,6 +168,7 @@ RUN --mount=source=.cargo/twoliter_cargo_config.toml,target=/home/builder/rpmbui
         --define "_target_cpu ${ARCH}" \
         --define "_buildtime ${BUILD_ID_TIMESTAMP}" \
         --define "dist .${BUILD_ID_TIMESTAMP}.${BUILD_ID//-dirty/}.br1" \
+        "${signing[@]}" \
         rpmbuild/SPECS/${PACKAGE}.spec
 
 # Copies RPM packages to the output directory that buildsys expects.

@@ -154,6 +154,11 @@ fn build_package(args: BuildPackageArgs) -> Result<()> {
     // Check for a deprecated key and error if it is detected.
     ensure_package_is_not_variant_sensitive(&manifest, &manifest_path)?;
 
+    // Every key gets a new path, so this reruns the build whenever the key changes.
+    if manifest.info().module_signing() {
+        println!("cargo:rerun-if-env-changed=BUILDSYS_MODULE_SIGNING_KEY");
+    }
+
     if let Some(files) = manifest.info().external_files() {
         // We need the modification time for any external files or bundled modules to be no later
         // than the manifest's modification time, to avoid triggering spurious rebuilds.

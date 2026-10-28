@@ -127,6 +127,10 @@ pub(crate) struct BuildPackageArgs {
     #[arg(long, env = "BUILDSYS_UPSTREAM_SOURCE_FALLBACK")]
     pub(crate) upstream_source_fallback: String,
 
+    /// Kit module-signing key, set by `buildsys with-signing-key`.
+    #[arg(long, env = "BUILDSYS_MODULE_SIGNING_KEY")]
+    pub(crate) module_signing_key: Option<PathBuf>,
+
     #[command(flatten)]
     pub(crate) common: Common,
 }
