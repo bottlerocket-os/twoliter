@@ -14,6 +14,7 @@ mod cache;
 mod gomod;
 mod project;
 mod rustmod;
+mod signing_key;
 mod spec;
 mod vendormod;
 
@@ -53,6 +54,11 @@ mod error {
 
         #[snafu(display("{source}"))]
         SpecParse { source: super::spec::error::Error },
+
+        #[snafu(display("{source}"))]
+        SigningKey {
+            source: super::signing_key::error::Error,
+        },
 
         #[snafu(display("{source}"))]
         ExternalFileFetch { source: super::cache::error::Error },
@@ -126,6 +132,11 @@ fn run(args: Buildsys) -> Result<()> {
         // A read-only query that must not emit cargo build-script directives
         // (they would pollute the value printed to stdout).
         Command::VariantImageFormat(args) => variant_image_format(*args),
+        // Exits with the command's status; an error returns to `main`, which exits 1.
+        Command::WithSigningKey(args) => {
+            let code = signing_key::with_signing_key(*args).context(error::SigningKeySnafu)?;
+            process::exit(code)
+        }
         command => {
             args::rerun_for_envs(command.build_type());
             match command {
@@ -133,7 +144,9 @@ fn run(args: Buildsys) -> Result<()> {
                 Command::BuildKit(args) => build_kit(*args),
                 Command::BuildVariant(args) => build_variant(*args),
                 Command::RepackVariant(args) => repack_variant(*args),
-                Command::VariantImageFormat(_) => unreachable!("handled above"),
+                Command::VariantImageFormat(_) | Command::WithSigningKey(_) => {
+                    unreachable!("handled above")
+                }
             }
         }
     }

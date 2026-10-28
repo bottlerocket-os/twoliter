@@ -17,6 +17,8 @@ filetime.workspace = true
 guppy.workspace = true
 hex.workspace = true
 lazy_static.workspace = true
+libc.workspace = true
+nix = { workspace = true, features = ["fs", "signal", "user"] }
 pipesys.workspace = true
 pubsys-config.workspace = true
 rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
@@ -27,6 +29,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_plain.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+signal-hook.workspace = true
 snafu.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 toml.workspace = true
