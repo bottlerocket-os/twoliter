@@ -910,6 +910,7 @@ for ws in variants .; do
   WORKSPACE_MANIFEST="${manifest}"
 done
 
+buildsys with-signing-key -- \
 cargo build \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \
@@ -936,6 +937,7 @@ export PATH="${TWOLITER_TOOLS_DIR}:${PATH}"
 # Save built artifacts for each architecture in path just for buildsys.
 export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
+buildsys with-signing-key -- \
 cargo build \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \
@@ -965,6 +967,7 @@ fi
 export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 
 rm -rf "${BUILDSYS_OUTPUT_DIR}/latest"
+buildsys with-signing-key -- \
 cargo build \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \
@@ -1007,6 +1010,7 @@ export CARGO_TARGET_DIR="${BUILDSYS_ROOT_DIR}/target/${BUILDSYS_ARCH}"
 find "${BUILDSYS_IMAGES_DIR}" -mindepth 2 -maxdepth 2 -type l \
   -name latest -exec rm {} \;
 
+buildsys with-signing-key -- \
 cargo build \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \

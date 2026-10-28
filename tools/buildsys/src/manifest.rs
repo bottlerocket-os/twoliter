@@ -80,6 +80,17 @@ naming.
 package-name = "better.name"
 ```
 
+`module-signing` signs the package's kernel modules with the kit module-signing key. A build
+in a workspace with any package that sets it creates one key, which exists only while the build
+runs. Each such package's `rpmbuild` gets the key as the BuildKit secret mounted at
+`/run/secrets/module-signing-key.pem`, with `%cross_sign_kernel_modules` set to 1 and
+`%_cross_module_signing_key` defined as that path; other packages get neither. The key is new for every build, so these packages, and every package
+that depends on them, rebuild every time.
+```ignore
+[package.metadata.build-package]
+module-signing = true
+```
+
 `releases-url` is ignored by buildsys, but can be used by packager maintainers
 to indicate a good URL for checking whether the software has had a new release.
 ```ignore
