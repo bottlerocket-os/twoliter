@@ -1,0 +1,96 @@
+// bootconfig.pest - Linux kernel boot configuration format
+// See: Documentation/admin-guide/bootconfig.rst
+//
+// Bootconfig is a structured key-value format for kernel parameters:
+// - Dotted keys: kernel.param = value
+// - Block syntax: kernel { param = value }
+// - Arrays: key = val1, val2, val3
+// - Boolean flags: init.splash (key without value)
+
+// =============================================================================
+// Top-level structure
+// =============================================================================
+
+// Entry point - config is a sequence of statements
+config = { SOI ~ statement* ~ EOI }
+
+// Statements are silent (_) to avoid extra nesting
+statement = _{ pair | bool_key | block | NEWLINE }
+
+// =============================================================================
+// Key-value pairs: key = value
+// =============================================================================
+
+// Standard assignment with optional semicolon terminator
+// Example: kernel.root = "UUID-1234"; or kernel.root = UUID-1234
+pair = { key ~ "=" ~ value ~ ";"? }
+
+// =============================================================================
+// Boolean keys (flags without values)
+// =============================================================================
+
+// Key that exists without a value acts as a boolean flag
+// Example: init.splash or init { splash }
+// Negative lookahead ensures we don't match keys followed by = or {
+bool_key = { key ~ !("=" | "{") ~ (";" | &NEWLINE | &"}" | &EOI) }
+
+// =============================================================================
+// Block syntax: prefix { ... }
+// =============================================================================
+
+// Block groups keys under a common prefix
+// Example: kernel { foo = bar; baz = qux }
+// Non-atomic (!) to allow whitespace inside block
+block = !{ identifier ~ "{" ~ (pair | bool_key | block | NEWLINE)* ~ "}" }
+
+// =============================================================================
+// Keys
+// =============================================================================
+
+// Dotted key like kernel.module.param (atomic - no whitespace between parts)
+key = @{ identifier ~ ("." ~ identifier)* }
+
+// Single identifier component (atomic)
+identifier = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+// =============================================================================
+// Values
+// =============================================================================
+
+// Value can be a single item or comma-separated array
+// Example: key = val or key = val1, val2, val3
+value = { value_item ~ ("," ~ value_item)* }
+
+// Individual value items - silent to flatten structure
+value_item = _{ string | single_string | unquoted }
+
+// =============================================================================
+// String literals
+// =============================================================================
+
+// Double-quoted string with escape sequences (atomic)
+// Example: "hello world" or "path\\to\\file"
+string = @{ "\"" ~ double_inner ~ "\"" }
+double_inner = @{ (!("\"" | "\\") ~ ANY)* ~ (escape ~ double_inner)? }
+
+// Single-quoted string - no escape processing per bootconfig spec (atomic)
+// Example: 'hello world'
+single_string = @{ "'" ~ single_inner ~ "'" }
+single_inner = @{ (!"'" ~ ANY)* }
+
+// Escape sequence (atomic)
+escape = @{ "\\" ~ ANY }
+
+// Unquoted value - stops at any delimiter (atomic)
+// Example: simple_value or UUID-1234-5678
+unquoted = @{ (!(" " | "\t" | NEWLINE | "\"" | "'" | "{" | "}" | "," | ";" | "#") ~ ANY)+ }
+
+// =============================================================================
+// Whitespace and comments (implicit - automatically skipped)
+// =============================================================================
+
+// Only spaces and tabs - newlines are significant for statement separation
+WHITESPACE = _{ " " | "\t" }
+
+// Shell-style comments
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }

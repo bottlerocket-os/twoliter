@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "tools/amispec",
+    "tools/bootconfig",
     "tools/bottlerocket-variant",
     "tools/error-utils",
     "tools/buildsys",
@@ -59,6 +60,7 @@ targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
 [workspace.dependencies]
 advisory-checker = { version = "0.1", path = "tools/advisory-checker", artifact = [ "bin:advisory-checker" ] }
 amispec = { version = "0.1", path = "tools/amispec" }
+bootconfig = { version = "0.1", path = "tools/bootconfig" }
 bottlerocket-variant = { version = "0.1", path = "tools/bottlerocket-variant" }
 buildsys = { version = "0.1", path = "tools/buildsys", lib = true, artifact = [ "bin:buildsys" ] }
 buildsys-config = { version = "0.1", path = "tools/buildsys-config" }

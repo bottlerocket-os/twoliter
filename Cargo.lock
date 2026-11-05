@@ -857,6 +857,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootconfig"
+version = "0.1.0"
+dependencies = [
+ "pest",
+ "pest_derive",
+ "snafu 0.8.9",
+ "test-case",
+]
+
+[[package]]
 name = "bottlerocket-variant"
 version = "0.1.0"
 dependencies = [

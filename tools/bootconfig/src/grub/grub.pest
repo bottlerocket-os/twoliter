@@ -1,0 +1,117 @@
+// grub.cfg grammar for PCR 9 prediction
+// Parses GRUB configuration to extract kernel command line parameters
+//
+// GRUB config consists of:
+// - Variable assignments: set name="value"
+// - Menu entries: menuentry "title" { commands... }
+// - Commands: linux, initrd, boot, etc.
+
+// =============================================================================
+// Top-level structure
+// =============================================================================
+
+// Entry point - a config file is a sequence of statements
+config = { SOI ~ statement* ~ EOI }
+
+// Statements are silent (_) so they don't create extra nesting in parse tree
+statement = _{ set_stmt | menuentry | command | NEWLINE }
+
+// =============================================================================
+// Variable assignment: set name="value"
+// =============================================================================
+
+// Variables can be referenced later as $name or ${name}
+set_stmt = { "set" ~ identifier ~ "=" ~ set_value ~ line_end }
+
+// Value in set statement - can be quoted (with variables) or unquoted
+set_value = _{ quoted_string | unquoted_set_value }
+unquoted_set_value = @{ (!(" " | "\t" | "\"" | "{" | "}" | NEWLINE) ~ ANY)+ }
+
+// =============================================================================
+// Menu entry: menuentry "title" --options { ... }
+// =============================================================================
+
+menuentry = { "menuentry" ~ quoted_string ~ option* ~ block }
+block = { "{" ~ statement* ~ "}" }
+
+// Command-line option like --unrestricted
+option = @{ "--" ~ identifier }
+
+// =============================================================================
+// Commands: linux, initrd, boot, etc.
+// =============================================================================
+
+// Generic command with arguments
+command = { identifier ~ argument* ~ line_end }
+
+// Line ending - newline or end of input (for single-line test cases)
+line_end = _{ NEWLINE | &EOI }
+
+// =============================================================================
+// Command arguments
+// =============================================================================
+
+// Arguments are silent to avoid extra nesting - we care about the actual values
+argument = _{ keyvalue | quoted_string | compound_word }
+
+// Key=value pair like console=tty0 or dm-mod.create="..."
+// Compound atomic ($) preserves inner structure but no whitespace around =
+keyvalue = ${ key_part ~ "=" ~ (quoted_string | value_part)? }
+key_part = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }
+value_part = @{ (!(" " | "\t" | "\"" | "{" | "}" | NEWLINE) ~ ANY)+ }
+
+// Compound word: mix of literal text and variables, parsed as one unit
+// Handles paths like ($root)/vmlinuz where $root is a variable
+compound_word = ${ word_part+ }
+word_part = _{ variable | word_text }
+word_text = @{ (!(" " | "\t" | "\"" | "{" | "}" | "=" | "$" | NEWLINE) ~ ANY)+ }
+
+// =============================================================================
+// Variable references: $name or ${name}
+// =============================================================================
+
+// Compound atomic ($) to preserve var_name token but no whitespace
+variable = ${ "$" ~ (braced_var | bare_var) }
+
+// Braced form ${name} - non-atomic (!) to allow whitespace inside braces
+braced_var = !{ "{" ~ var_name ~ "}" }
+
+// Bare form $name
+bare_var = { var_name }
+
+// Variable name (atomic)
+var_name = @{ (ASCII_ALPHANUMERIC | "_")+ }
+
+// =============================================================================
+// Quoted strings with embedded variables
+// =============================================================================
+
+// Compound atomic ($) preserves inner tokens (variables, text) but no whitespace
+quoted_string = ${ "\"" ~ quoted_content* ~ "\"" }
+
+// Content inside quotes - silent to flatten structure
+quoted_content = _{ variable | string_text }
+
+// Literal text and escape sequences (atomic)
+string_text = @{ (!("\"" | "\\" | "$") ~ ANY)+ | escape }
+escape = @{ "\\" ~ ANY }
+
+// =============================================================================
+// Identifiers
+// =============================================================================
+
+// Used for command names, variable names in set statements
+identifier = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }
+
+// =============================================================================
+// Whitespace and comments (implicit - automatically skipped)
+// =============================================================================
+
+// Spaces, tabs, and line continuations are whitespace
+WHITESPACE = _{ " " | "\t" | line_continuation }
+
+// Backslash-newline continues a line (common in grub.cfg)
+line_continuation = _{ "\\" ~ NEWLINE }
+
+// Shell-style comments
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
