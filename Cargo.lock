@@ -5304,8 +5304,10 @@ dependencies = [
 name = "ukisys"
 version = "0.1.0"
 dependencies = [
+ "bootconfig",
  "clap",
  "snafu 0.8.9",
+ "tempfile",
 ]
 
 [[package]]

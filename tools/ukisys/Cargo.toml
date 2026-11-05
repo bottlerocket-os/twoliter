@@ -6,5 +6,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
+bootconfig.workspace = true
 clap = { workspace = true, features = ["derive"] }
 snafu.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
