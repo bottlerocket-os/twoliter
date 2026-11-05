@@ -3338,10 +3338,9 @@ dependencies = [
  "aws-types",
  "base64 0.22.1",
  "bit_field",
- "bon",
+ "bootconfig",
  "clap",
  "coldsnap",
- "crc32fast",
  "ext4-view",
  "fatfs",
  "flate2",
@@ -3350,8 +3349,6 @@ dependencies = [
  "hex-literal",
  "nutype",
  "object 0.39.1",
- "pest",
- "pest_derive",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3360,6 +3357,7 @@ dependencies = [
  "test-case",
  "tokio",
  "uuid",
+ "wincode",
 ]
 
 [[package]]

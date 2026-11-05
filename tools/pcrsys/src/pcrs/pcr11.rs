@@ -1,7 +1,13 @@
 //! PCR 11: Boot Phases (sysinit, preconfigured, configured, ready, shutdown, final)
 
 use crate::error::Result;
-use crate::predict::{extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL};
+use crate::image::BootChain;
+use crate::predict::{
+    extend_pcr_data, extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL,
+};
+
+// Bottlerocket's sections in systemd v257.13 enumeration order.
+const UKI_SECTIONS: &[&str] = &[".linux", ".osrel", ".cmdline", ".uname", ".sbat"];
 
 /// Systemd boot phase strings extended into PCR 11.
 const PHASES: &[&str] = &[
@@ -14,9 +20,19 @@ const PHASES: &[&str] = &[
 ];
 
 /// Predict PCR 11 values for all boot phases.
-pub fn predict(_ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    let mut digests = Vec::with_capacity(PHASES.len() + 1);
+pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
     let mut pcr = PCR_INIT_VAL;
+
+    if let BootChain::Uki(uki) = &ctx.image.boot {
+        for name in UKI_SECTIONS {
+            if let Some(data) = uki.section(name).filter(|data| !data.is_empty()) {
+                pcr = extend_pcr_data(&pcr, format!("{name}\0").as_bytes());
+                pcr = extend_pcr_data(&pcr, data);
+            }
+        }
+    }
+
+    let mut digests = Vec::with_capacity(PHASES.len() + 1);
     digests.push(pcr);
     for phase in PHASES {
         pcr = extend_pcr_string(&pcr, phase);

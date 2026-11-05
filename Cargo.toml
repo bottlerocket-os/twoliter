@@ -198,6 +198,7 @@ url = "2"
 uuid = "1"
 walkdir = "2"
 which = "8"
+wincode = "0.2"
 x509-cert = { version = "0.2", default-features = false, features = ["std", "pem"] }
 zstd = "0.13"
 

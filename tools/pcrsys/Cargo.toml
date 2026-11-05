@@ -6,7 +6,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-bon.workspace = true
+bootconfig.workspace = true
 nutype = { workspace = true, features = ["serde"] }
 authenticode = { workspace = true, features = ["object"] }
 aws-config.workspace = true
@@ -17,7 +17,6 @@ base64.workspace = true
 bit_field.workspace = true
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
-crc32fast.workspace = true
 ext4-view.workspace = true
 fatfs.workspace = true
 flate2 = { workspace = true, features = ["zlib"] }
@@ -25,8 +24,6 @@ gptman.workspace = true
 hex.workspace = true
 hex-literal.workspace = true
 object.workspace = true
-pest.workspace = true
-pest_derive.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
@@ -34,6 +31,7 @@ snafu.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 uuid = { workspace = true, features = ["v4"] }
+wincode.workspace = true
 
 [dev-dependencies]
 test-case.workspace = true

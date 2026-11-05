@@ -1,41 +1,43 @@
-//! PCR 4: Boot Manager Code (shim, grub, vmlinuz)
+//! PCR 4: Boot Manager Code (shim, grub, vmlinuz or UKI)
 
 use crate::error::Result;
-use crate::pe::get_authenticode_hash;
+use crate::image::BootChain;
 use crate::platform::Platform;
 use crate::predict::{
     extend_pcr, extend_pcr_separator, extend_pcr_string, PcrContext, PcrIndex, PcrRecord,
     PCR_INIT_VAL,
 };
 
+const ACTION_STRING: &str = "Calling EFI Application from Boot Option";
+
 /// Predict PCR 4 value.
 ///
 /// AWS/Metal extend an action string before the separator, VMware does not.
 ///
-/// AWS/Metal: action -> separator -> shim -> grub -> vmlinuz
-/// VMware:              separator -> shim -> grub -> vmlinuz
+/// AWS/Metal GRUB: action -> separator -> shim -> grub -> vmlinuz
+/// AWS UKI:        action -> separator -> UKI
+/// VMware GRUB:    separator -> shim -> grub -> vmlinuz
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    if ctx.partitions.boot_b.is_some() {
-        return Ok(None);
-    }
-
-    let shim_hash = get_authenticode_hash(ctx.shim)?;
-    let grub_hash = get_authenticode_hash(ctx.grub)?;
-    let vmlinuz_hash = get_authenticode_hash(ctx.vmlinuz)?;
+    let images = match &ctx.image.boot {
+        BootChain::Uki(uki) => vec![uki.authenticode()],
+        BootChain::Grub(grub) if grub.partitions.dual_bank() => return Ok(None),
+        BootChain::Grub(grub) => vec![
+            grub.shim.authenticode(),
+            grub.grub.authenticode(),
+            grub.vmlinuz.authenticode(),
+        ],
+    };
 
     // AWS/Metal: action string first, VMware: start with zeros
     let mut pcr = match ctx.platform {
-        Platform::Aws | Platform::Metal => {
-            extend_pcr_string(&PCR_INIT_VAL, "Calling EFI Application from Boot Option")
-        }
+        Platform::Aws | Platform::Metal => extend_pcr_string(&PCR_INIT_VAL, ACTION_STRING),
         Platform::Vmware => PCR_INIT_VAL,
     };
 
-    // Common: separator -> shim -> grub -> vmlinuz
     pcr = extend_pcr_separator(&pcr);
-    pcr = extend_pcr(&pcr, &shim_hash);
-    pcr = extend_pcr(&pcr, &grub_hash);
-    pcr = extend_pcr(&pcr, &vmlinuz_hash);
+    for image in images {
+        pcr = extend_pcr(&pcr, image);
+    }
 
     Ok(Some((PcrIndex::Pcr4, PcrRecord::new(pcr))))
 }
@@ -43,21 +45,12 @@ pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::predict::test_support::{build_test_shim, MockCtx};
+    use crate::predict::test_support::{mock_uki, MockCtx};
 
     #[test]
     fn test_predict_aws() {
-        let pe = build_test_shim();
         let m = MockCtx::new();
-        let ctx = PcrContext::builder()
-            .platform(Platform::Aws)
-            .efi_vars(&m.efi_vars)
-            .partitions(&m.layout)
-            .shim(&pe)
-            .grub(&pe)
-            .vmlinuz(&pe)
-            .build();
-        let result = predict(&ctx).unwrap().unwrap();
+        let result = predict(&m.build(Platform::Aws)).unwrap().unwrap();
         assert_eq!(result.0, PcrIndex::Pcr4);
         assert_eq!(
             result.1.sha256[0],
@@ -67,17 +60,8 @@ mod tests {
 
     #[test]
     fn test_predict_vmware() {
-        let pe = build_test_shim();
         let m = MockCtx::new();
-        let ctx = PcrContext::builder()
-            .platform(Platform::Vmware)
-            .efi_vars(&m.efi_vars)
-            .partitions(&m.layout)
-            .shim(&pe)
-            .grub(&pe)
-            .vmlinuz(&pe)
-            .build();
-        let result = predict(&ctx).unwrap().unwrap();
+        let result = predict(&m.build(Platform::Vmware)).unwrap().unwrap();
         assert_eq!(result.0, PcrIndex::Pcr4);
         assert_eq!(
             result.1.sha256[0],
@@ -87,16 +71,17 @@ mod tests {
 
     #[test]
     fn test_predict_skipped_for_ab() {
-        let pe = build_test_shim();
         let m = MockCtx::dual_bank();
-        let ctx = PcrContext::builder()
-            .platform(Platform::Aws)
-            .efi_vars(&m.efi_vars)
-            .partitions(&m.layout)
-            .shim(&pe)
-            .grub(&pe)
-            .vmlinuz(&pe)
-            .build();
-        assert!(predict(&ctx).unwrap().is_none());
+        assert!(predict(&m.build(Platform::Aws)).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_predict_uki_measures_the_whole_image() {
+        let uki = mock_uki(0x8664);
+        let pcr = extend_pcr_separator(&extend_pcr_string(&PCR_INIT_VAL, ACTION_STRING));
+        let expected = extend_pcr(&pcr, uki.authenticode());
+        let m = MockCtx::with_boot(BootChain::Uki(uki));
+        let result = predict(&m.build(Platform::Aws)).unwrap().unwrap();
+        assert_eq!(result.1, PcrRecord::new(expected));
     }
 }

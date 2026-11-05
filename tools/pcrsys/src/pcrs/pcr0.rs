@@ -8,13 +8,14 @@
 
 use crate::error::Result;
 use crate::platform::Platform;
-use crate::predict::{PcrContext, PcrIndex, PcrRecord};
+use crate::predict::{PcrContext, PcrDigests, PcrIndex, PcrRecord};
+use hex_literal::hex;
 
 /// AWS Nitro PCR 0 value (fixed for all Nitro instances).
-const AWS_PCR0: [u8; 32] = [
-    0x73, 0x7f, 0x76, 0x7a, 0x12, 0xf5, 0x4e, 0x70, 0xee, 0xcb, 0xc8, 0x68, 0x40, 0x11, 0x32, 0x3a,
-    0xe2, 0xfe, 0x2d, 0xd9, 0xf9, 0x07, 0x85, 0x57, 0x79, 0x69, 0xd7, 0xa2, 0x01, 0x3e, 0x8c, 0x12,
-];
+const AWS_PCR0: PcrDigests = PcrDigests {
+    sha256: hex!("737f767a12f54e70eecbc8684011323ae2fe2dd9f90785577969d7a2013e8c12"),
+    sha384: hex!("6e901b16932f6e036747d7a57696e4a2cc864008ebc016826ca1d7bd42ab5ac8286ccf49cde6c0284cbc4b63d978a2ec"),
+};
 
 /// Predict PCR 0 value.
 ///

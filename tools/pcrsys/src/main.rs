@@ -8,7 +8,7 @@ mod diskfs;
 mod efi;
 mod error;
 mod gpt;
-mod parsers;
+mod image;
 mod pcrs;
 mod pe;
 mod platform;
@@ -24,8 +24,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::error::Result;
+use crate::image::DiskImage;
 use crate::platform::Platform;
-use crate::predict::{PcrContext, PcrPredictions};
+use crate::predict::PcrPredictions;
 
 /// Command-line arguments for pcrsys.
 #[derive(Parser)]
@@ -170,42 +171,5 @@ fn predict_pcrs(
     disk: &mut fs::File,
     platform: Platform,
 ) -> Result<PcrPredictions> {
-    let gpt_bin = gpt::extract_primary_gpt(disk)?;
-    let partitions = gpt::find_partitions(disk)?;
-    let shim = diskfs::extract_shim(disk, &partitions)?;
-    let grub = diskfs::extract_grub(disk, &partitions)?;
-    let vmlinuz = diskfs::extract_vmlinuz(disk, &partitions)?;
-    let grub_cfg = diskfs::extract_grub_cfg(disk, &partitions)?;
-    let bootconfig = diskfs::extract_bootconfig(disk, &partitions)?;
-    let boot_partuuid = gpt::get_boot_partuuid(disk)?;
-
-    let ctx = PcrContext::builder()
-        .platform(platform)
-        .efi_vars(efi_vars)
-        .partitions(&partitions)
-        .gpt_bin(&gpt_bin)
-        .shim(&shim)
-        .grub(&grub)
-        .vmlinuz(&vmlinuz)
-        .grub_cfg(&grub_cfg)
-        .bootconfig(&bootconfig)
-        .boot_partuuid(&boot_partuuid)
-        .build();
-
-    PcrPredictions::new()
-        .try_extend(|| pcrs::pcr0::predict(&ctx))?
-        .try_extend(|| pcrs::pcr1::predict(&ctx))?
-        .try_extend(|| pcrs::pcr2::predict(&ctx))?
-        .try_extend(|| pcrs::pcr3::predict(&ctx))?
-        .try_extend(|| pcrs::pcr4::predict(&ctx))?
-        .try_extend(|| pcrs::pcr5::predict(&ctx))?
-        .try_extend(|| pcrs::pcr6::predict(&ctx))?
-        .try_extend(|| pcrs::pcr7::predict(&ctx))?
-        .try_extend(|| pcrs::pcr9::predict(&ctx))?
-        .try_extend(|| pcrs::pcr10::predict(&ctx))?
-        .try_extend(|| pcrs::pcr11::predict(&ctx))?
-        .try_extend(|| pcrs::pcr12::predict(&ctx))?
-        .try_extend(|| pcrs::pcr13::predict(&ctx))?
-        .try_extend(|| pcrs::pcr14::predict(&ctx))?
-        .try_extend(|| pcrs::pcr15::predict(&ctx))
+    DiskImage::parse(disk)?.predict(efi_vars, platform)
 }
