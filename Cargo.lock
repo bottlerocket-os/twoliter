@@ -857,6 +857,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootconfig"
+version = "0.1.0"
+dependencies = [
+ "pest",
+ "pest_derive",
+ "snafu 0.8.9",
+ "test-case",
+]
+
+[[package]]
 name = "bottlerocket-variant"
 version = "0.1.0"
 dependencies = [
@@ -3331,10 +3341,9 @@ dependencies = [
  "aws-types",
  "base64 0.22.1",
  "bit_field",
- "bon",
+ "bootconfig",
  "clap",
  "coldsnap",
- "crc32fast",
  "ext4-view",
  "fatfs",
  "flate2",
@@ -3343,8 +3352,6 @@ dependencies = [
  "hex-literal",
  "nutype",
  "object 0.39.1",
- "pest",
- "pest_derive",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3353,6 +3360,7 @@ dependencies = [
  "test-case",
  "tokio",
  "uuid",
+ "wincode",
 ]
 
 [[package]]
@@ -5299,8 +5307,10 @@ dependencies = [
 name = "ukisys"
 version = "0.1.0"
 dependencies = [
+ "bootconfig",
  "clap",
  "snafu 0.8.9",
+ "tempfile",
 ]
 
 [[package]]

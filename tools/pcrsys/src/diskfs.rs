@@ -3,56 +3,78 @@
 //! Extracts shim, grub, vmlinuz, grub.cfg, and bootconfig from disk image partitions.
 
 use crate::error::Result;
-use crate::gpt::PartitionLayout;
 
 use ext4_view::Ext4;
 use fatfs::{FileSystem, FsOptions};
-use snafu::{whatever, ResultExt};
+use snafu::{ensure_whatever, whatever, OptionExt, ResultExt};
 use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::ops::RangeInclusive;
 
-/// Extract shim EFI binary from ESP (EFI-A partition) using fatfs.
-///
-/// Tries `bootaa64.efi` (ARM64) then `bootx64.efi` (x86_64).
-pub fn extract_shim<R: Read + Seek>(disk: &mut R, partitions: &PartitionLayout) -> Result<Vec<u8>> {
-    extract_efi_file(disk, partitions, &["bootaa64.efi", "bootx64.efi"])
-}
+/// A mounted EFI System Partition.
+pub type Esp = FileSystem<Cursor<Vec<u8>>>;
 
-/// Extract grub EFI binary from ESP (EFI-A partition) using fatfs.
-///
-/// Tries `grubaa64.efi` (ARM64) then `grubx64.efi` (x86_64).
-pub fn extract_grub<R: Read + Seek>(disk: &mut R, partitions: &PartitionLayout) -> Result<Vec<u8>> {
-    extract_efi_file(disk, partitions, &["grubaa64.efi", "grubx64.efi"])
-}
-
-/// Extract an EFI file from `/EFI/BOOT/` on the ESP, trying each name in order.
-///
-/// Returns the contents of the first file found from the `names` list.
-fn extract_efi_file<R: Read + Seek>(
+fn read_partition<R: Read + Seek>(
     disk: &mut R,
-    partitions: &PartitionLayout,
-    names: &[&str],
+    bytes: RangeInclusive<u64>,
+    name: &str,
 ) -> Result<Vec<u8>> {
-    let start = partitions.efi_a.offset_bytes();
-    let size = partitions.efi_a.size_bytes() as usize;
+    disk.seek(SeekFrom::Start(*bytes.start()))
+        .with_whatever_context(|_| format!("failed to seek to {name}"))?;
+    let size = usize::try_from(bytes.end() - bytes.start() + 1)
+        .with_whatever_context(|_| format!("{name} size overflow"))?;
+    let mut data = vec![0; size];
+    disk.read_exact(&mut data)
+        .with_whatever_context(|_| format!("failed to read {name}"))?;
+    Ok(data)
+}
 
-    disk.seek(SeekFrom::Start(start))
-        .whatever_context("failed to seek to ESP")?;
+/// Copy the ESP into memory and mount it.
+pub fn mount_esp<R: Read + Seek>(disk: &mut R, bytes: RangeInclusive<u64>) -> Result<Esp> {
+    let data = read_partition(disk, bytes, "ESP")?;
+    FileSystem::new(Cursor::new(data), FsOptions::new()).whatever_context("failed to mount ESP")
+}
 
-    let mut partition_data = vec![0u8; size];
-    disk.read_exact(&mut partition_data)
-        .whatever_context("failed to read ESP")?;
+/// Copy an ext4 partition into memory and mount it.
+pub fn mount_ext4<R: Read + Seek>(
+    disk: &mut R,
+    bytes: RangeInclusive<u64>,
+    name: &str,
+) -> Result<Ext4> {
+    let data = read_partition(disk, bytes, name)?;
+    Ext4::load(Box::new(data)).with_whatever_context(|_| format!("failed to mount {name}"))
+}
 
-    let cursor = Cursor::new(partition_data);
-    let fs = FileSystem::new(cursor, FsOptions::new())
-        .whatever_context("failed to mount ESP filesystem")?;
+/// Read the single architecture-specific firmware fallback executable.
+pub fn read_fallback(esp: &Esp) -> Result<Vec<u8>> {
+    let root = esp.root_dir();
+    let mut found = None;
+    // The UEFI removable-media path: shim on GRUB images, the UKI itself on UKI images.
+    for path in ["EFI/BOOT/bootx64.efi", "EFI/BOOT/bootaa64.efi"] {
+        match root.open_file(path) {
+            Ok(mut file) => {
+                ensure_whatever!(
+                    found.is_none(),
+                    "ambiguous ESP: multiple fallback executables"
+                );
+                let mut data = Vec::new();
+                file.read_to_end(&mut data)
+                    .whatever_context("failed to read fallback executable")?;
+                found = Some(data);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).whatever_context("failed to open fallback executable"),
+        }
+    }
+    found.whatever_context("no firmware fallback executable on ESP")
+}
 
-    let root = fs.root_dir();
-    let efi_dir = root
-        .open_dir("EFI")
-        .whatever_context("EFI directory not found")?;
-    let boot_dir = efi_dir
-        .open_dir("BOOT")
-        .whatever_context("BOOT directory not found")?;
+/// Read `grubaa64.efi` or `grubx64.efi` from `/EFI/BOOT/`.
+pub fn read_grub(esp: &Esp) -> Result<Vec<u8>> {
+    let names = ["grubaa64.efi", "grubx64.efi"];
+    let boot_dir = esp
+        .root_dir()
+        .open_dir("EFI/BOOT")
+        .whatever_context("EFI/BOOT directory not found")?;
 
     for name in names {
         if let Ok(mut file) = boot_dir.open_file(name) {
@@ -66,82 +88,9 @@ fn extract_efi_file<R: Read + Seek>(
     whatever!("none of {:?} found in /EFI/BOOT/", names);
 }
 
-/// Extract vmlinuz from BOOT-A partition using ext4-view.
-///
-/// Reads `/vmlinuz` from the ext4 filesystem.
-pub fn extract_vmlinuz<R: Read + Seek>(
-    disk: &mut R,
-    partitions: &PartitionLayout,
-) -> Result<Vec<u8>> {
-    let start = partitions.boot_a.offset_bytes();
-    let size = partitions.boot_a.size_bytes() as usize;
-
-    disk.seek(SeekFrom::Start(start))
-        .whatever_context("failed to seek to BOOT-A")?;
-
-    let mut partition_data = vec![0u8; size];
-    disk.read_exact(&mut partition_data)
-        .whatever_context("failed to read BOOT-A")?;
-
-    let fs = Ext4::load(Box::new(partition_data))
-        .whatever_context("failed to mount BOOT-A filesystem")?;
-
-    fs.read("/vmlinuz")
-        .whatever_context("failed to read vmlinuz")
-}
-
-/// Extract grub.cfg from BOOT-A partition using ext4-view.
-///
-/// Reads `/grub/grub.cfg` from the ext4 filesystem.
-pub fn extract_grub_cfg<R: Read + Seek>(
-    disk: &mut R,
-    partitions: &PartitionLayout,
-) -> Result<Vec<u8>> {
-    let start = partitions.boot_a.offset_bytes();
-    let size = partitions.boot_a.size_bytes() as usize;
-
-    disk.seek(SeekFrom::Start(start))
-        .whatever_context("failed to seek to BOOT-A")?;
-
-    let mut partition_data = vec![0u8; size];
-    disk.read_exact(&mut partition_data)
-        .whatever_context("failed to read BOOT-A")?;
-
-    let fs = Ext4::load(Box::new(partition_data))
-        .whatever_context("failed to mount BOOT-A filesystem")?;
-
-    fs.read("/grub/grub.cfg")
-        .whatever_context("failed to read grub.cfg")
-}
-
-/// Extract bootconfig.data from PRIVATE partition using ext4-view.
-///
-/// Reads `/bootconfig.data` from the ext4 filesystem.
-pub fn extract_bootconfig<R: Read + Seek>(
-    disk: &mut R,
-    partitions: &PartitionLayout,
-) -> Result<Vec<u8>> {
-    let start = partitions.private.offset_bytes();
-    let size = partitions.private.size_bytes() as usize;
-
-    disk.seek(SeekFrom::Start(start))
-        .whatever_context("failed to seek to PRIVATE")?;
-
-    let mut partition_data = vec![0u8; size];
-    disk.read_exact(&mut partition_data)
-        .whatever_context("failed to read PRIVATE")?;
-
-    let fs = Ext4::load(Box::new(partition_data))
-        .whatever_context("failed to mount PRIVATE filesystem")?;
-
-    fs.read("/bootconfig.data")
-        .whatever_context("failed to read bootconfig.data")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpt::PartitionInfo;
 
     /// Generate a minimal ext2 filesystem image with /vmlinuz, /grub/grub.cfg, and /bootconfig.data.
     fn generate_boot_image() -> Vec<u8> {
@@ -395,7 +344,7 @@ mod tests {
         // Helper to write FAT12 entry
         let write_fat12 = |fat: &mut [u8], cluster: usize, value: u16| {
             let offset = cluster + cluster / 2;
-            if cluster % 2 == 0 {
+            if cluster.is_multiple_of(2) {
                 fat[offset] = (value & 0xFF) as u8;
                 fat[offset + 1] = (fat[offset + 1] & 0xF0) | ((value >> 8) & 0x0F) as u8;
             } else {
@@ -463,54 +412,18 @@ mod tests {
         img
     }
 
-    fn mock_layout_esp() -> PartitionLayout {
-        PartitionLayout {
-            efi_a: PartitionInfo {
-                number: 1,
-                start_lba: 0,
-                end_lba: 2047,
-            }, // 1MB at offset 0
-            boot_a: PartitionInfo {
-                number: 2,
-                start_lba: 2048,
-                end_lba: 4095,
-            },
-            boot_b: None,
-            private: PartitionInfo {
-                number: 3,
-                start_lba: 4096,
-                end_lba: 6143,
-            },
-        }
-    }
-
-    fn mock_layout_boot() -> PartitionLayout {
-        PartitionLayout {
-            efi_a: PartitionInfo {
-                number: 1,
-                start_lba: 2048,
-                end_lba: 4095,
-            },
-            boot_a: PartitionInfo {
-                number: 2,
-                start_lba: 0,
-                end_lba: 2047,
-            }, // 1MB at offset 0
-            boot_b: None,
-            private: PartitionInfo {
-                number: 3,
-                start_lba: 0,
-                end_lba: 2047,
-            }, // Same as boot_a for testing bootconfig
-        }
+    /// The 1MB test filesystem images start at offset 0.
+    fn whole_image() -> RangeInclusive<u64> {
+        0..=1024 * 1024 - 1
     }
 
     #[test]
     fn test_extract_shim() {
         let esp_img = generate_esp_image();
         let mut cursor = std::io::Cursor::new(&esp_img);
-        let layout = mock_layout_esp();
-        let shim = extract_shim(&mut cursor, &layout).unwrap();
+        let shim = mount_esp(&mut cursor, whole_image())
+            .and_then(|esp| read_fallback(&esp))
+            .unwrap();
         assert_eq!(shim, b"bootaa64.efi");
     }
 
@@ -518,8 +431,7 @@ mod tests {
     fn test_extract_grub() {
         let esp_img = generate_esp_image();
         let mut cursor = std::io::Cursor::new(&esp_img);
-        let layout = mock_layout_esp();
-        let grub = extract_grub(&mut cursor, &layout).unwrap();
+        let grub = read_grub(&mount_esp(&mut cursor, whole_image()).unwrap()).unwrap();
         assert_eq!(grub, b"grubaa64.efi");
     }
 
@@ -527,27 +439,11 @@ mod tests {
     fn test_extract_vmlinuz() {
         let boot_img = generate_boot_image();
         let mut cursor = std::io::Cursor::new(&boot_img);
-        let layout = mock_layout_boot();
-        let vmlinuz = extract_vmlinuz(&mut cursor, &layout).unwrap();
+        let vmlinuz = mount_ext4(&mut cursor, whole_image(), "BOOT")
+            .unwrap()
+            .read("/vmlinuz")
+            .unwrap();
         assert_eq!(vmlinuz, b"vmlinuz");
-    }
-
-    #[test]
-    fn test_extract_grub_cfg() {
-        let boot_img = generate_boot_image();
-        let mut cursor = std::io::Cursor::new(&boot_img);
-        let layout = mock_layout_boot();
-        let grub_cfg = extract_grub_cfg(&mut cursor, &layout).unwrap();
-        assert_eq!(grub_cfg, b"grub.cfg");
-    }
-
-    #[test]
-    fn test_extract_bootconfig() {
-        let boot_img = generate_boot_image();
-        let mut cursor = std::io::Cursor::new(&boot_img);
-        let layout = mock_layout_boot();
-        let bootconfig = extract_bootconfig(&mut cursor, &layout).unwrap();
-        assert_eq!(bootconfig, b"bootconfig.data");
     }
 
     /// Generate ESP image with only x86_64 files (no aarch64).
@@ -585,8 +481,9 @@ mod tests {
     fn test_extract_shim_x64_fallback() {
         let esp_img = generate_esp_image_x64();
         let mut cursor = std::io::Cursor::new(&esp_img);
-        let layout = mock_layout_esp();
-        let shim = extract_shim(&mut cursor, &layout).unwrap();
+        let shim = mount_esp(&mut cursor, whole_image())
+            .and_then(|esp| read_fallback(&esp))
+            .unwrap();
         assert!(shim.starts_with(b"bootx64.efi"));
     }
 
@@ -594,8 +491,7 @@ mod tests {
     fn test_extract_grub_x64_fallback() {
         let esp_img = generate_esp_image_x64();
         let mut cursor = std::io::Cursor::new(&esp_img);
-        let layout = mock_layout_esp();
-        let grub = extract_grub(&mut cursor, &layout).unwrap();
+        let grub = read_grub(&mount_esp(&mut cursor, whole_image()).unwrap()).unwrap();
         assert!(grub.starts_with(b"grubx64.efi"));
     }
 
@@ -621,55 +517,9 @@ mod tests {
         img[cluster3_offset + 64..cluster3_offset + 128].fill(0);
 
         let mut cursor = std::io::Cursor::new(&img);
-        let layout = mock_layout_esp();
-        let err = extract_shim(&mut cursor, &layout).unwrap_err();
-        assert!(err.to_string().contains("none of"));
-    }
-
-    #[test]
-    fn test_extract_efi_missing_efi_dir() {
-        // ESP with no EFI directory
-        let mut img = generate_esp_image();
-
-        const SECTOR_SIZE: usize = 512;
-        const RESERVED_SECTORS: usize = 1;
-        const NUM_FATS: usize = 2;
-        const FAT_SECTORS: usize = 2;
-
-        let fat_start = RESERVED_SECTORS * SECTOR_SIZE;
-        let root_dir_start = fat_start + NUM_FATS * FAT_SECTORS * SECTOR_SIZE;
-
-        // Zero out root directory EFI entry
-        img[root_dir_start..root_dir_start + 32].fill(0);
-
-        let mut cursor = std::io::Cursor::new(&img);
-        let layout = mock_layout_esp();
-        let err = extract_shim(&mut cursor, &layout).unwrap_err();
-        assert!(err.to_string().contains("EFI"));
-    }
-
-    #[test]
-    fn test_extract_efi_missing_boot_dir() {
-        // ESP with EFI but no BOOT directory
-        let mut img = generate_esp_image();
-
-        const SECTOR_SIZE: usize = 512;
-        const RESERVED_SECTORS: usize = 1;
-        const NUM_FATS: usize = 2;
-        const FAT_SECTORS: usize = 2;
-        const ROOT_ENTRIES: usize = 512;
-        const ROOT_DIR_SECTORS: usize = (ROOT_ENTRIES * 32) / SECTOR_SIZE;
-
-        let fat_start = RESERVED_SECTORS * SECTOR_SIZE;
-        let root_dir_start = fat_start + NUM_FATS * FAT_SECTORS * SECTOR_SIZE;
-        let data_start = root_dir_start + ROOT_DIR_SECTORS * SECTOR_SIZE;
-
-        // Zero out BOOT entry in EFI directory (keep . and ..)
-        img[data_start + 64..data_start + 96].fill(0);
-
-        let mut cursor = std::io::Cursor::new(&img);
-        let layout = mock_layout_esp();
-        let err = extract_shim(&mut cursor, &layout).unwrap_err();
-        assert!(err.to_string().contains("BOOT"));
+        let err = mount_esp(&mut cursor, whole_image())
+            .and_then(|esp| read_fallback(&esp))
+            .unwrap_err();
+        assert!(err.to_string().contains("fallback"));
     }
 }

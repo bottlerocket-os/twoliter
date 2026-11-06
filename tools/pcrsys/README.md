@@ -4,7 +4,7 @@ A TPM Platform Configuration Register (PCR) prediction tool for Bottlerocket.
 
 ## Overview
 
-`pcrsys` predicts TPM PCR values (SHA-256) for Bottlerocket images without requiring a running system. It analyzes disk images and EFI variables to compute what the PCR values would be after boot, enabling pre-registration of expected measurements for attestation policies.
+`pcrsys` predicts TPM PCR values (SHA-256 and SHA-384) for Bottlerocket images without requiring a running system. It analyzes disk images and EFI variables to compute what the PCR values would be after boot, enabling pre-registration of expected measurements for attestation policies.
 
 ## Usage
 
@@ -29,9 +29,9 @@ JSON output with predicted PCR values, keyed by PCR index:
 ```json
 {
   "pcrs": {
-    "0": { "sha256": ["<hex digest>"] },
-    "4": { "sha256": ["<hex digest>"] },
-    "7": { "sha256": ["<hex digest>"] }
+    "0": { "sha256": ["<hex digest>"], "sha384": ["<hex digest>"] },
+    "4": { "sha256": ["<hex digest>"], "sha384": ["<hex digest>"] },
+    "7": { "sha256": ["<hex digest>"], "sha384": ["<hex digest>"] }
   }
 }
 ```
@@ -44,19 +44,20 @@ JSON output with predicted PCR values, keyed by PCR index:
 | 1 | Platform configuration (static per platform) |
 | 2 | Option ROM code (separator only) |
 | 3 | Option ROM configuration (separator only) |
-| 4 | Boot manager code (shim, grub, vmlinuz authenticode hashes) |
+| 4 | Boot manager code (shim, grub, vmlinuz or UKI authenticode hashes) |
 | 5 | GPT partition table |
 | 6 | Resume events (separator only) |
-| 7 | Secure Boot policy (PK, KEK, db, dbx, SbatLevel, MokListRT) |
-| 9 | Kernel command line (grub.cfg + bootconfig) |
+| 7 | Secure Boot policy (PK, KEK, db, dbx, plus shim's SbatLevel and MokListRT) |
+| 9 | Kernel command line (grub.cfg + bootconfig, or UKI command line + os-release initrd) |
 | 10 | Zero (unused) |
-| 11 | Boot phases (systemd) |
+| 11 | UKI sections and boot phases (systemd) |
 | 12 | Zero (unused) |
 | 13 | Zero (unused) |
-| 14 | Shim MOK (MokList, MokListX, MokListTrusted) |
+| 14 | Shim MOK (MokList, MokListX, MokListTrusted); zero for UKI |
 | 15 | Zero (unused) |
 
 PCRs 4 and 9 are skipped for images with A/B boot partitions since the active kernel and root hash can change.
+Images that boot a UKI directly are predicted for AWS only.
 
 ## Supported Platforms
 
@@ -87,4 +88,5 @@ JSON file containing Secure Boot variables:
 
 GPT-partitioned disk image containing:
 - EFI System Partition (FAT) with `/EFI/BOOT/boot{aa64,x64}.efi` (shim) and `grub{aa64,x64}.efi`
-- Boot partition (ext4) with `/vmlinuz`, `/grub.cfg`, and `/bootconfig.data`
+- Boot partition (ext4) with `/vmlinuz` and `/grub/grub.cfg`, and private partition with `/bootconfig.data`
+- Or, for direct UKI boot, the UKI at `/EFI/BOOT/boot{aa64,x64}.efi`

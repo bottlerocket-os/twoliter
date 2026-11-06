@@ -1,4 +1,4 @@
-//! PCR 9: Kernel Command Line
+//! PCR 9: Kernel Command Line and UKI initrd
 //!
 //! PCR 9 measures the kernel command line, which for Bottlerocket consists of:
 //! 1. Static parameters from grub.cfg
@@ -8,270 +8,140 @@
 //! `<kernel.* params> BOOT_IMAGE=<path> <grub params before --> -- <init.* params> <grub params after -->`
 
 use crate::error::Result;
-use crate::parsers::{bootconfig, grub};
-use crate::predict::{extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL};
-use snafu::whatever;
+use crate::image::BootChain;
+use crate::pe::Arch;
+use crate::predict::{
+    extend_pcr_data, extend_pcr_string, PcrContext, PcrIndex, PcrRecord, PCR_INIT_VAL,
+};
+use snafu::ResultExt;
+use std::fmt::Write;
 
-const KERNEL_PATH_PREFIX: &str = "()/vmlinuz ";
-
-/// Transform grub.cfg shell-style quoting `key="value"` to kernel cmdline format `"key=value"`.
-///
-/// grub.cfg uses shell-style quoting where values are quoted: `root="UUID=abc"`
-/// The kernel command line expects the entire key=value pair quoted: `"root=UUID=abc"`
-/// This function performs that transformation for PCR 9 prediction.
-fn repair_quotes(cmdline: &str) -> String {
-    let mut result = String::with_capacity(cmdline.len());
-    let mut chars = cmdline.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '=' && chars.peek() == Some(&'"') {
-            // Found `="`; scan back to find start of key
-            let key_start = result.rfind(' ').map(|i| i + 1).unwrap_or(0);
-            let key = result[key_start..].to_string();
-            result.truncate(key_start);
-
-            // Skip the opening quote
-            chars.next();
-
-            // Collect value until closing quote
-            let mut value = String::new();
-            for vc in chars.by_ref() {
-                if vc == '"' {
-                    break;
-                }
-                value.push(vc);
-            }
-
-            // Output as "key=value"
-            result.push('"');
-            result.push_str(&key);
-            result.push('=');
-            result.push_str(&value);
-            result.push('"');
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-/// Predict /proc/cmdline from grub.cfg and bootconfig.
-///
-/// The kernel constructs /proc/cmdline as:
-/// `<kernel.* bootconfig> BOOT_IMAGE=<path> <grub args> -- <init.* bootconfig> <grub args after -->`
-///
-/// If `boot_partuuid` is provided, replaces `PARTUUID=/PARTNROFF=` with the actual UUID.
-fn predict_cmdline(
-    grub_cfg: &[u8],
-    bootconfig_data: &[u8],
-    boot_partuuid: Option<&str>,
-) -> Result<String> {
-    let grub_cmdline = grub::parse(grub_cfg)?;
-    let bootconfig_params = bootconfig::parse(bootconfig_data)?;
-    let kernel_params = bootconfig::format_params(&bootconfig_params.kernel);
-    let init_params = bootconfig::format_params(&bootconfig_params.init);
-
-    // Verify and transform kernel path
-    if !grub_cmdline.starts_with(KERNEL_PATH_PREFIX) {
-        whatever!(
-            "grub.cfg kernel path must start with '{}', got: {}",
-            KERNEL_PATH_PREFIX.trim(),
-            &grub_cmdline[..grub_cmdline.len().min(20)]
-        );
-    }
-    let mut grub_args = grub_cmdline.replacen(KERNEL_PATH_PREFIX, "BOOT_IMAGE=/vmlinuz ", 1);
-
-    // Substitute PARTUUID placeholder with actual boot partition UUID
-    if let Some(uuid) = boot_partuuid {
-        grub_args = grub_args.replace(
-            "PARTUUID=/PARTNROFF=",
-            &format!("PARTUUID={uuid}/PARTNROFF="),
-        );
-    }
-
-    // Apply kernel's quote repair transformation to grub args
-    grub_args = repair_quotes(&grub_args);
-
-    // Split grub args at "--"
-    let (before_sep, after_sep) = if let Some(pos) = grub_args.find(" -- ") {
-        (&grub_args[..pos], &grub_args[pos + 4..])
-    } else {
-        (grub_args.as_str(), "")
-    };
-
-    // Construct final cmdline
-    let mut cmdline = String::new();
-    cmdline.push_str(&kernel_params);
-    cmdline.push_str(before_sep);
-    cmdline.push_str(" -- ");
-    cmdline.push_str(&init_params);
-    cmdline.push_str(after_sep);
-
-    Ok(cmdline)
-}
+// systemd-stub writes the trailer's namesize with an uppercase B; these are its exact bytes.
+const CPIO_TRAILER: &[u8] = b"07070100000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000B00000000TRAILER!!!\0\0\0\0";
 
 /// Predict PCR 9 value.
 ///
-/// PCR 9 = extend(init, SHA256(cmdline + newline))
-/// The trailing newline matches /proc/cmdline format.
+/// GRUB images extend the /proc/cmdline contents, newline included, after the aarch64 LoadOptions.
+/// UKI extends LoadOptions and the stub-generated os-release initrd.
 pub fn predict(ctx: &PcrContext) -> Result<Option<(PcrIndex, PcrRecord)>> {
-    if ctx.partitions.boot_b.is_some() {
-        return Ok(None);
-    }
-
-    let mut cmdline = predict_cmdline(ctx.grub_cfg, ctx.bootconfig, Some(ctx.boot_partuuid))?;
-    cmdline.push('\n');
-    let pcr9 = extend_pcr_string(&PCR_INIT_VAL, &cmdline);
+    let pcr9 = match &ctx.image.boot {
+        BootChain::Uki(uki) => {
+            let pcr = extend_pcr_data(&PCR_INIT_VAL, &uki.cmdline().load_options());
+            extend_pcr_data(&pcr, &stub_generated_uki_initrd(uki.osrel())?)
+        }
+        BootChain::Grub(grub) if grub.partitions.dual_bank() => return Ok(None),
+        BootChain::Grub(grub) => {
+            let pcr = match grub.vmlinuz.arch() {
+                Arch::Aarch64 => extend_pcr_data(&PCR_INIT_VAL, &grub.cmdline.load_options()),
+                Arch::X86_64 => PCR_INIT_VAL,
+            };
+            let proc_cmdline = grub.cmdline.proc_cmdline(&grub.bootconfig);
+            extend_pcr_string(&pcr, &format!("{proc_cmdline}\n"))
+        }
+    };
     Ok(Some((PcrIndex::Pcr9, PcrRecord::new(pcr9))))
+}
+
+/// The initrd systemd v257.13 builds with `pack_cpio_literal(".extra", "os-release", 0555, 0444)`.
+fn stub_generated_uki_initrd(data: &[u8]) -> Result<Vec<u8>> {
+    let mut out = cpio_entry(".extra", 1, 0o40555, &[])?;
+    out.extend(cpio_entry(".extra/os-release", 2, 0o100444, data)?);
+    out.extend_from_slice(CPIO_TRAILER);
+    Ok(out)
+}
+
+/// Encode one newc CPIO entry: header and NUL-terminated name, then data, each 4-byte aligned.
+fn cpio_entry(name: &str, inode: u32, mode: u32, data: &[u8]) -> Result<Vec<u8>> {
+    let size = u32::try_from(data.len()).whatever_context("CPIO payload too large")?;
+    // namesize counts the terminating NUL.
+    let namesize = u32::try_from(name.len() + 1).whatever_context("CPIO name too long")?;
+
+    // inode, mode, uid, gid, nlink, mtime, filesize, devmajor, devminor, rdevmajor, rdevminor,
+    // namesize, check
+    let mut header = String::from("070701");
+    for word in [inode, mode, 0, 0, 1, 0, size, 0, 0, 0, 0, namesize, 0] {
+        write!(&mut header, "{word:08x}").whatever_context("failed to format CPIO header")?;
+    }
+    let mut out = header.into_bytes();
+    out.extend(name.as_bytes());
+    out.push(0);
+    out.resize(out.len().next_multiple_of(4), 0);
+    out.extend(data);
+    out.resize(out.len().next_multiple_of(4), 0);
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_case::test_case;
+    use crate::image::Grub;
+    use crate::pe::PeImage;
+    use crate::platform::Platform;
+    use crate::predict::test_support::{build_test_pe, mock_grub, mock_uki, MockCtx};
+    use bootconfig::{Bootconfig, GrubCmdline};
 
-    fn make_bootconfig(text: &str) -> Vec<u8> {
-        let text_bytes = text.as_bytes();
-        let size = text_bytes.len() as u32;
-        let checksum: u32 = text_bytes.iter().map(|&b| b as u32).sum();
-        let padding = (4 - (text_bytes.len() % 4)) % 4;
-        let mut data = text_bytes.to_vec();
-        data.extend(vec![0u8; padding]);
+    fn encoded_bootconfig_data(bootconfig: &str) -> Vec<u8> {
+        let mut data = bootconfig.as_bytes().to_vec();
+        data.push(0);
+        data.resize(data.len().next_multiple_of(4), 0);
+        let size = u32::try_from(data.len()).expect("bootconfig fits in u32");
+        let checksum = data.iter().map(|&byte| u32::from(byte)).sum::<u32>();
         data.extend(size.to_le_bytes());
         data.extend(checksum.to_le_bytes());
         data.extend(b"#BOOTCONFIG\n");
         data
     }
 
-    #[test_case("key=value", "key=value" ; "no_quotes_unchanged")]
-    #[test_case("simple", "simple" ; "no_equals_unchanged")]
-    #[test_case(r#"key="value""#, r#""key=value""# ; "simple_quoted_value")]
-    #[test_case(r#"key="value with spaces""#, r#""key=value with spaces""# ; "quoted_value_with_spaces")]
-    #[test_case(r#"foo=bar key="quoted value" baz=qux"#, r#"foo=bar "key=quoted value" baz=qux"# ; "mixed_quoted_and_unquoted")]
-    #[test_case(r#"dm-mod.create="root,,,ro,0 123 verity""#, r#""dm-mod.create=root,,,ro,0 123 verity""# ; "dm_mod_create_style")]
-    #[test_case(r#"a="1" b="2" c="3""#, r#""a=1" "b=2" "c=3""# ; "multiple_quoted_values")]
-    #[test_case(r#"first="val""#, r#""first=val""# ; "quoted_at_start")]
-    #[test_case("", "" ; "empty_string")]
-    fn test_repair_quotes(input: &str, expected: &str) {
-        assert_eq!(repair_quotes(input), expected);
-    }
-
-    #[test_case(
-        b"linux ($root)/vmlinuz console=tty0 -- systemd.log_target=journal",
-        "kernel.FOO = bar\n",
-        "FOO=bar BOOT_IMAGE=/vmlinuz console=tty0 -- systemd.log_target=journal"
-        ; "kernel_param_before_boot_image"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz quiet -- init=/sbin/init",
-        "init.BAZ = qux\n",
-        "BOOT_IMAGE=/vmlinuz quiet -- BAZ=qux init=/sbin/init"
-        ; "init_param_after_separator"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz console=tty0 -- systemd.log_color=0",
-        "kernel.A = 1\ninit.B = 2\n",
-        "A=1 BOOT_IMAGE=/vmlinuz console=tty0 -- B=2 systemd.log_color=0"
-        ; "both_kernel_and_init_params"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz quiet -- x",
-        "",
-        "BOOT_IMAGE=/vmlinuz quiet -- x"
-        ; "empty_bootconfig"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz -- x",
-        "kernel.A = 1\n",
-        "A=1 BOOT_IMAGE=/vmlinuz -- x"
-        ; "kernel_only_no_init_bootconfig"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz foo -- bar",
-        "init.X = y\n",
-        "BOOT_IMAGE=/vmlinuz foo -- X=y bar"
-        ; "init_only_no_kernel_bootconfig"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz dm-mod.create=\"root verity\" -- x",
-        "",
-        r#"BOOT_IMAGE=/vmlinuz "dm-mod.create=root verity" -- x"#
-        ; "grub_quoted_value_gets_repaired"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz -- x",
-        "kernel.MSG = \"hello world\"\n",
-        r#"MSG="hello world" BOOT_IMAGE=/vmlinuz -- x"#
-        ; "bootconfig_quoted_value_not_repaired"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz a=1 b=2 -- c=3 d=4",
-        "kernel.K = v\ninit.I = w\n",
-        "K=v BOOT_IMAGE=/vmlinuz a=1 b=2 -- I=w c=3 d=4"
-        ; "multiple_grub_args_both_sides"
-    )]
-    #[test_case(
-        b"linux ($root)/vmlinuz PARTUUID=/PARTNROFF=1 PARTUUID=/PARTNROFF=2 -- x",
-        "",
-        "BOOT_IMAGE=/vmlinuz PARTUUID=/PARTNROFF=1 PARTUUID=/PARTNROFF=2 -- x"
-        ; "multiple_partuuid_without_substitution"
-    )]
-    fn test_predict_cmdline(grub_cfg: &[u8], bootconfig_text: &str, expected: &str) {
-        let bootconfig = make_bootconfig(bootconfig_text);
-        let cmdline = predict_cmdline(grub_cfg, &bootconfig, None).unwrap();
-        assert_eq!(cmdline, expected);
-    }
-
-    #[test]
-    fn test_predict_cmdline_partuuid_substitution() {
-        let grub_cfg = b"linux ($root)/vmlinuz root=PARTUUID=/PARTNROFF=1 -- x";
-        let bootconfig = make_bootconfig("");
-        let cmdline = predict_cmdline(grub_cfg, &bootconfig, Some("abcd-1234")).unwrap();
-        assert_eq!(
-            cmdline,
-            "BOOT_IMAGE=/vmlinuz root=PARTUUID=abcd-1234/PARTNROFF=1 -- x"
-        );
-    }
-
-    #[test]
-    fn test_predict_cmdline_multiple_partuuid_substitution() {
-        let grub_cfg = b"linux ($root)/vmlinuz PARTUUID=/PARTNROFF=1 PARTUUID=/PARTNROFF=2 -- x";
-        let bootconfig = make_bootconfig("");
-        let cmdline = predict_cmdline(grub_cfg, &bootconfig, Some("uuid-here")).unwrap();
-        assert_eq!(cmdline, "BOOT_IMAGE=/vmlinuz PARTUUID=uuid-here/PARTNROFF=1 PARTUUID=uuid-here/PARTNROFF=2 -- x");
+    fn predict_grub(machine: u16, grub_cfg: &[u8], bootconfig: &str) -> PcrRecord {
+        let vmlinuz = build_test_pe(machine, &[(".text", b"kernel")]);
+        let grub_cmdline = GrubCmdline::parse(grub_cfg, "").unwrap();
+        let bootconfig = Bootconfig::decode(&encoded_bootconfig_data(bootconfig)).unwrap();
+        let m = MockCtx::with_boot(BootChain::Grub(Box::new(Grub {
+            vmlinuz: PeImage::parse(&vmlinuz).unwrap(),
+            cmdline: grub_cmdline,
+            bootconfig,
+            ..mock_grub()
+        })));
+        predict(&m.build(Platform::Aws)).unwrap().unwrap().1
     }
 
     #[test]
     fn test_predict_includes_trailing_newline() {
-        let grub_cfg = b"linux ($root)/vmlinuz -- x";
-        let bootconfig = make_bootconfig("");
-        use crate::predict::test_support::MockCtx;
-        let m = MockCtx::new();
-        let ctx = PcrContext::builder()
-            .platform(crate::platform::Platform::Aws)
-            .efi_vars(&m.efi_vars)
-            .partitions(&m.layout)
-            .grub_cfg(grub_cfg.as_slice())
-            .bootconfig(bootconfig.as_slice())
-            .build();
-        let result = predict(&ctx).unwrap().unwrap();
-        let cmdline_with_newline = "BOOT_IMAGE=/vmlinuz -- x\n";
-        let expected = extend_pcr_string(&PCR_INIT_VAL, cmdline_with_newline);
-        assert_eq!(result.1.sha256[0], hex::encode(expected));
+        let record = predict_grub(0x8664, b"linux ($root)/vmlinuz -- x", "");
+        let expected = extend_pcr_string(&PCR_INIT_VAL, "BOOT_IMAGE=/vmlinuz -- x\n");
+        assert_eq!(record, PcrRecord::new(expected));
     }
 
-    #[test_case(b"linux /wrong/path console=tty0 -- x" ; "wrong_kernel_path")]
-    #[test_case(b"linux (hd0,gpt3)/vmlinuz console=tty0 -- x" ; "explicit_device_in_path")]
-    fn test_predict_cmdline_errors(grub_cfg: &[u8]) {
-        let bootconfig = make_bootconfig("");
-        let result = predict_cmdline(grub_cfg, &bootconfig, None);
-        assert!(result.is_err());
+    #[test]
+    fn aarch64_first_measures_the_load_options_grub_sets() {
+        let record = predict_grub(
+            0xaa64,
+            b"linux ($root)/vmlinuz quiet -- x",
+            "kernel.A = 1\n",
+        );
+        let load_options: Vec<u8> = "BOOT_IMAGE=/vmlinuz quiet -- x"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let expected = extend_pcr_data(&PCR_INIT_VAL, &load_options);
+        let expected = extend_pcr_string(&expected, "A=1 BOOT_IMAGE=/vmlinuz quiet -- x\n");
+        assert_eq!(record, PcrRecord::new(expected));
+    }
+
+    #[test]
+    fn a_uki_measures_its_load_options_then_the_os_release_initrd() {
+        let uki = mock_uki(0x8664);
+        // The fixture's command line is "quiet", in UTF-16LE with a terminating NUL.
+        let expected = extend_pcr_data(&PCR_INIT_VAL, b"q\0u\0i\0e\0t\0\0\0");
+        let expected = extend_pcr_data(&expected, &stub_generated_uki_initrd(uki.osrel()).unwrap());
+        let m = MockCtx::with_boot(BootChain::Uki(uki));
+        let record = predict(&m.build(Platform::Aws)).unwrap().unwrap().1;
+        assert_eq!(record, PcrRecord::new(expected));
     }
 
     #[test]
     fn test_predict_skipped_for_ab() {
-        use crate::predict::test_support::MockCtx;
         let m = MockCtx::dual_bank();
-        let ctx = m.build(crate::platform::Platform::Aws);
-        assert!(predict(&ctx).unwrap().is_none());
+        assert!(predict(&m.build(Platform::Aws)).unwrap().is_none());
     }
 }
