@@ -7,12 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.27.0-rc1...HEAD
+
+## [0.27.0-rc1] - 2026-11-06
+
 ### Added
 
 * Sign kernel modules with a kit module-signing key: packages that set `module-signing = true` receive a key
-  that `buildsys with-signing-key` creates on tmpfs for each build and removes when the build ends
+  that `buildsys with-signing-key` creates on tmpfs for each build and removes when the build ends ([#764])
+* Add a `bootconfig` library, shared by `ukisys` and `pcrsys`, that parses binary and text bootconfig, parses
+  `grub.cfg`, and renders the kernel command line the way the kernel does ([#745])
+* Add `ukisys merge-bootconfig`, which formats bootconfig to keep only the last assignment of each bootconfig
+  key, so a later-numbered drop-in can override an earlier one in UKI images ([#745])
+* Add `ukisys cmdline`, which composes the command line embedded in a UKI from the image's bootconfig and its
+  base kernel and init arguments ([#745])
+* Predict PCRs for UKI images that the firmware boots directly, on AWS ([#745])
+* Predict the SHA-384 PCR bank alongside SHA-256; every `pcrsys` record now carries `sha256` and `sha384` ([#745])
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.26.0...HEAD
+### Changed
+
+* Build UKI kernel command lines from the image's own boot config drop-ins instead of hard-coded systemd and
+  FIPS tokens, so UKI and GRUB images share the same base kernel and init arguments ([#745])
+* Include in PCR 9 the LoadOptions that the kernel's EFI stub measures when GRUB boots on aarch64 ([#745])
+
+[#745]: https://github.com/bottlerocket-os/twoliter/pull/745
+[#764]: https://github.com/bottlerocket-os/twoliter/pull/764
+
+[0.27.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.26.0...v0.27.0-rc1
 
 ## [0.26.0] - 2026-10-09
 
