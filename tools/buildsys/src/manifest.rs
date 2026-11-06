@@ -80,6 +80,17 @@ naming.
 package-name = "better.name"
 ```
 
+`module-signing` signs the package's kernel modules with the kit module-signing key. A build
+in a workspace with any package that sets it creates one key, which exists only while the build
+runs. Each such package's `rpmbuild` gets the key as the BuildKit secret mounted at
+`/run/secrets/module-signing-key.pem`, with `%cross_sign_kernel_modules` set to 1 and
+`%_cross_module_signing_key` defined as that path; other packages get neither. The key is new for every build, so these packages, and every package
+that depends on them, rebuild every time.
+```ignore
+[package.metadata.build-package]
+module-signing = true
+```
+
 `releases-url` is ignored by buildsys, but can be used by packager maintainers
 to indicate a good URL for checking whether the software has had a new release.
 ```ignore
@@ -357,19 +368,7 @@ impl Manifest {
     /// Extract the settings we understand from `Cargo.toml` and construct a dependency graph.
     pub fn new(manifest: impl AsRef<Path>, cargo_metadata: impl AsRef<Path>) -> Result<Self> {
         let manifest_info = ManifestInfo::new(manifest)?;
-        let cargo_metadata = cargo_metadata.as_ref();
-        let cargo_metadata_json_contents =
-            fs::read_to_string(cargo_metadata).context(error::CargoMetadataReadSnafu {
-                path: &cargo_metadata,
-            })?;
-        let graph = CargoMetadata::parse_json(cargo_metadata_json_contents)
-            .context(error::CargoMetadataParseSnafu {
-                path: cargo_metadata,
-            })?
-            .build_graph()
-            .context(error::GraphBuildSnafu {
-                path: cargo_metadata,
-            })?;
+        let graph = load_graph(cargo_metadata.as_ref())?;
         Ok(Self {
             manifest_info,
             graph,
@@ -585,6 +584,13 @@ impl ManifestInfo {
     /// Convenience method to return the list of external files.
     pub fn external_files(&self) -> Option<&Vec<ExternalFile>> {
         self.build_package().and_then(|b| b.external_files.as_ref())
+    }
+
+    /// Convenience method to return whether the package sets `module-signing = true`.
+    pub fn module_signing(&self) -> bool {
+        self.build_package()
+            .and_then(|b| b.module_signing)
+            .unwrap_or(false)
     }
 
     /// Convenience method to return the package name. If the manifest has an override in the
@@ -899,6 +905,57 @@ fn find_id(name: &str, graph: &PackageGraph, manifest_type: BuildType) -> Option
     None
 }
 
+/// Read the `cargo metadata` output and construct the dependency graph.
+fn load_graph(cargo_metadata: &Path) -> Result<PackageGraph> {
+    let cargo_metadata_json_contents =
+        fs::read_to_string(cargo_metadata).context(error::CargoMetadataReadSnafu {
+            path: &cargo_metadata,
+        })?;
+    let graph = CargoMetadata::parse_json(cargo_metadata_json_contents)
+        .context(error::CargoMetadataParseSnafu {
+            path: cargo_metadata,
+        })?
+        .build_graph()
+        .context(error::GraphBuildSnafu {
+            path: cargo_metadata,
+        })?;
+    Ok(graph)
+}
+
+/// List the workspace packages that set `module-signing = true`, by buildsys package name.
+///
+/// This scans the whole workspace, not only the packages a build will include, so in a workspace
+/// with any opted-in package, every build creates a key, even one that builds no opted-in package.
+pub fn module_signing_packages(cargo_metadata: impl AsRef<Path>) -> Result<Vec<String>> {
+    let graph = load_graph(cargo_metadata.as_ref())?;
+    let mut packages = Vec::new();
+    for pkg_metadata in graph.workspace().iter() {
+        if is_manifest_type(&pkg_metadata, BuildType::Package)
+            && module_signing_flag(&pkg_metadata)?
+        {
+            packages.push(get_buildsys_package_name(&pkg_metadata));
+        }
+    }
+    packages.sort();
+    packages.dedup();
+    Ok(packages)
+}
+
+/// Read only `module-signing`, so a malformed field elsewhere in a package can't fail the query.
+fn module_signing_flag(pkg_metadata: &PackageMetadata) -> Result<bool> {
+    let value = pkg_metadata
+        .metadata_table()
+        .get("build-package")
+        .and_then(|build_package| build_package.get("module-signing"));
+    match value {
+        None => Ok(false),
+        Some(value) => Ok(value.as_bool().context(error::ModuleSigningNotBoolSnafu {
+            name: pkg_metadata.name(),
+            value: value.to_string(),
+        })?),
+    }
+}
+
 /// Lists include the "top-level manifest", i.e. the thing that `buildsys` is being asked to build.
 /// We do not want this, we want only a list of things that it depends on. Here we convert
 /// `PackageMetadata` objects to the `String` name, and filter out the "top-level manifest".
@@ -951,6 +1008,8 @@ pub struct BuildPackage {
     pub source_groups: Option<Vec<PathBuf>>,
     pub variant_sensitive: Option<VariantSensitivity>,
     pub package_features: Option<Vec<ImageFeature>>,
+    /// Sign this package's kernel modules with the kit module-signing key.
+    pub module_signing: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -2996,6 +3055,143 @@ middle-kit = {{ path = "../../kits/middle-kit" }}
             } else {
                 fs::copy(&from, &to).unwrap();
             }
+        }
+    }
+
+    /// Write a workspace whose members have the given `[package.metadata.build-package]`
+    /// bodies, and return the path of its `cargo metadata` output.
+    fn module_signing_workspace(temp_dir: &TempDir, packages: &[(&str, &str)]) -> PathBuf {
+        let root = temp_dir.path().join("ws");
+        let members: Vec<String> = packages.iter().map(|(n, _)| format!("\"{n}\"")).collect();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            format!(
+                "[workspace]\nresolver = \"2\"\nmembers = [{}]\n",
+                members.join(", ")
+            ),
+        )
+        .unwrap();
+        for (name, build_package) in packages {
+            let dir = root.join(name);
+            fs::create_dir_all(dir.join("src")).unwrap();
+            fs::write(dir.join("src").join("lib.rs"), "").unwrap();
+            fs::write(
+                dir.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+                    [package.metadata.build-package]\n{build_package}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let output = MetadataCommand::new()
+            .manifest_path(root.join("Cargo.toml"))
+            .current_dir(&root)
+            .other_options(["--offline"])
+            .cargo_command()
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "cargo metadata failed {output:?}");
+        let output_path = temp_dir.path().join("cargo_metadata.json");
+        fs::write(&output_path, output.stdout).unwrap();
+        output_path
+    }
+
+    #[test]
+    fn test_module_signing_packages_opted_in_returns_buildsys_names() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata = module_signing_workspace(
+            &temp_dir,
+            &[
+                (
+                    "kernel-6_18",
+                    "package-name = \"kernel-6.18\"\nmodule-signing = true",
+                ),
+                ("kmod-efa", "module-signing = true"),
+                ("signing-off", "module-signing = false"),
+                ("unrelated", ""),
+            ],
+        );
+        assert_eq!(
+            module_signing_packages(&metadata).unwrap(),
+            vec!["kernel-6.18".to_string(), "kmod-efa".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_module_signing_packages_no_opt_in_returns_empty() {
+        let temp_dir = TempDir::new().unwrap();
+        assert!(module_signing_packages(cargo_metadata_path(&temp_dir))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_module_signing_packages_non_bool_returns_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata =
+            module_signing_workspace(&temp_dir, &[("kmod-efa", "module-signing = \"yes\"")]);
+        let error = module_signing_packages(&metadata).unwrap_err().to_string();
+        assert!(error.contains("kmod-efa"), "{error}");
+    }
+
+    #[test]
+    fn test_module_signing_packages_unrelated_malformed_field_is_ignored() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata = module_signing_workspace(
+            &temp_dir,
+            &[
+                ("kmod-efa", "module-signing = true"),
+                ("broken", "source-groups = 5"),
+            ],
+        );
+        assert_eq!(
+            module_signing_packages(&metadata).unwrap(),
+            vec!["kmod-efa".to_string()]
+        );
+    }
+
+    /// A package manifest with the given `[package.metadata.build-package]` body.
+    fn build_package_manifest(build_package: &str) -> String {
+        format!(
+            "[package]\nname = \"kmod-efa\"\n\n[package.metadata.build-package]\n{build_package}\n"
+        )
+    }
+
+    #[test]
+    fn test_manifest_info_module_signing_unset_returns_false() {
+        let info = manifest_info_from_toml(&build_package_manifest(""));
+        assert!(!info.module_signing());
+    }
+
+    #[test]
+    fn test_manifest_info_module_signing_false_returns_false() {
+        let info = manifest_info_from_toml(&build_package_manifest("module-signing = false"));
+        assert!(!info.module_signing());
+    }
+
+    #[test]
+    fn test_manifest_info_module_signing_true_returns_true() {
+        let info = manifest_info_from_toml(&build_package_manifest("module-signing = true"));
+        assert!(info.module_signing());
+    }
+
+    #[test]
+    fn manifest_info_module_signing() {
+        let temp_dir = TempDir::new().unwrap();
+        for (body, expected) in [
+            ("module-signing = true", true),
+            ("module-signing = false", false),
+            ("", false),
+        ] {
+            let path = temp_dir.path().join("Cargo.toml");
+            fs::write(
+                &path,
+                format!("[package]\nname = \"p\"\n\n[package.metadata.build-package]\n{body}\n"),
+            )
+            .unwrap();
+            assert_eq!(ManifestInfo::new(&path).unwrap().module_signing(), expected);
         }
     }
 }

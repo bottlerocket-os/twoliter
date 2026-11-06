@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+* Sign kernel modules with a kit module-signing key: packages that set `module-signing = true` receive a key
+  that `buildsys with-signing-key` creates on tmpfs for each build and removes when the build ends
+
 [unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.26.0...HEAD
 
 ## [0.26.0] - 2026-10-09

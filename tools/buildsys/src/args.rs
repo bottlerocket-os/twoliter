@@ -8,6 +8,7 @@ of its input arguments from environment variables.
 use buildsys::manifest::SupportedArch;
 use buildsys::BuildType;
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use url::Url;
 
@@ -47,6 +48,7 @@ pub(crate) enum Command {
     BuildVariant(Box<BuildVariantArgs>),
     RepackVariant(Box<RepackVariantArgs>),
     VariantImageFormat(Box<VariantImageFormatArgs>),
+    WithSigningKey(Box<WithSigningKeyArgs>),
 }
 
 impl Command {
@@ -59,6 +61,10 @@ impl Command {
             // `variant-image-format` is a read-only query, so it has no `BuildType`
             Command::VariantImageFormat(_) => {
                 unreachable!("variant-image-format does not have a build type")
+            }
+            // `with-signing-key` wraps a build, so it has no `BuildType`
+            Command::WithSigningKey(_) => {
+                unreachable!("with-signing-key does not have a build type")
             }
         }
     }
@@ -126,6 +132,10 @@ pub(crate) struct BuildPackageArgs {
 
     #[arg(long, env = "BUILDSYS_UPSTREAM_SOURCE_FALLBACK")]
     pub(crate) upstream_source_fallback: String,
+
+    /// Kit module-signing key, set by `buildsys with-signing-key`.
+    #[arg(long, env = "BUILDSYS_MODULE_SIGNING_KEY")]
+    pub(crate) module_signing_key: Option<PathBuf>,
 
     #[command(flatten)]
     pub(crate) common: Common,
@@ -224,6 +234,24 @@ pub(crate) struct VariantImageFormatArgs {
     /// Path to the variant's `Cargo.toml` manifest.
     #[arg(long)]
     pub(crate) variant_manifest: PathBuf,
+}
+
+/// Run a command with a kit module-signing key that exists only while the command runs.
+///
+/// If no workspace package sets `module-signing = true`, the command runs unchanged and no key
+/// is created.
+#[derive(Debug, Parser)]
+pub(crate) struct WithSigningKeyArgs {
+    #[arg(long, env = "BUILDSYS_CARGO_METADATA_PATH")]
+    pub(crate) cargo_metadata_path: PathBuf,
+
+    /// SDK image used to generate the key.
+    #[arg(long, env = "TLPRIVATE_SDK_IMAGE")]
+    pub(crate) sdk_image: String,
+
+    /// The command to run, after `--`.
+    #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(crate) command: Vec<OsString>,
 }
 
 /// Returns the environment variables that need to be watched for a given `[BuildType]`.

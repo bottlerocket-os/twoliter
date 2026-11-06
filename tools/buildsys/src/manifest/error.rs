@@ -47,6 +47,12 @@ pub(super) enum Error {
     ))]
     RootDependencyMissing { name: String },
 
+    #[snafu(display(
+        "Package '{name}' sets package.metadata.build-package.module-signing to {value}, \
+        but it must be true or false"
+    ))]
+    ModuleSigningNotBool { name: String, value: String },
+
     #[snafu(display("{context} is incompatible with: {reason}"))]
     IncompatibleImageFeatures {
         context: &'static str,

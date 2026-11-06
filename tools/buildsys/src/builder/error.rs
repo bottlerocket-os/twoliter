@@ -19,6 +19,12 @@ pub(crate) enum Error {
     #[snafu(display("Failed to start command: {}", source))]
     CommandStart { source: std::io::Error },
 
+    #[snafu(display(
+        "Package '{package}' sets module-signing = true, but BUILDSYS_MODULE_SIGNING_KEY is \
+        not set. Build it through a Twoliter build task, which creates the key"
+    ))]
+    ModuleSigningKeyMissing { package: String },
+
     #[snafu(display("Failed to execute command: 'docker {}'", args))]
     DockerExecution { args: String },
 
