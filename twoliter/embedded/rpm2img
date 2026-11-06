@@ -612,6 +612,7 @@ else
     -O ^has_journal -O ^resize_inode -O sparse_super2 \
     -b "${VERITY_DATA_BLOCK_SIZE}" -d "${ROOT_MOUNT}" "${ROOT_IMAGE}" "${partsize["ROOT-A"]}M"
   echo "${ROOT_LABELS}" | debugfs -w -f - "${ROOT_IMAGE}"
+  ext4_set_signed_dir_hash "${ROOT_IMAGE}" "${ROOT_MOUNT}"
   resize2fs -M "${ROOT_IMAGE}"
 fi
 dd if="${ROOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["ROOT-A"]}"
@@ -789,11 +790,13 @@ if [[ "${UKI_IMAGE}" == "no" ]]; then
     "${SELINUX_FILE_CONTEXTS}" "${BOOT_MOUNT}" |
     awk -v root="${BOOT_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_set", $1, "security.selinux", $4}')
   clamp_mtimes_to_build_id "${BOOT_MOUNT}"
+  # `no_copy_xattrs` keeps out the build host's SELinux labels.
   mkfs.ext4 -O ^has_journal \
     -U "$(derive_uuid boot-ext4)" \
-    -E "hash_seed=$(ext4_hash_seed boot-ext4)" \
+    -E "hash_seed=$(ext4_hash_seed boot-ext4),no_copy_xattrs" \
     -d "${BOOT_MOUNT}" "${BOOT_IMAGE}" "${partsize["BOOT-A"]}M"
   echo "${BOOT_LABELS}" | debugfs -w -f - "${BOOT_IMAGE}"
+  ext4_set_signed_dir_hash "${BOOT_IMAGE}" "${BOOT_MOUNT}"
   resize2fs -M "${BOOT_IMAGE}"
   dd if="${BOOT_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff["BOOT-A"]}"
 
@@ -819,11 +822,13 @@ if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   # - adjust the inode ratio since we expect lots of small files
   # - retain the inode size to allow most settings to be stored inline
   # - retain the block size to handle worse-case alignment for hardware
+  # - drop the build host's SELinux labels with `no_copy_xattrs`
   clamp_mtimes_to_build_id "${PRIVATE_MOUNT}"
   mkfs.ext4 -b 4096 -i 4096 -I 256 \
     -U "$(derive_uuid private-ext4)" \
-    -E "hash_seed=$(ext4_hash_seed private-ext4)" \
+    -E "hash_seed=$(ext4_hash_seed private-ext4),no_copy_xattrs" \
     -d "${PRIVATE_MOUNT}" "${PRIVATE_IMAGE}" "${partsize[PRIVATE]}M"
+  ext4_set_signed_dir_hash "${PRIVATE_IMAGE}" "${PRIVATE_MOUNT}"
   dd if="${PRIVATE_IMAGE}" of="${OS_IMAGE}" conv=notrunc bs=1M seek="${partoff[PRIVATE]}"
 fi
 
@@ -843,10 +848,8 @@ fi
 if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   # If we build on a host with SELinux enabled, we could end up with labels that
   # do not match our policy. Since we allow replacing the data volume at runtime,
-  # we can't count on these labels being correct in any case, and it's better to
-  # remove them all.
-  UNLABELED=$(find "${DATA_MOUNT}" |
-    awk -v root="${DATA_MOUNT}" '{gsub(root"/","/"); gsub(root,"/"); print "ea_rm", $1, "security.selinux"}')
+  # we can't count on these labels being correct in any case, so the ext4 DATA
+  # filesystem is created without them.
 
   # Decide which data filesystem to create at build time based on layout.
   #
@@ -868,11 +871,11 @@ if [[ "${STANDALONE_IMAGE}" == "no" ]]; then
   case "${PARTITION_PLAN}" in
   unified)
     "${mkfs_data_fn}" "${OS_IMAGE}" "${partsize["DATA-A"]}M" "${partoff["DATA-A"]}" \
-      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
+      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}"
     ;;
   split)
     "${mkfs_data_fn}" "${DATA_IMAGE}" "${partsize["DATA-B"]}M" "${partoff["DATA-B"]}" \
-      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}" "${UNLABELED}"
+      "${BOTTLEROCKET_DATA}" "${DATA_MOUNT}"
     ;;
   *)
     echo "unexpected partition plan '${PARTITION_PLAN}'" >&2

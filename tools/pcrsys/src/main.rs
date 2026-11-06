@@ -3,29 +3,17 @@
 //! Predicts TPM Platform Configuration Register (PCR) values based on
 //! boot components, EFI variables, and GPT partition tables.
 
-mod aws;
-mod diskfs;
-mod efi;
-mod error;
-mod gpt;
-mod parsers;
-mod pcrs;
-mod pe;
-mod platform;
-mod predict;
-
-use aws_config::profile::ProfileFileCredentialsProvider;
-use aws_types::region::Region;
-use aws_types::SdkConfig;
 use clap::{Parser, Subcommand};
 use coldsnap::SnapshotDownloader;
 use snafu::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::error::Result;
-use crate::platform::Platform;
-use crate::predict::{PcrContext, PcrPredictions};
+use pcrsys::aws::build_client_config;
+use pcrsys::error::Result;
+use pcrsys::platform::Platform;
+use pcrsys::predict::{PcrContext, PcrPredictions};
+use pcrsys::{aws, diskfs, efi, gpt, pcrs};
 
 /// Command-line arguments for pcrsys.
 #[derive(Parser)]
@@ -138,30 +126,6 @@ async fn run_ami(ami_id: &str, region: Option<&String>, profile: Option<&String>
     println!("{json}");
 
     Ok(())
-}
-
-/// Build AWS SDK config, handling region and profile options like coldsnap.
-async fn build_client_config(region: Option<&String>, profile: Option<&String>) -> SdkConfig {
-    let config = match (region, profile) {
-        (Some(r), _) => aws_config::from_env().region(Region::new(r.clone())),
-        (None, Some(p)) => aws_config::from_env().region(
-            aws_config::profile::ProfileFileRegionProvider::builder()
-                .profile_name(p)
-                .build(),
-        ),
-        (None, None) => aws_config::from_env(),
-    };
-
-    let config = match profile {
-        Some(p) => config.credentials_provider(
-            ProfileFileCredentialsProvider::builder()
-                .profile_name(p)
-                .build(),
-        ),
-        None => config,
-    };
-
-    config.load().await
 }
 
 /// Run PCR prediction using EFI variables and a disk image file.

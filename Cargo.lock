@@ -3916,6 +3916,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "reprosys"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-ebs",
+ "aws-sdk-ec2",
+ "aws-sdk-sts",
+ "clap",
+ "coldsnap",
+ "crc",
+ "ext4-view",
+ "fatfs",
+ "flate2",
+ "gptman",
+ "hex",
+ "hmac",
+ "libc",
+ "lzma-rs",
+ "pcrsys",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "snafu 0.8.9",
+ "tempfile",
+ "tokio",
+ "zstd",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5164,6 +5194,7 @@ dependencies = [
  "twoliter-tool-pipesys",
  "twoliter-tool-pubsys",
  "twoliter-tool-pubsys-setup",
+ "twoliter-tool-reprosys",
  "twoliter-tool-tuftool",
  "twoliter-tool-ukisys",
  "twoliter-tool-unplug",
@@ -5235,6 +5266,14 @@ version = "0.1.0"
 dependencies = [
  "include-env-compressed",
  "pubsys-setup",
+]
+
+[[package]]
+name = "twoliter-tool-reprosys"
+version = "0.1.0"
+dependencies = [
+ "include-env-compressed",
+ "reprosys",
 ]
 
 [[package]]
