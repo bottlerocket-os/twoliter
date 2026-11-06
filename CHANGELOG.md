@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.27.0-rc1...HEAD
+[unreleased]: https://github.com/bottlerocket-os/twoliter/compare/v0.27.0...HEAD
 
-## [0.27.0-rc1] - 2026-11-06
+## [0.27.0] - 2026-11-06
 
 ### Added
 
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#745]: https://github.com/bottlerocket-os/twoliter/pull/745
 [#764]: https://github.com/bottlerocket-os/twoliter/pull/764
 
-[0.27.0-rc1]: https://github.com/bottlerocket-os/twoliter/compare/v0.26.0...v0.27.0-rc1
+[0.27.0]: https://github.com/bottlerocket-os/twoliter/compare/v0.26.0...v0.27.0
 
 ## [0.26.0] - 2026-10-09
 
