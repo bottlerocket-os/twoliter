@@ -56,7 +56,7 @@ fn twoliter_make(
 async fn test_twoliter_build_variant() {
     let bob_src = create_test_project().await;
     let project_path = bob_src.path().join("Twoliter.toml");
-    let arch = "x86_64";
+    let arch = std::env::consts::ARCH;
     let variant = "aws-ecs-2";
 
     // Update
@@ -97,7 +97,7 @@ async fn test_twoliter_build_variant() {
 async fn test_twoliter_repack_variant() {
     let bob_src = create_test_project().await;
     let project_path = bob_src.path().join("Twoliter.toml");
-    let arch = "x86_64";
+    let arch = std::env::consts::ARCH;
     let variant = "aws-ecs-2";
 
     // Update
