@@ -56,7 +56,7 @@ impl RegionReport {
     }
 
     /// Whether this region fails verification, as every mismatch does.
-    fn failed(&self) -> bool {
+    pub fn failed(&self) -> bool {
         self.status == Status::Mismatch
     }
 
