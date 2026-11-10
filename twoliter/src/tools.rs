@@ -76,6 +76,12 @@ pub(crate) async fn install_tools(tools_dir: impl AsRef<Path>) -> Result<()> {
             mtime,
         ),
         write_bin("pubsys", twoliter_tool_pubsys::PUBSYS.reader(), &dir, mtime),
+        write_bin(
+            "reprosys",
+            twoliter_tool_reprosys::REPROSYS.reader(),
+            &dir,
+            mtime,
+        ),
     ];
 
     try_join_all(write_tasks).await?;
@@ -172,6 +178,7 @@ async fn test_install_tools() {
     assert!(toolsdir.join("eif-builder").is_file());
     assert!(toolsdir.join("pubsys").is_file());
     assert!(toolsdir.join("pubsys-setup").is_file());
+    assert!(toolsdir.join("reprosys").is_file());
     assert!(toolsdir.join("tuftool").is_file());
     assert!(toolsdir.join("ukisys").is_file());
     assert!(toolsdir.join("unplug").is_file());
