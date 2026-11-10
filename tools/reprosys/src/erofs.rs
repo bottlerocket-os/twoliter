@@ -4,8 +4,10 @@
 //! supported.
 
 use crate::error::Result;
+use crate::eventlog;
 use crate::fsfiles::{self, display, Entry, FileTree, FsPath, Kind, Xattrs};
 use regex::bytes::Regex;
+use serde_json::json;
 use snafu::{ensure_whatever, OptionExt, ResultExt};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -528,6 +530,13 @@ impl FileTree for ErofsTree {
             fsfiles::insert_unique(&mut entries, fs_path, (path, entry))?;
         }
 
+        eventlog::event(
+            "erofs-listing",
+            json!({
+                "image": self.image,
+                "entries": entries.len(),
+            }),
+        );
         Ok(entries)
     }
 
