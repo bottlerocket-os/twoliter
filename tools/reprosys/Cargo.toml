@@ -10,8 +10,10 @@ aws-config.workspace = true
 aws-sdk-ebs.workspace = true
 aws-sdk-ec2.workspace = true
 aws-sdk-sts.workspace = true
+bootconfig.workspace = true
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
+ext4-view.workspace = true
 gptman.workspace = true
 hex.workspace = true
 pcrsys.workspace = true
