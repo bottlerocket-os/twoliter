@@ -22,3 +22,6 @@ sha2.workspace = true
 snafu.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
+
+[dev-dependencies]
+libc.workspace = true

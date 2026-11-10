@@ -3935,6 +3935,7 @@ dependencies = [
  "coldsnap",
  "gptman",
  "hex",
+ "libc",
  "pcrsys",
  "regex",
  "serde",
