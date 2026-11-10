@@ -149,6 +149,26 @@ ext4_hash_seed() {
   derive_uuid "${1:?}"
 }
 
+# Mark an ext4 image's directory hashes as signed, so it does not depend on the
+# build host's `char` signedness. Fails if <dir>, the tree the image was built
+# from, has names with bytes of 0x80 and above, whose hashes would differ.
+#
+# Usage: ext4_set_signed_dir_hash <image> <dir>
+ext4_set_signed_dir_hash() {
+  local image dir non_ascii
+  image="${1:?}"
+  dir="${2:?}"
+  # Not `find | grep -q`: under pipefail, find's SIGPIPE when grep exits early
+  # would make a match look like no match.
+  non_ascii="$(LC_ALL=C find "${dir}" -mindepth 1 -name $'*[\x80-\xff]*' -print -quit)"
+  if [[ -n "${non_ascii}" ]]; then
+    echo "ext4_set_signed_dir_hash: '${dir}' has names with non-ASCII bytes, whose directory hashes depend on the build host" >&2
+    return 1
+  fi
+  # EXT2_FLAGS_SIGNED_HASH; mke2fs sets no other superblock flags.
+  echo "ssv flags 1" | debugfs -w -f - "${image}"
+}
+
 # Clamp file mtimes under <dir> to BUILD_ID_TIMESTAMP when they are newer, so
 # that filesystems built with `mkfs.ext4 -d` / `mkfs.erofs <dir>` embed stable
 # per-inode mtimes. Mirrors reproducible-builds.org's "clamp to
@@ -465,31 +485,30 @@ x86_64-objdumpcopy() {
 }
 
 mkfs_data_ext4() {
-  local target size offset bottlerocket_data data_mount unlabeled fs_uuid hash_seed
+  local target size offset bottlerocket_data data_mount fs_uuid hash_seed
   target="${1:?}"
   size="${2:?}"
   offset="${3:?}"
   bottlerocket_data="${4:?}"
   data_mount="${5:?}"
-  unlabeled="${6:?}"
   echo "writing ext4 filesystem for DATA"
   fs_uuid="$(derive_uuid data-ext4)"
   hash_seed="$(ext4_hash_seed data-ext4)"
   clamp_mtimes_to_build_id "${data_mount}"
-  mkfs.ext4 -m 0 -U "${fs_uuid}" -E "hash_seed=${hash_seed}" \
+  # `no_copy_xattrs` keeps out the build host's SELinux labels.
+  mkfs.ext4 -m 0 -U "${fs_uuid}" -E "hash_seed=${hash_seed},no_copy_xattrs" \
     -d "${data_mount}" "${bottlerocket_data}" "${size}"
-  echo "${unlabeled}" | debugfs -w -f - "${bottlerocket_data}"
+  ext4_set_signed_dir_hash "${bottlerocket_data}" "${data_mount}"
   dd if="${bottlerocket_data}" of="${target}" conv=notrunc bs=1M seek="${offset}"
 }
 
 mkfs_data_xfs() {
-  local target size offset bottlerocket_data data_mount unlabeled
+  local target size offset bottlerocket_data data_mount
   target="${1:?}"
   size="${2:?}"
   offset="${3:?}"
   bottlerocket_data="${4:?}"
   data_mount="${5:?}"
-  unlabeled="${6:?}"
   echo "writing blank partition for DATA"
   # Create a file to write the filesystem to first
   dd if=/dev/zero of="${bottlerocket_data}" bs=1M count="${size%?}"
