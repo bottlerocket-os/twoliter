@@ -3,9 +3,11 @@
 use crate::disk::{self, DiskLayout, Partition, RangeHash};
 use crate::erofs::{self, ErofsTree};
 use crate::error::Result;
+use crate::eventlog;
 use crate::fsfiles::{self, FileReport, Rules, Status};
 use crate::verity;
 use serde::Serialize;
+use serde_json::json;
 use sha2_0_11::{Digest, Sha256};
 use snafu::{ensure_whatever, ResultExt};
 use std::collections::BTreeSet;
@@ -68,6 +70,7 @@ impl RegionReport {
 
     /// A region whose bytes differ but whose files could not be read.
     fn unreadable(&mut self, e: impl std::fmt::Display) {
+        eventlog::error(&e);
         self.detail = format!("contents differ and files could not be read: {e}");
     }
 
@@ -153,6 +156,14 @@ const NOTES: &[&str] = &[
     "The B partitions and the RESERVED partitions are unused: they must match the rebuilt ones \
      and be all zero in the published image, as must any published bytes beyond the end of the \
      rebuilt image (PADDING).",
+    "PRIVATE must match byte for byte. When it differs, its files are compared to explain the \
+     difference, but it fails verification whatever they show. Images whose source pins a \
+     twoliter older than the first release whose ext4 partitions do not depend on the build \
+     host have two known causes of such a difference: a build host with SELinux enabled, \
+     whose labels on the source files (security.selinux) mke2fs copies into PRIVATE, and an \
+     aarch64 build host, whose unsigned char mke2fs records in the directory hash flags of the \
+     superblocks. Both also change an ext4 DATA partition. Verify such images from an x86_64 \
+     host with SELinux disabled.",
 ];
 
 struct Images {
@@ -179,15 +190,26 @@ impl Images {
         })
     }
 
-    /// An empty report on these images.
-    fn report(&self) -> ImageReport {
-        ImageReport {
+    /// An empty report on these images, which are of `kind` (`os` or `data`).
+    fn report(&self, kind: &str) -> ImageReport {
+        let report = ImageReport {
             expected: Some(self.expected_path.clone()),
             actual: Some(self.actual_path.clone()),
             expected_len: self.expected_len,
             actual_len: self.actual_len,
             regions: Vec::new(),
-        }
+        };
+        eventlog::event(
+            "image",
+            json!({
+                "image": kind,
+                "rebuilt": self.expected_path,
+                "published": self.actual_path,
+                "rebuilt_len": self.expected_len,
+                "published_len": self.actual_len,
+            }),
+        );
+        report
     }
 
     /// The published bytes beyond the end of the rebuilt image, which must be zero.
@@ -241,7 +263,7 @@ fn assess_region(
 /// Compare partition-by-partition two images that share a GPT layout.
 pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
     let mut images = Images::open(expected, actual)?;
-    let mut report = images.report();
+    let mut report = images.report("os");
     let (expected_len, actual_len) = (images.expected_len, images.actual_len);
     if actual_len < expected_len {
         report.regions.push(RegionReport::mismatch(
@@ -254,6 +276,19 @@ pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
     }
 
     let layout = DiskLayout::read(&mut images.expected)?;
+    eventlog::event(
+        "layout",
+        json!({
+            "primary_gpt_end": layout.primary_gpt_end,
+            "backup_gpt": layout.backup_gpt,
+            "partitions": layout.partitions.iter().map(|p| json!({
+                "name": p.name,
+                "offset": p.offset,
+                "len": p.len,
+            })).collect::<Vec<_>>(),
+            "unallocated": layout.unallocated(expected_len),
+        }),
+    );
     let gpt_ranges = layout.gpt_ranges();
     let (e, a) = images.hash(&gpt_ranges)?;
     let mut gpt = assess_region("GPT", &gpt_ranges, Some(&e), &a);
@@ -299,6 +334,7 @@ pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
                 } else {
                     fsfiles::ext4_files(exp).and_then(|e| Ok((e, fsfiles::ext4_files(act)?)))
                 };
+                let _scope = eventlog::region(&p.name);
                 match files {
                     Ok((exp, act)) => {
                         if p.name == boot_source.partition() {
@@ -310,7 +346,7 @@ pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
                     }
                     // A partition that differs must be compared to be accepted.
                     Err(e) if r.status != Status::Match => r.unreadable(e),
-                    Err(_) => {}
+                    Err(e) => eventlog::error(e),
                 }
             }
             n if must_be_zero(n) => r.require_zero(&a),
@@ -321,7 +357,26 @@ pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
 
     // Uses boot_config, read from BOOT-A or EFI-A above.
     if layout.find("HASH-A").is_some() {
-        let result = check_boot_config(&boot_config);
+        let result = {
+            let _scope = eventlog::region("BOOT-CONFIG");
+            let result = check_boot_config(&boot_config);
+            if let Err(e) = &result {
+                let text = |d: &BootConfigData| {
+                    d.as_ref()
+                        .ok()
+                        .map(|d| String::from_utf8_lossy(d).into_owned())
+                };
+                eventlog::event(
+                    "error",
+                    json!({
+                        "error": e.to_string(),
+                        "rebuilt": text(&boot_config.rebuilt),
+                        "published": text(&boot_config.published),
+                    }),
+                );
+            }
+            result
+        };
         report.regions.push(boot_config_region(
             layout.find(boot_source.partition()),
             &boot_config,
@@ -342,6 +397,7 @@ pub fn compare_os(expected: &Path, actual: &Path) -> Result<ImageReport> {
 /// any other ROOT-A that differs fails.
 fn compare_root(images: &Images, p: &Partition, r: &mut RegionReport) -> Result<()> {
     let fs_name = |erofs: bool| if erofs { "erofs" } else { "not erofs" };
+    let _scope = eventlog::region(&p.name);
     let expected_erofs = erofs::is_erofs(&images.expected, p.offset)?;
     let actual_erofs = erofs::is_erofs(&images.actual, p.offset)?;
     if !(expected_erofs && actual_erofs) {
@@ -436,6 +492,7 @@ fn bootconfig_diff(expected: &[u8], actual: &[u8]) -> String {
 /// Explain how PRIVATE differs from the rebuilt one by comparing their files.
 /// PRIVATE must match byte for byte, so it fails whatever they show.
 fn explain_private(images: &mut Images, p: &Partition, r: &mut RegionReport) {
+    let _scope = eventlog::region(&p.name);
     let result = (|| -> Result<_> {
         let (e, a) = images.read(p)?;
         let (e, a) = (fsfiles::ext4_files(e)?, fsfiles::ext4_files(a)?);
@@ -666,7 +723,7 @@ fn boot_config_region(
 /// Compare the data image over the rebuilt image's length, and check that the rest is zero.
 pub fn compare_data(expected: &Path, actual: &Path) -> Result<ImageReport> {
     let mut images = Images::open(expected, actual)?;
-    let mut report = images.report();
+    let mut report = images.report("data");
     let (expected_len, actual_len) = (images.expected_len, images.actual_len);
     let common = [(0, expected_len.min(actual_len))];
     let (e, a) = images.hash(&common)?;
@@ -709,6 +766,35 @@ fn missing_data(expected: Option<&Path>, actual: Option<&Path>) -> Result<ImageR
     })
 }
 
+/// The outcome of a region, as logged; its files are logged one by one.
+#[derive(Serialize)]
+struct RegionResult<'a> {
+    image: &'a str,
+    listed_files: usize,
+    #[serde(flatten)]
+    region: RegionReport,
+}
+
+/// Log the outcome of every region of `report`.
+fn log_results(image: &str, report: &ImageReport) {
+    for r in &report.regions {
+        let _scope = eventlog::region(&r.name);
+        let region = RegionReport {
+            files: Vec::new(),
+            ..r.clone()
+        };
+        let listed_files = r.files.len();
+        eventlog::event(
+            "result",
+            RegionResult {
+                image,
+                listed_files,
+                region,
+            },
+        );
+    }
+}
+
 /// Compare the OS image and the data images.
 pub fn compare(
     expected: &Path,
@@ -717,12 +803,32 @@ pub fn compare(
     actual_data: Option<&Path>,
 ) -> Result<Report> {
     let os = compare_os(expected, actual)?;
+    log_results("os", &os);
     let data = match (expected_data, actual_data) {
         (Some(e), Some(a)) => Some(compare_data(e, a)?),
         (None, None) => None,
         (e, a) => Some(missing_data(e, a)?),
     };
+    if let Some(data) = &data {
+        log_results("data", data);
+    }
     let failed = os.failed() || data.as_ref().is_some_and(ImageReport::failed);
+    let failed_regions: Vec<String> = std::iter::once(("os", &os))
+        .chain(data.as_ref().map(|d| ("data", d)))
+        .flat_map(|(image, r)| {
+            r.regions
+                .iter()
+                .filter(|r| r.failed())
+                .map(move |r| format!("{image}/{}", r.name))
+        })
+        .collect();
+    eventlog::event(
+        "verdict",
+        json!({
+            "verdict": if failed { Verdict::Failed } else { Verdict::Verified },
+            "failed_regions": failed_regions,
+        }),
+    );
     Ok(Report {
         verdict: if failed {
             Verdict::Failed

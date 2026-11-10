@@ -172,6 +172,8 @@ impl VerifyAmi {
             .context("Unable to determine the build that produced the AMI")?;
         let info: AmiInfo = serde_json::from_slice(&resolved)
             .context("Unable to parse 'reprosys resolve' output")?;
+        let ami_info_path = work_dir.join("ami.json");
+        fs::write(&ami_info_path, &resolved).await?;
         info!(
             "AMI {} ('{}') is {} {} version {} built from commit {}",
             self.ami_id, info.ami_name, info.variant, info.arch, info.version, info.build_id
@@ -258,6 +260,7 @@ impl VerifyAmi {
         let (downloaded, built) = (downloaded?, built?);
 
         let report_path = work_dir.join("report.json");
+        let log_path = work_dir.join("log.jsonl");
         let mut compare = self.reprosys(&reprosys, "compare");
         compare
             .arg("--expected")
@@ -265,7 +268,14 @@ impl VerifyAmi {
             .arg("--actual")
             .arg(&downloaded.root_image)
             .arg("--report")
-            .arg(&report_path);
+            .arg(&report_path)
+            .arg("--log")
+            .arg(&log_path)
+            .arg("--ami-info")
+            .arg(&ami_info_path)
+            .args(["--twoliter-version", env!("CARGO_PKG_VERSION")])
+            .arg("--source-dir")
+            .arg(&source_dir);
         // reprosys fails verification when only one side has a data image.
         if let Some(expected) = &built.data_image {
             compare.arg("--expected-data").arg(expected);
@@ -280,6 +290,7 @@ impl VerifyAmi {
             .context("Unable to parse the comparison report")?;
         println!("Verification result: {}", report.verdict);
         println!("Report:    {}", report_path.display());
+        println!("Log:       {}", log_path.display());
         if let Some(build_log) = &build_log {
             println!("Build log: {}", build_log.display());
         }
