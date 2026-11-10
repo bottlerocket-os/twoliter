@@ -39,7 +39,7 @@ async fn find_latest_version(repository: &str) -> String {
         // Pretend to be curl
         .header("User-Agent", "twoliter-ci");
     // Check if we have a GITHUB_TOKEN
-    if let Some(token) = env::var("GITHUB_TOKEN").ok() {
+    if let Ok(token) = env::var("GITHUB_TOKEN") {
         request = request.bearer_auth(token);
     }
     let response = request

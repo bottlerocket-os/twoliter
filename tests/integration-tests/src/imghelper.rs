@@ -17,7 +17,7 @@ fn test_sanity_checks(sbom_arg: Option<&str>, expect_success: bool) {
     std::fs::write(&ovf_template, "dummy ovf content").unwrap();
 
     let imghelper = imghelper_path();
-    let mut script = format!(
+    let script = format!(
         r#"
         source "{}"
         sanity_checks "raw" "split" "{}" "no" {}
