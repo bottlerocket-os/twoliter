@@ -7,6 +7,7 @@ mod download;
 mod erofs;
 mod error;
 mod fsfiles;
+mod pe;
 mod verity;
 
 use crate::error::Result;

@@ -14,13 +14,16 @@ bootconfig.workspace = true
 clap = { workspace = true, features = ["derive"] }
 coldsnap = { workspace = true, features = ["aws-sdk-rust-rustls"] }
 ext4-view.workspace = true
+fatfs.workspace = true
 gptman.workspace = true
 hex.workspace = true
+hmac.workspace = true
+object.workspace = true
 pcrsys.workspace = true
 regex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sha2.workspace = true
+sha2_0_11.workspace = true
 snafu.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
