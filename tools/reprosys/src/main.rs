@@ -9,6 +9,7 @@ mod error;
 mod eventlog;
 mod fsfiles;
 mod pe;
+mod summary;
 mod verity;
 
 use crate::error::Result;
@@ -98,9 +99,17 @@ struct CompareArgs {
     #[arg(long)]
     log: Option<PathBuf>,
 
-    /// The AMI's description, as printed by `resolve`, for the log
+    /// The AMI's description, as printed by `resolve`, for the summary and the log
     #[arg(long)]
     ami_info: Option<PathBuf>,
+
+    /// Print a summary of the report instead of the report
+    #[arg(long, requires = "ami_info")]
+    summary: bool,
+
+    /// List every differing file, full hashes and the notes in the summary
+    #[arg(long)]
+    verbose: bool,
 
     /// The twoliter version that rebuilt the image, for the log
     #[arg(long)]
@@ -197,7 +206,13 @@ fn compare(args: CompareArgs) -> Result<ExitCode> {
     let closed = eventlog::close();
     let result = result?;
     closed?;
-    let json = print_json(&result)?;
+    let json = match &info {
+        Some(info) if args.summary => {
+            print!("{}", summary::summary(&result, info, args.verbose));
+            serde_json::to_string_pretty(&result).whatever_context("failed to serialize report")?
+        }
+        _ => print_json(&result)?,
+    };
     if let Some(path) = args.report {
         std::fs::write(&path, json)
             .whatever_context(format!("failed to write {}", path.display()))?;

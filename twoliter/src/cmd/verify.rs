@@ -99,7 +99,8 @@ pub(crate) struct VerifyAmi {
     #[clap(long)]
     pub(crate) keep: bool,
 
-    /// Show the build output instead of writing it to `build.log` in the work directory.
+    /// Show the build output instead of writing it to `build.log` in the work directory, and list
+    /// every differing file, full hashes and an explanation of each check in the summary.
     #[clap(long)]
     pub(crate) verbose: bool,
 }
@@ -122,11 +123,6 @@ struct AmiInfo {
 struct Downloaded {
     root_image: PathBuf,
     data_image: Option<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Report {
-    verdict: String,
 }
 
 /// Images rebuilt from source.
@@ -273,9 +269,13 @@ impl VerifyAmi {
             .arg(&log_path)
             .arg("--ami-info")
             .arg(&ami_info_path)
+            .arg("--summary")
             .args(["--twoliter-version", env!("CARGO_PKG_VERSION")])
             .arg("--source-dir")
             .arg(&source_dir);
+        if self.verbose {
+            compare.arg("--verbose");
+        }
         // reprosys fails verification when only one side has a data image.
         if let Some(expected) = &built.data_image {
             compare.arg("--expected-data").arg(expected);
@@ -283,12 +283,10 @@ impl VerifyAmi {
         if let Some(actual) = &downloaded.data_image {
             compare.arg("--actual-data").arg(actual);
         }
-        run_reprosys(compare, &[REPROSYS_NOT_VERIFIED])
+        let (code, summary) = run_reprosys(compare, &[REPROSYS_NOT_VERIFIED])
             .await
             .context("Unable to compare the rebuilt image against the AMI")?;
-        let report: Report = serde_json::from_slice(&fs::read(&report_path).await?)
-            .context("Unable to parse the comparison report")?;
-        println!("Verification result: {}", report.verdict);
+        print!("{}", String::from_utf8_lossy(&summary));
         println!("Report:    {}", report_path.display());
         println!("Log:       {}", log_path.display());
         if let Some(build_log) = &build_log {
@@ -296,7 +294,7 @@ impl VerifyAmi {
         }
 
         ensure!(
-            report.verdict == "verified",
+            code == 0,
             "AMI {} could not be verified as built from commit {}",
             self.ami_id,
             info.build_id
