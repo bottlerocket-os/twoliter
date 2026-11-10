@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct UnvalidatedProjectV1 {
-    #[expect(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) schema_version: SchemaVersion<1>,
     pub(crate) release_version: String,
     pub(crate) sdk: Option<Image>,

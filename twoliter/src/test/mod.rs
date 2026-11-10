@@ -6,6 +6,8 @@ be compiled for `cfg(test)`, which is accomplished at its declaration in `main.r
 !*/
 
 #![allow(unused)]
+// Test data is located by real path, so these helpers resolve symlinks on purpose.
+#![allow(clippy::disallowed_methods)]
 
 #[cfg(feature = "integ-tests")]
 mod cargo_make;
