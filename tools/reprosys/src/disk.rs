@@ -3,7 +3,7 @@
 use crate::error::Result;
 use gptman::GPT;
 use pcrsys::gpt::uuid_to_guid;
-use sha2::{Digest, Sha256};
+use sha2_0_11::{Digest, Sha256};
 use snafu::{ensure_whatever, ResultExt};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};

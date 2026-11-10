@@ -26,9 +26,6 @@ const INODE_SLOT_BITS: u32 = 5;
 const XATTR_IBODY_HEADER_SIZE: usize = 12;
 const XATTR_ENTRY_SIZE: usize = 4;
 const XATTR_LONG_PREFIX: u8 = 0x80;
-const S_IFMT: u16 = 0xf000;
-const S_IFCHR: u16 = 0x2000;
-const S_IFBLK: u16 = 0x6000;
 /// The file type of directory entries for directories.
 const FT_DIR: u8 = 2;
 
@@ -74,6 +71,32 @@ fn parse_total_file_size(output: &str) -> Option<u64> {
 struct Superblock {
     meta_start: u64,
     xattr_start: u64,
+    feature_incompat: u32,
+}
+
+impl Superblock {
+    /// Read the superblock of the erofs filesystem in the `len` bytes at `offset` of `file`.
+    fn read(file: &File, offset: u64, len: u64) -> Result<Self> {
+        let mut sb = [0u8; 128];
+        ensure_whatever!(
+            SUPERBLOCK_OFFSET + sb.len() as u64 <= len,
+            "the partition is too small for an erofs superblock"
+        );
+        file.read_exact_at(&mut sb, offset + SUPERBLOCK_OFFSET)
+            .whatever_context("failed to read the erofs superblock")?;
+        let u32_at = |o: usize| u32::from_le_bytes(sb[o..o + 4].try_into().expect("4 bytes"));
+        ensure_whatever!(u32_at(0) == MAGIC, "not an erofs filesystem");
+        let block_bits = u32::from(sb[12]);
+        ensure_whatever!(
+            (9..=16).contains(&block_bits),
+            "unsupported erofs block size 2^{block_bits}"
+        );
+        Ok(Self {
+            meta_start: u64::from(u32_at(40)) << block_bits,
+            xattr_start: u64::from(u32_at(44)) << block_bits,
+            feature_incompat: u32_at(80),
+        })
+    }
 }
 
 /// A `dump.erofs --ls` listing: the directory's inode and its entries.
@@ -123,20 +146,6 @@ fn extracted_kind(file_type: fs::FileType) -> Kind {
     } else {
         Kind::Socket
     }
-}
-
-/// The kind of entry an inode's mode describes.
-fn mode_kind(mode: u16) -> Option<Kind> {
-    Some(match mode & S_IFMT {
-        0x8000 => Kind::File,
-        0x4000 => Kind::Directory,
-        0xa000 => Kind::Symlink,
-        S_IFCHR => Kind::CharDevice,
-        S_IFBLK => Kind::BlockDevice,
-        0x1000 => Kind::Fifo,
-        0xc000 => Kind::Socket,
-        _ => return None,
-    })
 }
 
 /// An erofs filesystem extracted to a temporary directory.
@@ -255,22 +264,12 @@ impl ErofsTree {
     }
 
     fn superblock(&self, file: &File) -> Result<Superblock> {
-        let sb = self.read_at(file, SUPERBLOCK_OFFSET, 128)?;
-        let u32_at = |o: usize| u32::from_le_bytes(sb[o..o + 4].try_into().expect("4 bytes"));
-        ensure_whatever!(u32_at(0) == MAGIC, "not an erofs filesystem");
+        let sb = Superblock::read(file, self.offset, self.len)?;
         ensure_whatever!(
-            u32_at(80) & INCOMPAT_METABOX == 0,
+            sb.feature_incompat & INCOMPAT_METABOX == 0,
             "erofs filesystems with a metabox are not supported"
         );
-        let block_bits = u32::from(sb[12]);
-        ensure_whatever!(
-            (9..=16).contains(&block_bits),
-            "unsupported erofs block size 2^{block_bits}"
-        );
-        Ok(Superblock {
-            meta_start: u64::from(u32_at(40)) << block_bits,
-            xattr_start: u64::from(u32_at(44)) << block_bits,
-        })
+        Ok(sb)
     }
 
     /// Read inode `nid`, in its compact (32-byte) or extended (64-byte) form.
@@ -496,7 +495,7 @@ impl FileTree for ErofsTree {
                 .inode(&image, &sb, nid)
                 .with_whatever_context(|_| format!("failed to read the inode of {name}"))?;
             ensure_whatever!(
-                mode_kind(inode.mode) == Some(kind),
+                Kind::from_mode(inode.mode) == Some(kind),
                 "the inode of {name} is not a {}",
                 kind.name()
             );
@@ -590,13 +589,13 @@ mod tests {
     }
 
     #[test]
-    fn detects_erofs_magic() {
+    fn detects_erofs() {
         let f = tempfile::tempfile().unwrap();
-        f.write_all_at(&MAGIC.to_le_bytes(), 4096 + SUPERBLOCK_OFFSET)
-            .unwrap();
-        f.set_len(8192).unwrap();
+        let sb = SUPERBLOCK_OFFSET + 4096;
+        f.write_all_at(&MAGIC.to_le_bytes(), sb).unwrap();
+        f.set_len(4096 + (2 << 20)).unwrap();
         assert!(is_erofs(&f, 4096).unwrap());
         assert!(!is_erofs(&f, 0).unwrap());
-        assert!(!is_erofs(&f, 1 << 20).unwrap());
+        assert!(!is_erofs(&f, 1 << 30).unwrap());
     }
 }
