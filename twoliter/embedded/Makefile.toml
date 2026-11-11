@@ -469,6 +469,7 @@ if ! docker run --rm \
    -v "${CARGO_HOME}/vendor":/tmp/.cargo/vendor \
    -v "${BUILDSYS_ROOT_DIR}/sources":/tmp/sources \
    -e VARIANT \
+   -e RUSTFLAGS \
    "${TLPRIVATE_SDK_IMAGE}" \
    cargo clippy \
   --manifest-path /tmp/sources/Cargo.toml \
