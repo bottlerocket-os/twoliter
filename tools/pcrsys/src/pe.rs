@@ -12,7 +12,6 @@ use sha2::digest::{Output, Update};
 use sha2::{Digest, Sha256, Sha384};
 use snafu::{ensure_whatever, whatever, OptionExt, ResultExt};
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::ops::Deref;
 
 /// Sections that mark a UKI, all of which a UKI must carry. `.sbat` is deliberately not one,
@@ -24,7 +23,8 @@ const UKI_MARKERS: [&str; 3] = [".linux", ".osrel", ".cmdline"];
 pub struct PeImage {
     arch: Arch,
     authenticode: PcrDigests,
-    sections: BTreeMap<String, Vec<u8>>,
+    /// Every section, in file order.
+    sections: Vec<(String, Vec<u8>)>,
 }
 
 impl PeImage {
@@ -47,7 +47,7 @@ impl PeImage {
                 whatever!("unsupported architecture {other:?}");
             }
         };
-        let mut sections = BTreeMap::new();
+        let mut sections = Vec::new();
         for section in pe.sections() {
             let name = section
                 .name()
@@ -55,10 +55,7 @@ impl PeImage {
             let data = section
                 .data()
                 .with_whatever_context(|_| format!("failed to read section '{name}'"))?;
-            // The first section of a name wins, as with `section_by_name`.
-            sections
-                .entry(name.to_string())
-                .or_insert_with(|| data.to_vec());
+            sections.push((name.to_string(), data.to_vec()));
         }
         Ok(Self {
             arch,
@@ -80,7 +77,16 @@ impl PeImage {
 
     /// Initialized bytes of the named section.
     pub fn section(&self, name: &str) -> Option<&[u8]> {
-        self.sections.get(name).map(Vec::as_slice)
+        // The first section of a name wins, as with `section_by_name`.
+        self.sections()
+            .find_map(|(section, data)| (section == name).then_some(data))
+    }
+
+    /// The name and initialized bytes of every section, duplicates included, in file order.
+    pub fn sections(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.sections
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_slice()))
     }
 
     fn required_section(&self, name: &str) -> Result<&[u8]> {
@@ -419,6 +425,18 @@ pub(crate) mod tests {
         assert_eq!(uki.osrel(), b"ID=bottlerocket\n");
         let shim = PeImage::parse(&build_test_shim()).unwrap();
         assert!(Uki::from_pe(shim).unwrap().is_err());
+    }
+
+    #[test]
+    fn every_section_is_listed_and_the_first_of_a_name_wins() {
+        let pe = build_test_pe(0x8664, &[(".cmdline", b"first"), (".cmdline", b"second")]);
+        let pe = PeImage::parse(&pe).unwrap();
+        let sections: Vec<_> = pe.sections().collect();
+        assert_eq!(
+            sections,
+            [(".cmdline", b"first".as_slice()), (".cmdline", b"second")]
+        );
+        assert_eq!(pe.section(".cmdline"), Some(b"first".as_slice()));
     }
 
     #[test_case(".linux", None, "'.linux' is missing or empty" ; "without_linux")]

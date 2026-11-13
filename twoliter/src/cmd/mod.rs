@@ -5,6 +5,7 @@ mod fetch;
 mod make;
 mod publish_kit;
 mod update;
+mod verify;
 
 use self::build::BuildCommand;
 use crate::cmd::debug::DebugAction;
@@ -12,6 +13,7 @@ use crate::cmd::fetch::Fetch;
 use crate::cmd::make::Make;
 use crate::cmd::publish_kit::PublishCommand;
 use crate::cmd::update::Update;
+use crate::cmd::verify::VerifyCommand;
 use anyhow::Result;
 use clap::{Args as ClapArgs, Parser};
 use env_logger::Builder;
@@ -60,6 +62,10 @@ pub(crate) enum Subcommand {
     #[clap(subcommand)]
     Publish(PublishCommand),
 
+    /// Verify that published artifacts were reproducibly built from source.
+    #[clap(subcommand)]
+    Verify(VerifyCommand),
+
     /// Commands that are used for checking and troubleshooting Twoliter's internals.
     #[clap(subcommand)]
     Debug(DebugAction),
@@ -73,6 +79,7 @@ pub(super) async fn run(args: Args) -> Result<()> {
         Subcommand::Make(make_args) => make_args.run(&args.global).await,
         Subcommand::Update(update_args) => update_args.run().await,
         Subcommand::Publish(publish_command) => publish_command.run().await,
+        Subcommand::Verify(verify_command) => verify_command.run().await,
         Subcommand::Debug(debug_action) => debug_action.run().await,
     }
 }

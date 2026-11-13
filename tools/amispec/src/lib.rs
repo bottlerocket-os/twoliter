@@ -489,7 +489,7 @@ mod test {
         "parse tags"
     )]
     fn test_parse_ami_spec_toml(toml_str: &str, expected: AmiSpec) {
-        let spec: AmiSpec = toml::from_str(&toml_str).unwrap();
+        let spec: AmiSpec = toml::from_str(toml_str).unwrap();
         assert_eq!(spec, expected);
     }
 

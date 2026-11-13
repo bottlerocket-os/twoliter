@@ -18,7 +18,7 @@ pub struct Nibble(u8);
 /// Convert UUID byte order to GPT GUID byte order.
 ///
 /// GUIDs store the first three fields as little-endian, while UUIDs are big-endian.
-const fn uuid_to_guid(uuid: [u8; 16]) -> [u8; 16] {
+pub const fn uuid_to_guid(uuid: [u8; 16]) -> [u8; 16] {
     [
         uuid[3], uuid[2], uuid[1], uuid[0], uuid[5], uuid[4], uuid[7], uuid[6], uuid[8], uuid[9],
         uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15],
