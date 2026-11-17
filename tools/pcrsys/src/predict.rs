@@ -157,7 +157,7 @@ pub fn extend_pcr_separator(current: &PcrDigests) -> PcrDigests {
 }
 
 #[cfg(test)]
-pub mod test_support {
+pub(crate) mod test_support {
     use super::PcrContext;
     use crate::efi::EfiVars;
     use crate::gpt::PartitionTable;

@@ -17,6 +17,7 @@ members = [
     "tools/pubsys",
     "tools/pubsys-config",
     "tools/pubsys-setup",
+    "tools/reprosys",
     "tools/serde-templated",
     "tools/serde-templated-derive",
     "tools/ukisys",
@@ -34,6 +35,7 @@ members = [
     "twoliter/src/tool-crates/pipesys",
     "twoliter/src/tool-crates/pubsys",
     "twoliter/src/tool-crates/pubsys-setup",
+    "twoliter/src/tool-crates/reprosys",
     "twoliter/src/tool-crates/tuftool",
     "twoliter/src/tool-crates/ukisys",
     "twoliter/src/tool-crates/unplug",
@@ -73,11 +75,12 @@ nutype = "0.5"
 oci-cli-wrapper = { version = "0.1", path = "tools/oci-cli-wrapper" }
 parse-datetime = { version = "0.1", path = "tools/parse-datetime" }
 path-absolutize = "3.1"
-pcrsys = { version = "0.1", path = "tools/pcrsys", artifact = [ "bin:pcrsys" ] }
+pcrsys = { version = "0.1", path = "tools/pcrsys", lib = true, artifact = [ "bin:pcrsys" ] }
 pipesys = { version = "0.1", path = "tools/pipesys", lib = true, artifact = [ "bin:pipesys" ] }
 pubsys = { version = "0.1", path = "tools/pubsys", artifact = [ "bin:pubsys" ] }
 pubsys-config = { version = "0.1", path = "tools/pubsys-config" }
 pubsys-setup = { version = "0.1", path = "tools/pubsys-setup", artifact = [ "bin:pubsys-setup" ] }
+reprosys = { version = "0.1", path = "tools/reprosys", artifact = [ "bin:reprosys" ] }
 serde-templated = { version = "0.1", path = "tools/serde-templated" }
 serde-templated-derive = { version = "0.1", path = "tools/serde-templated-derive" }
 
@@ -90,6 +93,7 @@ twoliter-tool-pcrsys = { version = "0.1", path = "twoliter/src/tool-crates/pcrsy
 twoliter-tool-pipesys = { version = "0.1", path = "twoliter/src/tool-crates/pipesys" }
 twoliter-tool-pubsys = { version = "0.1", path = "twoliter/src/tool-crates/pubsys" }
 twoliter-tool-pubsys-setup = { version = "0.1", path = "twoliter/src/tool-crates/pubsys-setup" }
+twoliter-tool-reprosys = { version = "0.1", path = "twoliter/src/tool-crates/reprosys" }
 twoliter-tool-tuftool = { version = "0.1", path = "twoliter/src/tool-crates/tuftool" }
 twoliter-tool-ukisys = { version = "0.1", path = "twoliter/src/tool-crates/ukisys" }
 twoliter-tool-unplug = { version = "0.1", path = "twoliter/src/tool-crates/unplug" }
@@ -140,6 +144,7 @@ guppy = "0.17"
 handlebars = "6"
 hex = "0.4"
 hex-literal = "1"
+hmac = "0.13"
 home = "0.5"
 indicatif = "0.18"
 inotify = "0.11"
@@ -174,6 +179,8 @@ serde_json = "1"
 serde_plain = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
+# hmac 0.13 needs digest 0.11; pcrsys stays on 0.10 for authenticode.
+sha2_0_11 = { package = "sha2", version = "0.11" }
 shell-words = "1"
 signal-hook = "0.4"
 simplelog = "0.12"
