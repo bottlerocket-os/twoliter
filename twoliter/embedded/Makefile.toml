@@ -368,7 +368,18 @@ script = [
 '''
 export VARIANT="${BUILDSYS_VARIANT}"
 
-cargo test \
+# unit tests (rust), with the SDK toolchain. Mount the whole project at
+# the same path, because some tests read files outside the sources dir.
+docker run --rm \
+  -u $(id -u):$(id -g) \
+  -e CARGO_HOME="/tmp/.cargo" \
+  -v "${CARGO_HOME}/twoliter_cargo_config.toml":/tmp/.cargo/config.toml \
+  -v "${CARGO_HOME}/vendor":/tmp/.cargo/vendor \
+  -v "${BUILDSYS_ROOT_DIR}":"${BUILDSYS_ROOT_DIR}" \
+  -e VARIANT \
+  -e RUSTFLAGS \
+  "${TLPRIVATE_SDK_IMAGE}" \
+  cargo test \
   ${CARGO_BUILD_ARGS} \
   ${CARGO_MAKE_CARGO_ARGS} \
   --manifest-path ${BUILDSYS_SOURCES_DIR}/Cargo.toml \
