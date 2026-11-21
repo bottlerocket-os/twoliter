@@ -1,4 +1,4 @@
-mod lock;
+pub(crate) mod lock;
 mod migrate;
 pub(crate) mod vendor;
 

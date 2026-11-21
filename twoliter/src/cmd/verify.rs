@@ -13,6 +13,8 @@ use tempfile::TempDir;
 use tokio::process::Command;
 use tracing::{info, warn};
 
+mod kit;
+
 const DEFAULT_REPO: &str = "https://github.com/bottlerocket-os/bottlerocket.git";
 
 /// The first twoliter release whose builds are expected to be reproducible.
@@ -42,12 +44,14 @@ const VERIFY_PUBLISH_REPO: &str = "reprosys-verify";
 #[derive(Debug, Parser)]
 pub(crate) enum VerifyCommand {
     Ami(VerifyAmi),
+    Kit(kit::VerifyKit),
 }
 
 impl VerifyCommand {
     pub(crate) async fn run(self) -> Result<()> {
         match self {
             VerifyCommand::Ami(command) => command.run().await,
+            VerifyCommand::Kit(command) => command.run().await,
         }
     }
 }
@@ -135,32 +139,18 @@ impl VerifyAmi {
     pub(super) async fn run(&self) -> Result<()> {
         let mut cleanup = Vec::new();
         let result = self.verify(&mut cleanup).await;
-        if !self.keep {
-            for dir in &cleanup {
-                if let Err(e) = fs::remove_dir_all(dir).await {
-                    warn!("Unable to clean up '{}': {e:#}", dir.display());
-                }
-            }
-        }
+        clean_up(self.keep, &cleanup).await;
         result
     }
 
     /// Verify the AMI, adding the directories to delete when done to `cleanup`.
     async fn verify(&self, cleanup: &mut Vec<PathBuf>) -> Result<()> {
-        for tool in ["git", "cargo-make", "lz4", "docker"] {
-            which::which(tool)
-                .with_context(|| format!("'{tool}' is required but not found in PATH"))?;
-        }
-
-        let work_dir = match &self.work_dir {
-            Some(dir) => dir.clone(),
-            None => PathBuf::from(format!("twoliter-verify-{}", self.ami_id)),
-        };
-        let work_dir = work_dir.absolutize()?.into_owned();
-        fs::create_dir_all(&work_dir).await?;
-
-        let tools = TempDir::new().context("Unable to create a directory for tools")?;
-        install_tools(tools.path()).await?;
+        let (work_dir, tools) = prepare(
+            &["git", "cargo-make", "lz4", "docker"],
+            self.work_dir.as_deref(),
+            format!("twoliter-verify-{}", self.ami_id),
+        )
+        .await?;
         let reprosys = tools.path().join("reprosys");
 
         let (_, resolved) = run_reprosys(self.reprosys(&reprosys, "resolve"), &[])
@@ -185,12 +175,21 @@ impl VerifyAmi {
             Some(dir) => (dir.absolutize()?.into_owned(), false),
             None => (work_dir.join("source"), true),
         };
-        prepare_source(&source_dir, cloned.then_some(self.repo.as_str()), &info).await?;
-        // Only once prepare_source has found the checkout clean.
+        checkout(
+            &source_dir,
+            cloned.then_some(self.repo.as_str()),
+            Some(&info.build_id),
+            &info.version,
+            "AMI",
+        )
+        .await?;
+        // Only once checkout has succeeded.
         if cloned {
             cleanup.push(source_dir.clone());
         }
-        if let Some(pinned) = check_twoliter_version(&source_dir).await? {
+        if let Some(pinned) =
+            check_twoliter_version(&source_dir, &MIN_REPRODUCIBLE_TWOLITER).await?
+        {
             let arch = std::env::consts::ARCH;
             let causes = private_host_differences(&pinned, selinux_enabled(), arch);
             if !causes.is_empty() {
@@ -288,27 +287,10 @@ impl VerifyAmi {
         if let Some(actual) = &downloaded.data_image {
             compare.arg("--actual-data").arg(actual);
         }
-        let (code, summary) = run_reprosys(compare, &[REPROSYS_NOT_VERIFIED])
-            .await
-            .context("Unable to compare the rebuilt image against the AMI")?;
-        print!("{}", String::from_utf8_lossy(&summary));
-        println!("Report:    {}", report_path.display());
-        println!("Log:       {}", log_path.display());
-        if let Some(build_log) = &build_log {
-            println!("Build log: {}", build_log.display());
-        }
-
-        ensure!(
-            code == 0,
-            "AMI {} could not be verified as built from commit {}",
-            self.ami_id,
-            info.build_id
-        );
-        println!(
-            "AMI {} was verified as built from commit {}",
-            self.ami_id, info.build_id
-        );
-        Ok(())
+        let mut files = vec![("Report:", report_path.as_path()), ("Log:", &log_path)];
+        files.extend(build_log.as_deref().map(|log| ("Build log:", log)));
+        let what = format!("AMI {}", self.ami_id);
+        compare_and_report(compare, &files, &what, &info.build_id).await
     }
 
     /// A `reprosys` `subcommand`, with this AMI and the AWS options unless it compares images.
@@ -326,6 +308,59 @@ impl VerifyAmi {
         }
         cmd
     }
+}
+
+/// Check that `tools` are in PATH, create the work directory, `default` unless one is given, and
+/// install twoliter's tools, returning the work directory and the tools directory.
+async fn prepare(
+    tools: &[&str],
+    work_dir: Option<&Path>,
+    default: String,
+) -> Result<(PathBuf, TempDir)> {
+    for tool in tools {
+        which::which(tool)
+            .with_context(|| format!("'{tool}' is required but not found in PATH"))?;
+    }
+    let work_dir = work_dir.map_or_else(|| PathBuf::from(default), Path::to_path_buf);
+    let work_dir = work_dir.absolutize()?.into_owned();
+    fs::create_dir_all(&work_dir).await?;
+    let tools = TempDir::new().context("Unable to create a directory for tools")?;
+    install_tools(tools.path()).await?;
+    Ok((work_dir, tools))
+}
+
+/// Delete `dirs`, unless `keep`.
+async fn clean_up(keep: bool, dirs: &[PathBuf]) {
+    if !keep {
+        for dir in dirs {
+            if let Err(e) = fs::remove_dir_all(dir).await {
+                warn!("Unable to clean up '{}': {e:#}", dir.display());
+            }
+        }
+    }
+}
+
+/// Run a reprosys comparison, print its summary and `files`, and fail unless it verified that
+/// `what` was built from `commit`.
+async fn compare_and_report(
+    compare: Command,
+    files: &[(&str, &Path)],
+    what: &str,
+    commit: &str,
+) -> Result<()> {
+    let (code, summary) = run_reprosys(compare, &[REPROSYS_NOT_VERIFIED])
+        .await
+        .with_context(|| format!("Unable to compare the rebuild against {what}"))?;
+    print!("{}", String::from_utf8_lossy(&summary));
+    for (label, path) in files {
+        println!("{label:<10} {}", path.display());
+    }
+    ensure!(
+        code == 0,
+        "{what} could not be verified as built from commit {commit}"
+    );
+    println!("{what} was verified as built from commit {commit}");
+    Ok(())
 }
 
 /// Run reprosys and return its exit code and stdout; `ok_codes` are non-zero exit codes that are
@@ -390,58 +425,97 @@ async fn read_toml(path: &Path) -> Result<toml::Value> {
         .with_context(|| format!("Unable to parse '{}'", path.display()))
 }
 
-/// Check out the commit the AMI was built from, cloning `repo` first if given.
-async fn prepare_source(dir: &Path, repo: Option<&str>, info: &AmiInfo) -> Result<()> {
-    match repo {
-        Some(repo) => {
-            if dir.exists() {
-                info!("Reusing existing checkout in '{}'", dir.display());
-                git(dir, &["fetch", "--tags", "origin"]).await?;
-            } else {
-                info!("Cloning '{repo}' into '{}'", dir.display());
-                let parent = dir.parent().context("Source directory has no parent")?;
-                let name = dir.file_name().context("Source directory has no name")?;
-                git(parent, &["clone", repo, &name.to_string_lossy()]).await?;
-            }
-        }
-        None => warn!(
-            "Checking out commit {} in '{}'",
-            info.build_id,
-            dir.display()
-        ),
+/// Clone `repo` into `dir`, or fetch it if `dir` is a checkout from an earlier run.
+async fn fetch_source(dir: &Path, repo: &str) -> Result<()> {
+    if dir.exists() {
+        info!("Reusing existing checkout in '{}'", dir.display());
+        git(dir, &["fetch", "--tags", "origin"]).await?;
+    } else {
+        info!("Cloning '{repo}' into '{}'", dir.display());
+        let parent = dir.parent().context("Source directory has no parent")?;
+        let name = dir.file_name().context("Source directory has no name")?;
+        git(parent, &["clone", repo, &name.to_string_lossy()]).await?;
     }
+    Ok(())
+}
 
-    let status = git(dir, &["status", "--porcelain", "--untracked-files=no"]).await?;
+/// Fail unless `dir` has no uncommitted changes and no untracked or ignored files: build output
+/// left from an earlier build would be found as the rebuild's, and other files can change the
+/// build.
+async fn ensure_clean(dir: &Path) -> Result<()> {
+    let status = git(dir, &["status", "--porcelain", "--ignored"]).await?;
     ensure!(
         status.is_empty(),
-        "Source directory '{}' has uncommitted changes, which would change the build ID",
+        "Source directory '{}' has uncommitted changes, or untracked or ignored files such as the \
+         output of an earlier build, which could change the build or be taken for its output. \
+         Use a fresh clone, or omit --source-dir to let twoliter clone the source",
         dir.display()
     );
+    Ok(())
+}
 
-    let commit = rev_parse(dir, &info.build_id).await.with_context(|| {
-        format!(
-            "Commit {} is not in '{}', or the abbreviation is ambiguous",
-            info.build_id,
-            dir.display()
-        )
-    })?;
-    git(dir, &["checkout", "--quiet", "--detach", &commit]).await?;
-    info!("Checked out commit {commit}");
-
-    let tag = format!("v{}", info.version);
-    match rev_parse(dir, &tag).await {
-        Ok(tagged) if tagged == commit => info!("Tag {tag} points at the AMI's commit"),
-        Ok(tagged) => warn!("Tag {tag} points at {tagged}, not at the AMI's commit {commit}"),
-        Err(_) => warn!("Tag {tag} does not exist in the source repository"),
+/// Check out `commit` in `dir`, or the commit tagged `v<version>` if none is given, and return it.
+/// `what` is what was built from the commit, for messages.
+///
+/// If `repo` is given, `dir` is twoliter's own clone of it: it is cloned or fetched, and reset to
+/// the commit with every untracked and ignored file removed. Otherwise `dir` must be clean.
+async fn checkout(
+    dir: &Path,
+    repo: Option<&str>,
+    commit: Option<&str>,
+    version: &str,
+    what: &str,
+) -> Result<String> {
+    match repo {
+        Some(repo) => fetch_source(dir, repo).await?,
+        None => ensure_clean(dir).await?,
     }
+
+    let tag = format!("v{version}");
+    let tagged = rev_parse(dir, &tag).await.ok();
+    let commit = match commit {
+        Some(commit) => {
+            let resolved = rev_parse(dir, commit).await.with_context(|| {
+                format!(
+                    "Commit {commit} is not in '{}', or the abbreviation is ambiguous",
+                    dir.display()
+                )
+            })?;
+            match &tagged {
+                Some(tagged) if *tagged == resolved => info!("Tag {tag} points at {resolved}"),
+                Some(tagged) => warn!("Tag {tag} points at {tagged}, not at {resolved}"),
+                None => warn!("Tag {tag} does not exist in the source repository"),
+            }
+            resolved
+        }
+        None => tagged.with_context(|| {
+            format!(
+                "Tag {tag} does not exist in '{}'; pass the commit the {what} was built from \
+                 with --commit",
+                dir.display()
+            )
+        })?,
+    };
+    if repo.is_some() {
+        git(
+            dir,
+            &["checkout", "--quiet", "--force", "--detach", &commit],
+        )
+        .await?;
+        git(dir, &["clean", "-ffdx", "--quiet"]).await?;
+    } else {
+        warn!("Checking out commit {commit} in '{}'", dir.display());
+        git(dir, &["checkout", "--quiet", "--detach", &commit]).await?;
+    }
+    info!("Checked out commit {commit}");
 
     let release_version = read_release_version(dir).await?;
     ensure!(
-        release_version == info.version,
-        "Commit {commit} has release version {release_version}, but the AMI is version {}",
-        info.version
+        release_version == version,
+        "Commit {commit} has release version {release_version}, but the {what} is version \
+         {version}"
     );
-    Ok(())
+    Ok(commit)
 }
 
 /// Read the release version from Twoliter.toml, which every tag from v1.30.0 has. Older
@@ -456,25 +530,55 @@ async fn read_release_version(dir: &Path) -> Result<String> {
         .with_context(|| format!("No release-version found in '{}'", path.display()))
 }
 
-/// Warn when the checkout pins a twoliter that predates reproducible builds, and return the pinned
-/// version if it parses.
-async fn check_twoliter_version(dir: &Path) -> Result<Option<Version>> {
+/// Read the twoliter version the checkout pins, from the `env` table of Makefile.toml as in
+/// Bottlerocket, or a `TWOLITER_VERSION` variable in the Makefile as in kit repositories.
+async fn pinned_twoliter_version(dir: &Path) -> Result<String> {
     let path = dir.join("Makefile.toml");
-    let makefile = read_toml(&path).await?;
-    let pinned = makefile
-        .get("env")
-        .and_then(|env| env.get("TWOLITER_VERSION"))
-        .and_then(|v| v.as_str())
-        .with_context(|| format!("No TWOLITER_VERSION found in '{}'", path.display()))?;
+    if path.exists() {
+        if let Some(version) = read_toml(&path)
+            .await?
+            .get("env")
+            .and_then(|env| env.get("TWOLITER_VERSION"))
+            .and_then(|v| v.as_str())
+        {
+            return Ok(version.to_string());
+        }
+    }
+    let path = dir.join("Makefile");
+    if path.exists() {
+        for line in fs::read_to_string(&path).await?.lines() {
+            let Some(rest) = line.trim().strip_prefix("TWOLITER_VERSION") else {
+                continue;
+            };
+            let rest = rest.trim_start();
+            if let Some(value) = ["?=", ":=", "="]
+                .iter()
+                .find_map(|op| rest.strip_prefix(op))
+            {
+                let value = value.split('#').next().unwrap_or_default();
+                return Ok(value.trim().trim_matches('"').to_string());
+            }
+        }
+    }
+    bail!(
+        "No TWOLITER_VERSION found in Makefile.toml or Makefile in '{}'",
+        dir.display()
+    )
+}
+
+/// Warn when the checkout pins a twoliter older than `minimum`, the first whose builds are
+/// expected to reproduce, and return the pinned version if it parses.
+async fn check_twoliter_version(dir: &Path, minimum: &Version) -> Result<Option<Version>> {
+    let pinned = pinned_twoliter_version(dir).await?;
     let version = Version::parse(pinned.trim_start_matches('v')).ok();
     match &version {
-        Some(version) if *version >= MIN_REPRODUCIBLE_TWOLITER => {
+        Some(version) if version >= minimum => {
             info!("Source pins twoliter {version}");
         }
         _ => warn!(
             "\n\n!!! The source pins twoliter {pinned}, which predates reproducible builds \
-             (twoliter {MIN_REPRODUCIBLE_TWOLITER}). The rebuilt image is expected to differ \
-             from the AMI. !!!\n"
+             (twoliter {minimum}). The rebuild is expected to differ from what was published. \
+             !!!\n"
         ),
     }
     Ok(version)
@@ -591,52 +695,21 @@ async fn build(
     info: &AmiInfo,
 ) -> Result<Built> {
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(source_dir)
-        .args(["make", "-e"])
+    cmd.args(["make", "-e"])
         .arg(format!("BUILDSYS_VARIANT={}", info.variant))
         .arg("-e")
         .arg(format!("BUILDSYS_ARCH={}", info.arch))
         .arg("-e")
         .arg(format!("PUBLISH_REPO={VERIFY_PUBLISH_REPO}"))
         // No signing key exists for the role, and building an image needs none.
-        .args(["-e", "ALLOW_MISSING_KEY=true"])
-        .kill_on_drop(true);
-    match log {
-        Some(log) => {
-            info!(
-                "Building {} {}; this takes a while. Build output is written to '{}'",
-                info.variant,
-                info.arch,
-                log.display()
-            );
-            let file = std::fs::File::create(log)
-                .with_context(|| format!("Unable to create '{}'", log.display()))?;
-            cmd.stdin(Stdio::null())
-                .stdout(file.try_clone()?)
-                .stderr(file);
-        }
-        None => info!(
-            "Building {} {} in '{}'",
-            info.variant,
-            info.arch,
-            source_dir.display()
-        ),
-    }
-    let started = Instant::now();
-    let status = cmd.status().await.context("Unable to run cargo make")?;
-    if !status.success() {
-        if let Some(log) = log {
-            print_log_tail(log).await;
-        }
-        bail!("Building the variant from source failed");
-    }
-    info!(
-        "Built {} {} in {}m {:02}s",
-        info.variant,
-        info.arch,
-        started.elapsed().as_secs() / 60,
-        started.elapsed().as_secs() % 60
-    );
+        .args(["-e", "ALLOW_MISSING_KEY=true"]);
+    run_build(
+        cmd,
+        source_dir,
+        log,
+        &format!("{} {}", info.variant, info.arch),
+    )
+    .await?;
 
     let variant_dir = source_dir
         .join("build/images")
@@ -664,6 +737,50 @@ async fn build(
         os_image,
         data_image,
     })
+}
+
+/// Run the build command `cmd` in `source_dir`, describing what it builds as `what`.
+///
+/// The build output is written to `log` if given, and shown otherwise.
+async fn run_build(
+    mut cmd: Command,
+    source_dir: &Path,
+    log: Option<&Path>,
+    what: &str,
+) -> Result<()> {
+    cmd.current_dir(source_dir).kill_on_drop(true);
+    match log {
+        Some(log) => {
+            info!(
+                "Building {what}; this takes a while. Build output is written to '{}'",
+                log.display()
+            );
+            let file = std::fs::File::create(log)
+                .with_context(|| format!("Unable to create '{}'", log.display()))?;
+            cmd.stdin(Stdio::null())
+                .stdout(file.try_clone()?)
+                .stderr(file);
+        }
+        None => info!("Building {what} in '{}'", source_dir.display()),
+    }
+    let started = Instant::now();
+    let program = cmd.as_std().get_program().to_string_lossy().into_owned();
+    let status = cmd
+        .status()
+        .await
+        .with_context(|| format!("Unable to run {program}"))?;
+    if !status.success() {
+        if let Some(log) = log {
+            print_log_tail(log).await;
+        }
+        bail!("Building {what} from source failed");
+    }
+    info!(
+        "Built {what} in {}m {:02}s",
+        started.elapsed().as_secs() / 60,
+        started.elapsed().as_secs() % 60
+    );
+    Ok(())
 }
 
 /// Show the end of a failed build's log, where the error usually is.
@@ -765,6 +882,17 @@ mod tests {
         let unnumbered = TempDir::new().unwrap();
         std::fs::write(unnumbered.path().join("default.root.json"), "{}").unwrap();
         assert!(committed_root_role(unnumbered.path()).is_err());
+    }
+
+    #[tokio::test]
+    async fn reads_pinned_twoliter_from_makefile() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("Makefile"),
+            "TOP := here\nTWOLITER_VERSION ?= \"0.26.0\" # pinned\nTWOLITER_SHA256_AARCH64 ?= \"abc\"\n",
+        )
+        .unwrap();
+        assert_eq!(pinned_twoliter_version(dir.path()).await.unwrap(), "0.26.0");
     }
 
     #[tokio::test]

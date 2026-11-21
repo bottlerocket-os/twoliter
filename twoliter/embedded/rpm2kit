@@ -43,12 +43,14 @@ done
 # tracks BUILD_ID_TIMESTAMP instead of the rpmbuild wall-clock.
 find "${KIT_DIR}/Packages" -mindepth 1 -exec touch -d "@${BUILD_ID_TIMESTAMP}" {} +
 
-createrepo_c "${KIT_DIR}"
+# Record BUILD_ID_TIMESTAMP as repomd.xml's revision and timestamps instead of
+# the wall-clock time.
+createrepo_c --revision "${BUILD_ID_TIMESTAMP}" --set-timestamp-to-revision "${KIT_DIR}"
 dnf --disablerepo '*' --repofrompath "kit,file:///${KIT_DIR}" repoquery
 
-# Normalize the generated repodata files so the kit's repodata-layer tar
-# entries are also deterministic.
-find "${KIT_DIR}/repodata" -mindepth 1 -exec touch -d "@${BUILD_ID_TIMESTAMP}" {} +
+# Normalize the mtimes of the repodata directory and its files, which `tar`
+# archives in the repodata layer.
+find "${KIT_DIR}/repodata" -exec touch -d "@${BUILD_ID_TIMESTAMP}" {} +
 
 WORK_DIR="$(mktemp -d)"
 
@@ -75,34 +77,30 @@ esac
 mkdir -p "${WORK_DIR}/blobs/sha256"
 
 # Store each directory in the repo as a separate layer, to minimize overhead
-# when pushing and pulling a kit that only has a few modified packages.
-declare -A LAYER_DIGESTS
-for layer in ${PACKAGES[@]} repodata ; do
-  [ "${layer}" != "repodata" ] && layer="Packages/${layer}"
+# when pushing and pulling a kit that only has a few modified packages. The
+# layers are in name order, so that their order does not depend on their
+# digests.
+declare -a PACKAGE_LAYERS CONTENT_DIGESTS LAYER_OBJECTS
+# shellcheck disable=SC2068
+mapfile -t PACKAGE_LAYERS < <(for pkg in ${PACKAGES[@]} ; do echo "Packages/${pkg}" ; done | LC_ALL=C sort)
+for layer in "${PACKAGE_LAYERS[@]}" repodata ; do
   layer_archive="${WORK_DIR}/content-layer.tar"
   tar -cvf "${layer_archive}" --sort=name -C "${KIT_DIR}" "${layer}"
   layer_digest="$(digest_from_file "${layer_archive}")"
   mv "${layer_archive}" "${WORK_DIR}/blobs/sha256/${layer_digest}"
   layer_size="$(stat -c %s "${WORK_DIR}/blobs/sha256/${layer_digest}")"
-  LAYER_DIGESTS["${layer_digest}"]="${layer_size}"
+  CONTENT_DIGESTS+=("sha256:${layer_digest}")
+  layer_object='{"mediaType":"application/vnd.oci.image.layer.v1.tar",'
+  layer_object+='"digest":"'"sha256:${layer_digest}"'",'
+  layer_object+='"size":'"${layer_size}"'}'
+  LAYER_OBJECTS+=("${layer_object}")
 done
 
-# Generate a JSON list of diff IDs for the layers.
-declare -a CONTENT_DIGESTS
-CONTENT_DIGESTS=(${!LAYER_DIGESTS[@]})
-CONTENT_DIGESTS=(${CONTENT_DIGESTS[@]/#/sha256:})
-DIFF_IDS="$(jq --null-input --compact-output '$ARGS.positional // []' --args ${CONTENT_DIGESTS[@]})"
+# Generate a JSON list of diff IDs for the layers, which are uncompressed.
+DIFF_IDS="$(jq --null-input --compact-output '$ARGS.positional // []' --args "${CONTENT_DIGESTS[@]}")"
 
 # Generate a JSON list of objects for the layers.
-declare -a LAYER_OBJECTS
-for layer_digest in ${!LAYER_DIGESTS[@]} ; do
-  layer_size="${LAYER_DIGESTS[${layer_digest}]}"
-  layer='{"mediaType":"application/vnd.oci.image.layer.v1.tar",'
-  layer+='"digest":"'"sha256:${layer_digest}"'",'
-  layer+='"size":'"${layer_size}"'}'
-  LAYER_OBJECTS+=(${layer})
-done
-LAYERS="$(echo ${LAYER_OBJECTS[@]} | jq --slurp --compact-output)"
+LAYERS="$(printf '%s\n' "${LAYER_OBJECTS[@]}" | jq --slurp --compact-output)"
 
 METADATA_TEMPLATE=$(cat <<EOF
 {

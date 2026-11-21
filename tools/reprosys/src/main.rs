@@ -8,7 +8,12 @@ mod erofs;
 mod error;
 mod eventlog;
 mod fsfiles;
+mod goelf;
+mod kernel;
+mod kit;
+mod kmod;
 mod pe;
+mod rpm;
 mod summary;
 mod verity;
 
@@ -21,7 +26,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use tokio::signal::unix::{signal, SignalKind};
 
-/// Exit code of `compare` when the comparison ran but verification failed.
+/// Exit code of `compare` and `compare-kit` when the comparison ran but verification failed.
 const EXIT_NOT_VERIFIED: u8 = 2;
 
 #[derive(Parser)]
@@ -69,6 +74,9 @@ enum Command {
 
     /// Compare a rebuilt image against a downloaded one
     Compare(CompareArgs),
+
+    /// Compare rebuilt kit images against published ones, by layer, file and package
+    CompareKit(kit::CompareKitArgs),
 }
 
 #[derive(ClapArgs)]
@@ -252,6 +260,7 @@ async fn run(args: Args) -> Result<ExitCode> {
             print_json(&DownloadOutput { ami: info, images })?;
         }
         Command::Compare(args) => return compare(args),
+        Command::CompareKit(args) => return kit::run(args),
     }
     Ok(ExitCode::SUCCESS)
 }

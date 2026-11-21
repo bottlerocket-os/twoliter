@@ -7,6 +7,31 @@ We welcome ideas and requirements in the form of issues and comments!
 [Bottlerocket]: https://github.com/bottlerocket-os/bottlerocket
 [design doc]: docs/design/README.md
 
+## Verifying builds
+
+`twoliter verify ami` and `twoliter verify kit` rebuild a published AMI or kit from the source it
+claims and compare the result against what was published. See
+[How `twoliter verify` works](docs/verify.md) for the flow, and
+[Verifying a kit](docs/verify-kit.md) for `verify kit`.
+
+### Verifying an AMI
+
+`twoliter verify ami --ami-id <id>` compares the rebuilt disk image against the AMI's snapshots
+region by region. `--source-dir` builds in an existing clone instead of a fresh one; it must have
+no uncommitted changes and no untracked or ignored files, such as the output of an earlier build
+(see [Source checkout](docs/verify.md#source-checkout)). A rebuild cannot be byte-identical, since
+each build signs with fresh keys, so each region has an explicit list of expected differences and
+anything else fails:
+
+| Region | Rule |
+|---|---|
+| GPT, BIOS-boot, DATA, data image | Byte-identical. B-bank, RESERVED and padding must be zero. |
+| PRIVATE | If bytes differ, its files are compared: identical files make the difference expected, and any other difference fails, with lines of `bootconfig.data` found on only one side shown in the report. Sources pinning a twoliter older than 0.28.0 build ext4 partitions that depend on the build host (SELinux labels, and the directory hash flag on aarch64), so `verify ami` warns when the host would change PRIVATE. |
+| ROOT-A (erofs only) | If bytes differ, compare the file trees: type, mode, owner, symlink target, xattrs (SELinux labels, capabilities), contents. Other root filesystem formats, and device nodes, are not supported. Kernel modules come from the kit already signed, so they must match like any other file, as must the TUF root role (`/usr/share/updog/root.json`): the rebuild embeds the one given with `--root-role`. Expected: the SBOMs (`/usr/share/bottlerocket/{spdx,cyclonedx}-sbom.json`), since sbomtool's output is not reproducible yet. |
+| BOOT-CONFIG (`grub.cfg` in BOOT-A, or for UKI images, which have no BOOT-A, the UKI's `.cmdline` section in EFI-A) | Identical except the dm-verity root hash, salt and data size; exactly one verity table for the same devices. |
+| HASH-A | Not compared: it is formatted with a random salt, so it never matches the rebuilt one. The root hash and salt it is built with are the fields BOOT-CONFIG allows to differ. |
+| EFI-A, BOOT-A | If bytes differ, file by file, and every difference needs a listed cause or verification fails: a signature or certificate that both images have; a PE binary whose Authenticode digest matches, or that differs only in its key-holding sections (`.vendor_cert`, `.pubkey`) with the same headers and layout; a FIPS `.hmac` that is the HMAC of the published file it names; the verity root hash, salt and data size in `grub.cfg` or the UKI's `.cmdline`. Files in only one image fail, which also keeps out the add-ons, credentials and extension images systemd-stub would load next to a UKI. The kernel comes from the kit, so it must match apart from its signature. |
+
 ## For Maintainers
 
 This section includes information for maintainers about testing and releasing Twoliter.

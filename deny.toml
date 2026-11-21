@@ -85,6 +85,7 @@ skip = [
     { name = "digest" },
     { name = "getrandom" },
     { name = "heck" },
+    { name = "itertools", reason = "guppy brings in older itertools" },
     { name = "r-efi" },
     { name = "rand_core" },
     { name = "sha2" },
