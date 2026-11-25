@@ -72,10 +72,8 @@ impl VendedArtifact for LockedImage {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ImageMetadata {
     /// The name of the kit
-    #[expect(dead_code)]
     pub name: String,
     /// The version of the kit
-    #[expect(dead_code)]
     pub version: Version,
     /// The required sdk of the kit,
     pub sdk: Image,
@@ -97,7 +95,7 @@ impl TryFrom<EncodedKitMetadata> for ImageMetadata {
 
 /// Encoded kit metadata, which is embedded in a label of the OCI image config.
 #[derive(Clone, Eq, PartialEq)]
-pub(crate) struct EncodedKitMetadata(String);
+pub(crate) struct EncodedKitMetadata(pub(crate) String);
 
 impl EncodedKitMetadata {
     #[instrument(level = "trace")]
@@ -116,7 +114,7 @@ impl EncodedKitMetadata {
         Ok(kit_metadata)
     }
 
-    fn extract_encoded_kit_metadata(oci_config: &ConfigView) -> Result<String> {
+    pub(crate) fn extract_encoded_kit_metadata(oci_config: &ConfigView) -> Result<String> {
         let encoded_metadata = oci_config
             .labels
             .get(supported_kit_metadata_label().as_str());

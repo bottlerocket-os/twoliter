@@ -195,7 +195,7 @@ pub fn ext4_files(partition: Vec<u8>) -> Result<Files> {
     Ok(files)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
     Match,

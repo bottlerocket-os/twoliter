@@ -6,11 +6,11 @@
 /// Contains operations for working with an OCI Archive
 mod archive;
 /// Covers resolution and validation of a single image dependency in a lock file
-mod image;
+pub(crate) mod image;
 /// Provides tools for marking artifacts as having been verified against the Twoliter lockfile
 mod verification;
 /// Implements view models of common OCI manifest and configuration types
-mod views;
+pub(crate) mod views;
 
 pub(crate) use self::verification::VerificationTagger;
 
