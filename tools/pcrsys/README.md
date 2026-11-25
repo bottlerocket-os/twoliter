@@ -22,6 +22,14 @@ pcrsys ami --ami-id ami-0123456789abcdef0 [--region us-west-2] [--profile myprof
 
 The AMI subcommand downloads the root snapshot using coldsnap and retrieves UEFI data from the AMI attributes.
 
+**Note:** `pcrsys ami` and `twoliter predict-pcrs` require an AMI in your account. For official Bottlerocket AMIs, copy the AMI first:
+
+```bash
+aws ec2 copy-image --source-image-id <ami-id> --source-region <region> --region <region> --name <name-of-your-choice>
+```
+
+Then run the command on the copy.
+
 ## Output
 
 JSON output with predicted PCR values, keyed by PCR index:
